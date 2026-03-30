@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro de Maletas - Tasf.B2B</title>
+  <link rel="stylesheet" href="../css/estilo.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-logo">
+      <div class="icon">✈️</div>
+      <span>Tasf.B2B</span>
+    </div>
+    <nav class="header-nav">
+      <a href="../index.html">Inicio</a>
+      <a href="registro-maletas.html" style="color: var(--accent-blue); font-weight: 600;">Registrar Maletas</a>
+      <a href="simulacion-config.html">Nueva Simulación</a>
+      <a href="mapa-principal.html">Monitoreo</a>
+      <a href="detalle-maleta.html">Búsqueda</a>
+    </nav>
+  </header>
+
+  <!-- Contenido Principal -->
+  <div class="container">
+    <div class="card fade-in">
+      <h1 style="margin-bottom: 32px; color: var(--accent-blue); font-size: 28px;">📦 Registro de Maletas</h1>
+
+      <!-- Formulario de Registro -->
+      <form id="formRegistroMaletas" class="form-group">
+        <div class="form-row">
+          <div>
+            <label for="aeroline">Aerolínea Cliente *</label>
+            <select id="aeroline" required>
+              <option value="">Seleccionar aerolínea...</option>
+              <option value="LATAM Airlines">LATAM Airlines</option>
+              <option value="Aeromexico">Aeromexico</option>
+              <option value="United Airlines">United Airlines</option>
+              <option value="Lufthansa">Lufthansa</option>
+              <option value="Singapore Airlines">Singapore Airlines</option>
+              <option value="Emirates">Emirates</option>
+              <option value="Air France">Air France</option>
+              <option value="British Airways">British Airways</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="origen">Aeropuerto de Origen *</label>
+            <select id="origen" required>
+              <option value="">Seleccionar origen...</option>
+              <optgroup label="América">
+                <option value="Lima (Jorge Chávez)">Lima (Jorge Chávez)</option>
+                <option value="Miami (MIA)">Miami (MIA)</option>
+                <option value="São Paulo (GIG)">São Paulo (GIG)</option>
+                <option value="Ciudad de México (MEX)">Ciudad de México (MEX)</option>
+                <option value="Nueva York (JFK)">Nueva York (JFK)</option>
+                <option value="Atlanta (ATL)">Atlanta (ATL)</option>
+              </optgroup>
+              <optgroup label="Europa">
+                <option value="Frankfurt (FRA)">Frankfurt (FRA)</option>
+                <option value="Madrid (MAD)">Madrid (MAD)</option>
+                <option value="Londres (LHR)">Londres (LHR)</option>
+                <option value="París (CDG)">París (CDG)</option>
+                <option value="Ámsterdam (AMS)">Ámsterdam (AMS)</option>
+              </optgroup>
+              <optgroup label="Asia">
+                <option value="Tokio (NRT)">Tokio (NRT)</option>
+                <option value="Singapur (SIN)">Singapur (SIN)</option>
+                <option value="Hong Kong (HKG)">Hong Kong (HKG)</option>
+                <option value="Dubái (DXB)">Dubái (DXB)</option>
+                <option value="Bangkok (BKK)">Bangkok (BKK)</option>
+              </optgroup>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label for="destino">Aeropuerto de Destino *</label>
+            <select id="destino" required>
+              <option value="">Seleccionar destino...</option>
+              <optgroup label="América">
+                <option value="Lima (Jorge Chávez)">Lima (Jorge Chávez)</option>
+                <option value="Miami (MIA)">Miami (MIA)</option>
+                <option value="São Paulo (GIG)">São Paulo (GIG)</option>
+                <option value="Ciudad de México (MEX)">Ciudad de México (MEX)</option>
+                <option value="Nueva York (JFK)">Nueva York (JFK)</option>
+                <option value="Atlanta (ATL)">Atlanta (ATL)</option>
+              </optgroup>
+              <optgroup label="Europa">
+                <option value="Frankfurt (FRA)">Frankfurt (FRA)</option>
+                <option value="Madrid (MAD)">Madrid (MAD)</option>
+                <option value="Londres (LHR)">Londres (LHR)</option>
+                <option value="París (CDG)">París (CDG)</option>
+                <option value="Ámsterdam (AMS)">Ámsterdam (AMS)</option>
+              </optgroup>
+              <optgroup label="Asia">
+                <option value="Tokio (NRT)">Tokio (NRT)</option>
+                <option value="Singapur (SIN)">Singapur (SIN)</option>
+                <option value="Hong Kong (HKG)">Hong Kong (HKG)</option>
+                <option value="Dubái (DXB)">Dubái (DXB)</option>
+                <option value="Bangkok (BKK)">Bangkok (BKK)</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div>
+            <label for="cantidad">Cantidad de Maletas *</label>
+            <input type="number" id="cantidad" min="1" max="400" step="1" placeholder="Ej: 50" required>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('formRegistroMaletas').reset();">
+            Limpiar
+          </button>
+          <button type="submit" class="btn btn-primary">
+            ✓ Registrar Maletas
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Tabla Resumen -->
+    <div class="card fade-in" style="margin-top: 32px; animation-delay: 0.1s;">
+      <h2 style="margin-bottom: 20px; font-size: 20px; color: var(--text-primary);">Resumen de Registros</h2>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Aerolínea</th>
+              <th>Origen</th>
+              <th>Destino</th>
+              <th>Cantidad</th>
+              <th style="text-align: right;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="malesRegistrosTabla">
+            <tr>
+              <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                No hay registros aún. Completa el formulario para agregar maletas.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Estadísticas Rápidas -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-top: 24px;">
+        <div class="stat-card">
+          <h3>Total Registrado</h3>
+          <div class="value" id="totalMaletas">0</div>
+        </div>
+        <div class="stat-card">
+          <h3>Últimas 24h</h3>
+          <div class="value" id="ultimas24h">0</div>
+        </div>
+        <div class="stat-card">
+          <h3>En Procesamiento</h3>
+          <div class="value">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección de Ayuda -->
+    <div class="card fade-in" style="margin-top: 32px; animation-delay: 0.2s; border-left: 4px solid var(--accent-blue);">
+      <h3 style="color: var(--accent-blue); margin-bottom: 12px;">ℹ️ Información Importante</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; font-size: 13px; line-height: 1.8; color: var(--text-secondary);">
+        <div>
+          <strong style="color: var(--text-primary);">Plazos de Entrega:</strong>
+          <ul style="margin-top: 8px; margin-left: 16px;">
+            <li>✓ Mismo continente: 1 día</li>
+            <li>✓ Diferente continente: 2 días</li>
+          </ul>
+        </div>
+        <div>
+          <strong style="color: var(--text-primary);">Límite de Capacidad:</strong>
+          <ul style="margin-top: 8px; margin-left: 16px;">
+            <li>✓ Min/Max por vuelo: 150-250 (continente)</li>
+            <li>✓ Min/Max por vuelo: 150-400 (mundial)</li>
+          </ul>
+        </div>
+        <div>
+          <strong style="color: var(--text-primary);">Almacenamiento:</strong>
+          <ul style="margin-top: 8px; margin-left: 16px;">
+            <li>✓ Capacidad aeropuerto: 500-800 maletas</li>
+            <li>✓ Monitoreo automático disponible</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/app.js"></script>
+  <script>
+    // Actualizar total de maletas
+    function actualizarTotalMaletas() {
+      const total = MaletasRegistry.data.reduce((sum, item) => sum + item.cantidad, 0);
+      document.getElementById('totalMaletas').textContent = total;
+    }
+
+    // Observador para cambios
+    setInterval(actualizarTotalMaletas, 1000);
+  </script>
+</body>
+</html>

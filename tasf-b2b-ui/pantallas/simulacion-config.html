@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nueva Simulación - Tasf.B2B</title>
+  <link rel="stylesheet" href="../css/estilo.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-logo">
+      <div class="icon">✈️</div>
+      <span>Tasf.B2B</span>
+    </div>
+    <nav class="header-nav">
+      <a href="../index.html">Inicio</a>
+      <a href="registro-maletas.html">Registrar Maletas</a>
+      <a href="simulacion-config.html" style="color: var(--accent-blue); font-weight: 600;">Nueva Simulación</a>
+      <a href="mapa-principal.html">Monitoreo</a>
+      <a href="detalle-maleta.html">Búsqueda</a>
+    </nav>
+  </header>
+
+  <!-- Contenido Principal -->
+  <div class="container">
+    <button class="btn btn-primary" onclick="abrirModalSimulacion()" style="margin-bottom: 24px;">
+      + Nueva Simulación
+    </button>
+
+    <!-- Historial de Simulaciones -->
+    <div class="card fade-in">
+      <h2 style="margin-bottom: 20px; font-size: 20px; color: var(--text-primary);">Historial de Simulaciones</h2>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>ID Simulación</th>
+              <th>Tipo</th>
+              <th>Duración</th>
+              <th>Estado</th>
+              <th>Fecha Inicio</th>
+              <th>Progreso</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>SIM-2026-001</td>
+              <td><span class="badge badge-primary">Período</span></td>
+              <td>5 días</td>
+              <td><span class="badge badge-success">Completada</span></td>
+              <td>2026-03-25 09:30</td>
+              <td>100%</td>
+            </tr>
+            <tr>
+              <td>SIM-2026-002</td>
+              <td><span class="badge badge-primary">Período</span></td>
+              <td>7 días</td>
+              <td><span class="badge badge-warning">En Progreso</span></td>
+              <td>2026-03-27 14:15</td>
+              <td>45%</td>
+            </tr>
+            <tr>
+              <td>SIM-2026-003</td>
+              <td><span class="badge badge-primary">Día a Día</span></td>
+              <td>Continua</td>
+              <td><span class="badge badge-success">Activa</span></td>
+              <td>2026-03-28 08:00</td>
+              <td>-</td>
+            </tr>
+            <tr>
+              <td>SIM-2026-004</td>
+              <td><span class="badge badge-danger">Colapso</span></td>
+              <td>3 días</td>
+              <td><span class="badge badge-danger">Colapso Detectado</span></td>
+              <td>2026-03-26 10:45</td>
+              <td>100%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Estadísticas General -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-top: 24px;">
+        <div class="stat-card">
+          <h3>Simulaciones Totales</h3>
+          <div class="value">4</div>
+        </div>
+        <div class="stat-card">
+          <h3>Completadas</h3>
+          <div class="value" style="color: var(--success-green);">2</div>
+        </div>
+        <div class="stat-card">
+          <h3>En Progreso</h3>
+          <div class="value" style="color: var(--warning-amber);">2</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Información de Simulaciones -->
+    <div class="card fade-in" style="margin-top: 32px; animation-delay: 0.1s;">
+      <h3 style="color: var(--accent-blue); margin-bottom: 20px;">📊 Tipos de Simulación Disponibles</h3>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+        <!-- Simulación de Período -->
+        <div class="selectable-card">
+          <h3>📅 Simulación de Período</h3>
+          <p>Simula 3, 5 o 7 días de operaciones completas. Tiempo de ejecución: 30-90 minutos.</p>
+          <ul style="text-align: left; margin-top: 12px; margin-left: 16px; color: var(--text-secondary); font-size: 12px;">
+            <li>✓ Planificación automática de rutas</li>
+            <li>✓ Replanificación ante cancelaciones</li>
+            <li>✓ Análisis detallado de rendimiento</li>
+            <li>✓ Importar desde registros reales</li>
+          </ul>
+        </div>
+
+        <!-- Operación Día a Día -->
+        <div class="selectable-card">
+          <h3>⏱️ Operación Día a Día</h3>
+          <p>Monitoreo en tiempo real de las operaciones actuales. Continuamente actualizado.</p>
+          <ul style="text-align: left; margin-top: 12px; margin-left: 16px; color: var(--text-secondary); font-size: 12px;">
+            <li>✓ Actualización en tiempo real</li>
+            <li>✓ Alertas automáticas</li>
+            <li>✓ Gestión de incidencias</li>
+            <li>✓ Reporte de monitoreo por demanda</li>
+          </ul>
+        </div>
+
+        <!-- Simulación hasta Colapso -->
+        <div class="selectable-card">
+          <h3>💥 Simulación hasta el Colapso</h3>
+          <p>Ejecuta hasta que se incumpla algún plazo de entrega. Identifica límites operacionales.</p>
+          <ul style="text-align: left; margin-top: 12px; margin-left: 16px; color: var(--text-secondary); font-size: 12px;">
+            <li>✓ Pruebas de estrés del sistema</li>
+            <li>✓ Identificación de cuellos de botella</li>
+            <li>✓ Análisis de capacidad máxima</li>
+            <li>✓ Recomendaciones de optimización</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal del Wizard de Simulación -->
+  <div id="modalOverlay" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 700px;">
+      <!-- Modal Header -->
+      <div class="modal-header">
+        <h2 class="modal-title">⚙️ Nueva Simulación</h2>
+        <button class="modal-close" onclick="cerrarModal('modalOverlay')">×</button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="modal-body">
+        <!-- Indicador de Pasos del Wizard -->
+        <div class="wizard-steps">
+          <div class="step active">
+            <div class="step-number">1</div>
+            <div class="step-label">Tipo de Simulación</div>
+          </div>
+          <div class="step">
+            <div class="step-number">2</div>
+            <div class="step-label">Configuración</div>
+          </div>
+          <div class="step">
+            <div class="step-number">3</div>
+            <div class="step-label">Parámetros</div>
+          </div>
+          <div class="step">
+            <div class="step-number">4</div>
+            <div class="step-label">Confirmación</div>
+          </div>
+        </div>
+
+        <!-- STEP 1: Tipo de Simulación -->
+        <div id="step1" style="display: block;">
+          <h3 style="color: var(--text-primary); margin-bottom: 20px; font-size: 16px;">
+            Selecciona el tipo de simulación
+          </h3>
+
+          <div class="selectable-cards" style="grid-template-columns: 1fr;">
+            <div class="selectable-card" onclick="SimulationWizard.seleccionarTipo('Periodo'); this.classList.add('selected')">
+              <div class="checkmark">✓</div>
+              <h3>📅 Simulación de Período</h3>
+              <p>Simula 3, 5 o 7 días de operaciones con planificación automática y replanificación.</p>
+            </div>
+
+            <div class="selectable-card" onclick="SimulationWizard.seleccionarTipo('DiaDia'); this.classList.add('selected')">
+              <div class="checkmark">✓</div>
+              <h3>⏱️ Operación Día a Día</h3>
+              <p>Monitoreo continuo en tiempo real de las operaciones actuales.</p>
+            </div>
+
+            <div class="selectable-card" onclick="SimulationWizard.seleccionarTipo('Colapso'); this.classList.add('selected')">
+              <div class="checkmark">✓</div>
+              <h3>💥 Simulación hasta el Colapso</h3>
+              <p>Ejecuta hasta incumplir un plazo. Identifica límites operacionales del sistema.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 2: Configuración -->
+        <div id="step2" style="display: none;">
+          <h3 style="color: var(--text-primary); margin-bottom: 20px; font-size: 16px;">
+            Configuración de Duración
+          </h3>
+
+          <div class="form-group">
+            <label for="duracion">Duración del Período (días)</label>
+            <div class="slider-container">
+              <input type="range" id="duracion" min="3" max="7" value="5" step="1"
+                     onchange="SimulationWizard.data.duracion = parseInt(this.value); SliderControl.actualizarValor('duracion', 'duracionDisplay')">
+              <span class="slider-value" id="duracionDisplay">5</span>
+            </div>
+            <small style="color: var(--text-muted); margin-top: 8px;">
+              Selecciona 3, 5 o 7 días para la simulación
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="tiempoEjecucion">Tiempo de Ejecución (minutos)</label>
+            <div class="slider-container">
+              <input type="range" id="tiempoEjecucion" min="30" max="90" value="60" step="5"
+                     onchange="SimulationWizard.data.tiempoEjecucion = parseInt(this.value); SliderControl.actualizarValor('tiempoEjecucion', 'tiempoEjecucionDisplay')">
+              <span class="slider-value" id="tiempoEjecucionDisplay">60</span>
+            </div>
+            <small style="color: var(--text-muted); margin-top: 8px;">
+              Rango: 30-90 minutos (adaptable a capacidad del sistema)
+            </small>
+          </div>
+        </div>
+
+        <!-- STEP 3: Parámetros de Semáforo -->
+        <div id="step3" style="display: none;">
+          <h3 style="color: var(--text-primary); margin-bottom: 20px; font-size: 16px;">
+            Configurar Umbrales de Almacenes
+          </h3>
+
+          <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 13px;">
+            Establece los rangos de ocupación de almacenes para los indicadores de semáforo:
+          </p>
+
+          <div class="form-group">
+            <label>🟢 Verde (Capacidad Baja)</label>
+            <div class="slider-container">
+              <input type="range" id="verde" min="0" max="70" value="60" step="5"
+                     onchange="SimulationWizard.data.verde = parseInt(this.value); SliderControl.actualizarValor('verde', 'verdeDisplay')">
+              <span class="slider-value" id="verdeDisplay">60</span><span style="margin-left: 4px;">%</span>
+            </div>
+            <small style="color: var(--text-muted); margin-top: 8px;">
+              Ocupación: 0% a <span id="verdeMax">60</span>% (Todas operaciones normales)
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label>🟡 Ámbar (Capacidad Moderada)</label>
+            <div class="slider-container">
+              <input type="range" id="ambar" min="61" max="100" value="85" step="5"
+                     onchange="SimulationWizard.data.ambar = parseInt(this.value); SliderControl.actualizarValor('ambar', 'ambarDisplay')">
+              <span class="slider-value" id="ambarDisplay">85</span><span style="margin-left: 4px;">%</span>
+            </div>
+            <small style="color: var(--text-muted); margin-top: 8px;">
+              Ocupación: 61% a <span id="ambarMax">85</span>% (Alerta, iniciar descarga)
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label>🔴 Rojo (Capacidad Crítica)</label>
+            <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 6px; border-left: 3px solid var(--danger-red);">
+              <strong style="color: var(--danger-red);">86% - 100%</strong>
+              <small style="display: block; color: var(--text-muted); margin-top: 4px;">
+                Ocupación crítica - Riesgo de sobrecarga inmediata
+              </small>
+            </div>
+          </div>
+
+          <!-- Vista Previa -->
+          <div style="margin-top: 24px; padding: 16px; background-color: var(--bg-tertiary); border-radius: 8px;">
+            <h4 style="color: var(--text-primary); margin-bottom: 12px; font-size: 13px; text-transform: uppercase;">
+              📊 Vista Previa
+            </h4>
+            <div class="traffic-light">
+              <div class="traffic-item">
+                <div class="traffic-color green"></div>
+                <span class="traffic-label">0% - <span id="previewVerde">60</span>%</span>
+              </div>
+              <div class="traffic-item">
+                <div class="traffic-color amber"></div>
+                <span class="traffic-label"><span id="previewVerdeEnd">61</span>% - <span id="previewAmbar">85</span>%</span>
+              </div>
+              <div class="traffic-item">
+                <div class="traffic-color red"></div>
+                <span class="traffic-label"><span id="previewAmbarEnd">86</span>% - 100%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 4: Confirmación -->
+        <div id="step4" style="display: none;">
+          <h3 style="color: var(--text-primary); margin-bottom: 20px; font-size: 16px;">
+            ✓ Resumen de Configuración
+          </h3>
+
+          <div style="display: grid; gap: 12px;">
+            <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--accent-blue);">
+              <small style="color: var(--text-secondary); text-transform: uppercase;">Tipo de Simulación</small>
+              <div style="color: var(--text-primary); font-weight: 600; margin-top: 4px;" id="confTipo">No seleccionado</div>
+            </div>
+
+            <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--accent-blue);">
+              <small style="color: var(--text-secondary); text-transform: uppercase;">Duración</small>
+              <div style="color: var(--text-primary); font-weight: 600; margin-top: 4px;" id="confDuracion">5 días</div>
+            </div>
+
+            <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--accent-blue);">
+              <small style="color: var(--text-secondary); text-transform: uppercase;">Tiempo de Ejecución</small>
+              <div style="color: var(--text-primary); font-weight: 600; margin-top: 4px;" id="confTiempo">60 minutos</div>
+            </div>
+
+            <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--accent-blue);">
+              <small style="color: var(--text-secondary); text-transform: uppercase;">Umbrales</small>
+              <div style="color: var(--text-primary); font-weight: 600; margin-top: 4px; font-size: 13px;">
+                🟢 Verde: 0-60% | 🟡 Ámbar: 61-85% | 🔴 Rojo: 86-100%
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 24px; padding: 16px; background-color: rgba(16, 185, 129, 0.1); border: 1px solid var(--success-green); border-radius: 8px;">
+            <p style="color: var(--text-secondary); font-size: 13px;">
+              ✓ La configuración está lista. Haz clic en <strong>"Iniciar Simulación"</strong> para comenzar el proceso.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="modal-footer">
+        <button id="btnAnterior" class="btn btn-secondary" onclick="SimulationWizard.anterior()" style="display: none;">
+          ← Anterior
+        </button>
+        <button class="btn btn-secondary" onclick="cerrarModal('modalOverlay')">
+          Cancelar
+        </button>
+        <button id="btnSiguiente" class="btn btn-primary" onclick="SimulationWizard.currentStep === 4 ? SimulationWizard.iniciar() : SimulationWizard.siguiente()">
+          Siguiente →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/app.js"></script>
+  <script>
+    // Actualizar vista previa de semáforo
+    document.getElementById('verde').addEventListener('input', function() {
+      document.getElementById('previewVerde').textContent = this.value;
+      document.getElementById('previewVerdeEnd').textContent = parseInt(this.value) + 1;
+    });
+
+    document.getElementById('ambar').addEventListener('input', function() {
+      document.getElementById('previewAmbar').textContent = this.value;
+      document.getElementById('previewAmbarEnd').textContent = parseInt(this.value) + 1;
+    });
+  </script>
+</body>
+</html>

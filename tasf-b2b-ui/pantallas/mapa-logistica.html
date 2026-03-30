@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoreo de Operaciones - Tasf.B2B</title>
+  <link rel="stylesheet" href="../css/estilo.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+      background-color: var(--bg-primary);
+    }
+
+    .simulator-container {
+      display: flex;
+      height: 100vh;
+      gap: 0;
+    }
+
+    .map-area {
+      flex: 1;
+      position: relative;
+      background: linear-gradient(135deg, #e8f0fb 0%, #f0f5fd 50%, #f5f8fe 100%);
+      border-right: 1px solid var(--border-color);
+    }
+
+    .canvas-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    canvas {
+      display: block;
+      background: white;
+      cursor: grab;
+    }
+
+    canvas:active {
+      cursor: grabbing;
+    }
+
+    .control-panel {
+      width: 320px;
+      background-color: var(--bg-secondary);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 0;
+    }
+
+    .panel-section {
+      padding: 20px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .panel-section h3 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .time-display {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-align: center;
+      margin: 16px 0;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="simulator-container">
+    <!-- Área del Mapa -->
+    <div class="map-area">
+      <div class="canvas-wrapper">
+        <canvas id="logisticCanvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Panel de Información -->
+    <div class="control-panel">
+      <!-- Sección de Estado Actual -->
+      <div class="panel-section">
+        <h3>📊 Estado de Operaciones</h3>
+        
+        <div class="time-display" id="timeDisplay">Día 1 - 00:00</div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px;">
+          <div style="background-color: var(--bg-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+            <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px;">Maletas en Tránsito</div>
+            <div style="font-size: 24px; font-weight: 700; color: var(--text-primary);" id="inTransit">0</div>
+          </div>
+          <div style="background-color: var(--bg-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+            <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px;">Entregadas</div>
+            <div style="font-size: 24px; font-weight: 700; color: #067857;" id="delivered">0</div>
+          </div>
+          <div style="background-color: var(--bg-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+            <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px;">Retrasadas</div>
+            <div style="font-size: 24px; font-weight: 700; color: #ab4502;" id="delayed">0</div>
+          </div>
+          <div style="background-color: var(--bg-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+            <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px;">Críticas</div>
+            <div style="font-size: 24px; font-weight: 700; color: #b91c1c;" id="critical">0</div>
+          </div>
+        </div>
+
+        <div style="background-color: var(--bg-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-top: 12px; font-size: 12px;">
+          <div style="color: var(--text-secondary); margin-bottom: 8px;"><strong>Utilización Promedio:</strong></div>
+          <div style="font-size: 18px; font-weight: 700; color: var(--accent-blue);" id="capacityInfo">-</div>
+        </div>
+      </div>
+
+      <!-- Sección de Leyenda -->
+      <div class="panel-section">
+        <h3>🎨 Estados de Ciudad</h3>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; text-align: center;">
+          <div>
+            <div style="width: 28px; height: 28px; border-radius: 50%; background-color: #067857; border: 2px solid white; margin: 0 auto 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);"></div>
+            <p style="font-size: 10px; color: var(--text-secondary); margin: 0;">Normal</p>
+          </div>
+          <div>
+            <div style="width: 28px; height: 28px; border-radius: 50%; background-color: #ab4502; border: 2px solid white; margin: 0 auto 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);"></div>
+            <p style="font-size: 10px; color: var(--text-secondary); margin: 0;">Alerta</p>
+          </div>
+          <div>
+            <div style="width: 28px; height: 28px; border-radius: 50%; background-color: #b91c1c; border: 2px solid white; margin: 0 auto 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);"></div>
+            <p style="font-size: 10px; color: var(--text-secondary); margin: 0;">Crítico</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sección de Información -->
+      <div class="panel-section" style="flex: 1; display: flex; flex-direction: column;">
+        <h3>ℹ️ Período de Simulación</h3>
+        <div id="infoContainer" style="flex: 1; overflow-y: auto; font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+          <p><strong>Simulación de operaciones diarias</strong></p>
+          <p style="margin-top: 8px; font-size: 11px;">Red global de 27 ciudades monitoreadas continuamente. Transporte aéreo de maletas extraviadas entre continentes.</p>
+          <p style="margin-top: 12px; font-size: 11px;"><strong>Plazo de entrega:</strong></p>
+          <p style="margin: 6px 0; font-size: 11px;">• Mismo continente: 1 día<br>• Distinto continente: 2 días</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
+  <script src="../js/logistic-simulator.js"></script>
+</body>
+</html>

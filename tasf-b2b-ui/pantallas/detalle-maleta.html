@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detalle de Maleta - Tasf.B2B</title>
+  <link rel="stylesheet" href="../css/estilo.css">
+  <style>
+    .suitcase-header {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 24px;
+      margin-bottom: 28px;
+      box-shadow: var(--shadow);
+    }
+
+    .suitcase-code {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .suitcase-id {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-shadow: none;
+      text-shadow: var(--glow-blue);
+      margin-bottom: 20px;
+    }
+
+    .suitcase-info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 20px;
+    }
+
+    .suitcase-info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .suitcase-info-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .suitcase-info-value {
+      font-size: 16px;
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .timeline-horizontal {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 28px 20px;
+      margin-bottom: 28px;
+      overflow-x: auto;
+    }
+
+    .timeline-track {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: max-content;
+    }
+
+    .timeline-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      position: relative;
+      flex-shrink: 0;
+      width: 100px;
+    }
+
+    .timeline-node::after {
+      content: '';
+      position: absolute;
+      width: 40px;
+      height: 2px;
+      background: linear-gradient(90deg, var(--border-color) 0%, transparent 100%);
+      left: 100%;
+      top: 20px;
+    }
+
+    .timeline-node:last-child::after {
+      display: none;
+    }
+
+    .timeline-circle {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 3px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: var(--bg-tertiary);
+      font-size: 18px;
+      transition: all 0.3s ease;
+      position: relative;
+      z-index: 2;
+    }
+
+    .timeline-node.completed .timeline-circle {
+      background-color: var(--success-green);
+      border-color: var(--success-green);
+      color: white;
+      box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
+    }
+
+    .timeline-node.active .timeline-circle {
+      background-color: var(--warning-amber);
+      border-color: var(--warning-amber);
+      color: white;
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.8);
+      animation: pulse 2s infinite;
+    }
+
+    .timeline-node.pending .timeline-circle {
+      background-color: transparent;
+      border-color: var(--border-color);
+      color: var(--text-muted);
+    }
+
+    .timeline-label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-align: center;
+      font-weight: 500;
+      max-width: 90px;
+      word-wrap: break-word;
+    }
+
+    .timeline-node.completed .timeline-label {
+      color: var(--success-green);
+      font-weight: 600;
+    }
+
+    .timeline-node.active .timeline-label {
+      color: var(--warning-amber);
+      font-weight: 600;
+    }
+
+    .info-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .info-card {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 20px;
+      transition: all 0.3s ease;
+    }
+
+    .info-card:hover {
+      border-color: var(--accent-blue);
+      box-shadow: var(--glow-blue);
+    }
+
+    .info-card h4 {
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    .info-card-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .info-card-subtext {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+
+    .status-indicator.success {
+      background-color: var(--success-green);
+      box-shadow: 0 0 8px var(--success-green);
+    }
+
+    .status-indicator.warning {
+      background-color: var(--warning-amber);
+      box-shadow: 0 0 8px var(--warning-amber);
+    }
+
+    .status-indicator.danger {
+      background-color: var(--danger-red);
+      box-shadow: 0 0 8px var(--danger-red);
+    }
+
+    .timeline-on-time {
+      color: var(--success-green);
+    }
+
+    .timeline-at-risk {
+      color: var(--danger-red);
+    }
+
+    .search-section {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 32px;
+    }
+
+    .search-input-group {
+      display: flex;
+      gap: 12px;
+    }
+
+    .search-input-group input {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-logo">
+      <div class="icon">✈️</div>
+      <span>Tasf.B2B</span>
+    </div>
+    <nav class="header-nav">
+      <a href="../index.html">Inicio</a>
+      <a href="registro-maletas.html">Registrar Maletas</a>
+      <a href="simulacion-config.html">Nueva Simulación</a>
+      <a href="mapa-principal.html">Monitoreo</a>
+      <a href="detalle-maleta.html" style="color: var(--accent-blue); font-weight: 600;">Búsqueda</a>
+    </nav>
+  </header>
+
+  <!-- Contenido Principal -->
+  <div class="container">
+    <!-- Sección de Búsqueda -->
+    <div class="search-section fade-in">
+      <h2 style="margin-bottom: 16px; font-size: 18px; color: var(--text-primary);">🔍 Buscar Maleta</h2>
+      <div class="search-input-group">
+        <input type="text" placeholder="Ingresa código de maleta (ej: MAL-01042)..." value="MAL-01042">
+        <button class="btn btn-primary">Buscar</button>
+      </div>
+    </div>
+
+    <!-- Header de la Maleta -->
+    <div class="suitcase-header fade-in">
+      <div class="suitcase-code">Código de Maleta</div>
+      <div class="suitcase-id">📦 MAL-01042</div>
+
+      <div class="suitcase-info-grid">
+        <div class="suitcase-info-item">
+          <span class="suitcase-info-label">Aerolínea</span>
+          <span class="suitcase-info-value">LATAM Airlines</span>
+        </div>
+        <div class="suitcase-info-item">
+          <span class="suitcase-info-label">Aeropuerto Origen</span>
+          <span class="suitcase-info-value">Lima (LIM)</span>
+        </div>
+        <div class="suitcase-info-item">
+          <span class="suitcase-info-label">Aeropuerto Destino</span>
+          <span class="suitcase-info-value">Tokio (NRT)</span>
+        </div>
+        <div class="suitcase-info-item">
+          <span class="suitcase-info-label">Tipo de Ruta</span>
+          <span class="suitcase-info-value" style="color: var(--warning-amber);">Multi-continente</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline Horizontal de Ruta -->
+    <div class="timeline-horizontal fade-in" style="animation-delay: 0.1s;">
+      <h3 style="margin-bottom: 24px; color: var(--text-primary); font-size: 16px;">Ruta Planificada</h3>
+
+      <div class="timeline-track">
+        <!-- Nodo 1: Lima (Completado) -->
+        <div class="timeline-node completed">
+          <div class="timeline-circle">✓</div>
+          <div class="timeline-label">Lima</div>
+        </div>
+
+        <!-- Nodo 2: Miami (Completado) -->
+        <div class="timeline-node completed">
+          <div class="timeline-circle">✓</div>
+          <div class="timeline-label">Miami</div>
+        </div>
+
+        <!-- Nodo 3: São Paulo (Completado) -->
+        <div class="timeline-node completed">
+          <div class="timeline-circle">✓</div>
+          <div class="timeline-label">São Paulo</div>
+        </div>
+
+        <!-- Nodo 4: Frankfurt (Completado) -->
+        <div class="timeline-node completed">
+          <div class="timeline-circle">✓</div>
+          <div class="timeline-label">Frankfurt</div>
+        </div>
+
+        <!-- Nodo 5: Dubái (Actual) -->
+        <div class="timeline-node active">
+          <div class="timeline-circle">✈️</div>
+          <div class="timeline-label">Dubái</div>
+        </div>
+
+        <!-- Nodo 6: Singapur (Pendiente) -->
+        <div class="timeline-node pending">
+          <div class="timeline-circle">7</div>
+          <div class="timeline-label">Singapur</div>
+        </div>
+
+        <!-- Nodo 7: Tokio (Pendiente) -->
+        <div class="timeline-node pending">
+          <div class="timeline-circle">8</div>
+          <div class="timeline-label">Tokio</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tarjetas de Información Importantes -->
+    <div class="info-cards-grid fade-in" style="animation-delay: 0.2s;">
+      <!-- Ubicación Actual -->
+      <div class="info-card">
+        <h4>📍 Ubicación Actual</h4>
+        <div class="info-card-value">Dubái (DXB)</div>
+        <div class="info-card-subtext">
+          Almacén - Cuello de botella identificado
+        </div>
+        <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary);">
+          <span class="status-indicator warning"></span>En tránsito hacia Singapur
+        </div>
+      </div>
+
+      <!-- Plazo de Entrega -->
+      <div class="info-card">
+        <h4>⏰ Plazo de Entrega</h4>
+        <div class="info-card-value">29-Mar-2026</div>
+        <div class="info-card-subtext">
+          11:59 PM
+        </div>
+        <div style="margin-top: 12px; font-size: 12px; color: var(--success-green);">
+          <span class="status-indicator success"></span>A tiempo
+        </div>
+      </div>
+
+      <!-- Tiempo Restante -->
+      <div class="info-card">
+        <h4>⏳ Tiempo Restante</h4>
+        <div class="info-card-value timeline-on-time">34 horas</div>
+        <div class="info-card-subtext">
+          Margen de seguridad: 16 horas
+        </div>
+        <div style="margin-top: 12px; font-size: 12px; color: var(--success-green);">
+          <span class="status-indicator success"></span>En buen estado
+        </div>
+      </div>
+
+      <!-- Estado General -->
+      <div class="info-card">
+        <h4>📊 Estado General</h4>
+        <div class="info-card-value">Optimal</div>
+        <div class="info-card-subtext">
+          61% del viaje completado
+        </div>
+        <div style="margin-top: 12px; font-size: 12px;">
+          <span class="status-indicator success"></span><span style="color: var(--text-secondary);">No hay problemas detectados</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Historial de Eventos de la Maleta -->
+    <div class="card fade-in" style="animation-delay: 0.3s;">
+      <h3 style="margin-bottom: 16px; font-size: 16px; color: var(--text-primary);">📋 Historial de Eventos</h3>
+
+      <div class="event-log" style="max-height: 400px;">
+        <div class="event-item">
+          <span class="event-time">2026-03-28 16:45</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Llegó en Dubái - Almacén en cuello de botella (capacidad: 78%)</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-28 09:30</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Despegó de Frankfurt en vuelo FRA-DXB-001</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-28 03:20</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Llegó en Frankfurt - Sin demoras, listo para transferencia</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-27 18:15</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Despegó de São Paulo en vuelo SP001-FRA</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-27 12:00</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Llegó en São Paulo - Cambio de ruta confirmado</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-27 06:30</span>
+          <span class="event-icon warning"></span>
+          <span class="event-text">Replanificación: Vuelo Miami-São Paulo retrasado 2 horas</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-27 03:00</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Despegó de Miami en vuelo MIA-SP-001</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-26 22:10</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Llegó en Miami - Aduanas y seguridad completadas</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-26 16:45</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Despegó de Lima en vuelo LIM-MIA-002</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-26 09:00</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Recibida por Tasf.B2B en Lima - Preparación para envío</span>
+        </div>
+
+        <div class="event-item">
+          <span class="event-time">2026-03-25 18:30</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Registro creado - Aerolínea: LATAM Airlines</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Información Adicional -->
+    <div class="card fade-in" style="margin-top: 32px; animation-delay: 0.4s; border-left: 4px solid var(--success-green);">
+      <h3 style="color: var(--success-green); margin-bottom: 16px;">✓ Análisis de Desempeño</h3>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tiempo Total Planificado</small>
+          <div style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 8px;">48 horas</div>
+          <small style="color: var(--text-secondary);">Desde Lima a Tokio</small>
+        </div>
+
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tiempo Transcurrido</small>
+          <div style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 8px;">30 horas</div>
+          <small style="color: var(--text-secondary);">62.5% del total</small>
+        </div>
+
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Paradas Completadas</small>
+          <div style="font-size: 20px; font-weight: 700; color: var(--success-green); margin-top: 8px;">4 de 7</div>
+          <small style="color: var(--text-secondary);">2 en tránsito/pendientes</small>
+        </div>
+
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Incidencias</small>
+          <div style="font-size: 20px; font-weight: 700; color: var(--warning-amber); margin-top: 8px;">1 Retraso</div>
+          <small style="color: var(--text-secondary);">Recuperado exitosamente</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/app.js"></script>
+</body>
+</html>

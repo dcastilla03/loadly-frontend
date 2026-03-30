@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoreo en Tiempo Real - Tasf.B2B</title>
+  <link rel="stylesheet" href="../css/estilo.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+
+
+
+    .topbar {
+      background-color: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      border-radius: 12px;
+    }
+
+    .topbar-info {
+      display: flex;
+      gap: 32px;
+    }
+
+    .topbar-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .topbar-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .topbar-value {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-shadow: var(--glow-blue);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background-color: var(--bg-tertiary);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .status-badge .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--success-green);
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.3;
+      }
+    }
+
+    .sidebar-right {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+    }
+
+    .map-content {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 24px;
+    }
+
+    .map-card {
+      min-height: 500px;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    #leafletMap {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background: white;
+    }
+
+    @media (max-width: 1024px) {
+      .map-content {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+
+      .topbar {
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .topbar-info {
+        flex-direction: column;
+        gap: 16px;
+        width: 100%;
+      }
+
+      .sidebar-right {
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-logo">
+      <div class="icon">✈️</div>
+      <span>Tasf.B2B</span>
+    </div>
+    <nav class="header-nav">
+      <a href="../index.html">Inicio</a>
+      <a href="registro-maletas.html">Registrar Maletas</a>
+      <a href="simulacion-config.html">Nueva Simulación</a>
+      <a href="mapa-principal.html" style="color: var(--accent-blue); font-weight: 600;">Monitoreo</a>
+      <a href="detalle-maleta.html">Búsqueda</a>
+    </nav>
+  </header>
+
+  <!-- Contenido Principal -->
+  <div class="container">
+    <!-- Top Bar con Información -->
+    <div class="topbar">
+      <div class="topbar-info">
+        <div class="topbar-item">
+          <span class="topbar-label">Estado de Simulación</span>
+          <div class="status-badge">
+            <span class="dot"></span>
+            En Ejecución
+          </div>
+        </div>
+        <div class="topbar-item">
+          <span class="topbar-label">Progreso</span>
+          <span class="topbar-value">Día 3 de 5</span>
+        </div>
+        <div class="topbar-item">
+          <span class="topbar-label">Hora Simulada</span>
+          <span class="topbar-value" id="simulatedTime">10:30 AM</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mapa y Sidebar -->
+    <div class="map-content">
+        <div class="card map-card" style="padding: 0; overflow: hidden; position: relative; flex: 1;">
+          <div id="leafletMap"></div>
+        </div>
+
+      <!-- Sidebar Derecho con Estadísticas -->
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="stat-card">
+          <h3>Maletas en Tránsito</h3>
+          <div class="value" data-stat="enTransito">842</div>
+        </div>
+
+        <div class="stat-card">
+          <h3>Entregadas a Tiempo</h3>
+          <div class="value" style="color: var(--success-green);" data-stat="entregadas">1,284</div>
+        </div>
+
+        <div class="stat-card">
+          <h3>En Espera</h3>
+          <div class="value" style="color: var(--warning-amber);" data-stat="espera">142</div>
+        </div>
+
+        <div class="stat-card">
+          <h3>Retrasadas</h3>
+          <div class="value" style="color: var(--danger-red);" data-stat="retrasadas">23</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Event Log -->
+    <div class="card fade-in" style="margin-top: 24px; animation-delay: 0.1s;">
+      <h3 style="margin-bottom: 16px; font-size: 16px; color: var(--text-primary);">📋 Registro de Eventos (Últimas 24 horas)</h3>
+
+      <div class="event-log" style="max-height: 250px;">
+        <div class="event-item">
+          <span class="event-time">14:28</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Maleta <strong>#1042</strong> entregada en Frankfurt</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">14:15</span>
+          <span class="event-icon warning"></span>
+          <span class="event-text">Vuelo cancelado: <strong>SNG→TOK</strong>, replanificando ruta</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">13:52</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Lote de 50 maletas llegó a Miami</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">13:30</span>
+          <span class="event-icon warning"></span>
+          <span class="event-text">Almacén en Dubái alcanzando capacidad (85%)</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">13:12</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Vuelo <strong>TOK001</strong> desplegó con 320 maletas</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">12:45</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Maleta <strong>#890</strong> llegó a São Paulo</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">12:30</span>
+          <span class="event-icon error"></span>
+          <span class="event-text">Retraso detectado: Maleta <strong>#756</strong> puede perder plazo</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">12:00</span>
+          <span class="event-icon success"></span>
+          <span class="event-text">Simulación iniciada: Período 5 días</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Información Adicional -->
+    <div class="card fade-in" style="margin-top: 24px; animation-delay: 0.2s;">
+      <h3 style="color: var(--accent-blue); margin-bottom: 16px;">ℹ️ Métricas de Rendimiento</h3>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tasa de Puntualidad</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--success-green); margin-top: 8px;">98.3%</div>
+          <small style="color: var(--text-muted);">↑ 2.1% respecto a ayer</small>
+        </div>
+
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Ocupación Promedio</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--warning-amber); margin-top: 8px;">72%</div>
+          <small style="color: var(--text-muted);">En 7 almacenes activos</small>
+        </div>
+
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tiempo Promedio</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue); margin-top: 8px;">18h 32m</div>
+          <small style="color: var(--text-muted);">Desde origen a destino</small>
+        </div>
+
+        <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Maletas Transitando</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue); margin-top: 8px;">3,247</div>
+          <small style="color: var(--text-muted);">A través de 12 rutas</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/app.js"></script>
+  <!-- Leaflet Map JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
+  <script>
+    // Actualizar hora simulada
+    function actualizarHoraSimulada() {
+      const now = new Date();
+      const horas = String(now.getHours()).padStart(2, '0');
+      const minutos = String(now.getMinutes()).padStart(2, '0');
+      const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
+      document.getElementById('simulatedTime').textContent = `${horas}:${minutos} ${ampm}`;
+    }
+
+    setInterval(actualizarHoraSimulada, 1000);
+    actualizarHoraSimulada();
+
+    // Mapa simple - Leaflet
+    let map = null;
+    
+    function inicializarMapa() {
+      map = L.map('leafletMap', {
+        maxBounds: [[-85.05112878, -180], [85.05112878, 180]],
+        maxBoundsViscosity: 1.0,
+        minZoom: 2,
+        maxZoom: 19,
+        worldCopyJump: false,
+        continuousWorld: false
+      }).setView([20, 0], 2);
+      
+      // Tiles del mapa
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© CartoDB',
+        maxZoom: 19,
+        minZoom: 2,
+        subdomains: 'abcd',
+        noWrap: true,
+        bounds: [[-85.05112878, -180], [85.05112878, 180]]
+      }).addTo(map);
+      
+      // Coordenadas de los vuelos
+      const routes = [
+        {
+          name: 'São Paulo → Miami',
+          origin: [-23.55, -46.63],
+          destination: [25.76, -80.19],
+          color: '#2564eb'
+        },
+        {
+          name: 'México → Italia',
+          origin: [19.43, -99.13],
+          destination: [41.90, 12.50],
+          color: '#10b981'
+        },
+        {
+          name: 'Lima → Madrid',
+          origin: [-12.0462, -77.0428],
+          destination: [40.4168, -3.7038],
+          color: '#f97316'
+        }
+      ];
+      
+      // Definir funciones Bézier una sola vez (reutilizable)
+      function bezierPoint(t, p0, p1, p2, p3) {
+        const mt = 1 - t;
+        const mt2 = mt * mt;
+        const mt3 = mt2 * mt;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        
+        return mt3 * p0 + 3 * mt2 * t * p1 + 3 * mt * t2 * p2 + t3 * p3;
+      }
+      
+      function bezierTangent(t, p0, p1, p2, p3) {
+        const mt = 1 - t;
+        const mt2 = mt * mt;
+        const t2 = t * t;
+        
+        return 3 * mt2 * (p1 - p0) + 6 * mt * t * (p2 - p1) + 3 * t2 * (p3 - p2);
+      }
+      
+      // Array para almacenar los aviones
+      const airplanes = [];
+      
+      // Crear rutas, polylines y aviones
+      routes.forEach((route, index) => {
+        const origin = route.origin;
+        const destination = route.destination;
+        
+        // Puntos de control para línea recta
+        const controlPoint1 = [origin[0] + 2, origin[1] + 2];
+        const controlPoint2 = [destination[0] - 2, destination[1] - 2];
+        
+        // Generar puntos de la curva para la polyline
+        const curvePoints = [];
+        for (let i = 0; i <= 100; i++) {
+          const t = i / 100;
+          const lat = bezierPoint(t, origin[0], controlPoint1[0], controlPoint2[0], destination[0]);
+          const lng = bezierPoint(t, origin[1], controlPoint1[1], controlPoint2[1], destination[1]);
+          curvePoints.push([lat, lng]);
+        }
+        
+        // Dibujar la polyline
+        L.polyline(curvePoints, {
+          color: route.color,
+          weight: 2,
+          opacity: 0.8,
+          dashArray: '5, 5'
+        }).addTo(map);
+        
+        // Marcadores de origen y destino
+        L.marker(origin).addTo(map)
+          .bindPopup(`<b>${route.name.split('→')[0].trim()}</b><br>Lat: ${origin[0].toFixed(4)}<br>Lng: ${origin[1].toFixed(4)}`);
+        
+        L.marker(destination).addTo(map)
+          .bindPopup(`<b>${route.name.split('→')[1].trim()}</b><br>Lat: ${destination[0].toFixed(4)}<br>Lng: ${destination[1].toFixed(4)}`);
+        
+        // Crear SVG para el avión
+        const svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svgElement.style.position = 'absolute';
+        svgElement.style.top = '0';
+        svgElement.style.left = '0';
+        svgElement.style.pointerEvents = 'none';
+        svgElement.style.zIndex = '500';
+        
+        const airplaneGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        
+        const airplaneImage = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+        airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '../../airplane.svg');
+        airplaneImage.setAttribute('x', '-30');
+        airplaneImage.setAttribute('y', '-30');
+        airplaneImage.setAttribute('width', '60');
+        airplaneImage.setAttribute('height', '60');
+        airplaneImage.setAttribute('style', `filter: hue-rotate(${index * 120}deg) brightness(1.1);`);
+        
+        airplaneGroup.appendChild(airplaneImage);
+        svgElement.appendChild(airplaneGroup);
+        map.getPanes().overlayPane.appendChild(svgElement);
+        
+        // Guardar información del avión
+        airplanes.push({
+          svgElement,
+          airplaneGroup,
+          airplaneImage,
+          origin,
+          destination,
+          controlPoint1,
+          controlPoint2
+        });
+      });
+      
+      // Variables de animación
+      const animationDuration = 30000; // 30 segundos
+      let animationStartTime = performance.now();
+      
+      // Función para actualizar posición de todos los aviones
+      function updatePointPosition() {
+        const currentTime = performance.now();
+        const elapsed = currentTime - animationStartTime;
+        const progress = (elapsed % animationDuration) / animationDuration;
+        
+        // Actualizar cada avión
+        airplanes.forEach((airplane) => {
+          // Calcular posición en la curva Bézier
+          const currentLat = bezierPoint(progress, airplane.origin[0], airplane.controlPoint1[0], airplane.controlPoint2[0], airplane.destination[0]);
+          const currentLng = bezierPoint(progress, airplane.origin[1], airplane.controlPoint1[1], airplane.controlPoint2[1], airplane.destination[1]);
+          
+          // Obtener las coordenadas del mapa
+          const pointCoords = map.latLngToLayerPoint([currentLat, currentLng]);
+          
+          // Calcular la tangente de la curva para obtener la dirección correcta
+          const tangentLat = bezierTangent(progress, airplane.origin[0], airplane.controlPoint1[0], airplane.controlPoint2[0], airplane.destination[0]);
+          const tangentLng = bezierTangent(progress, airplane.origin[1], airplane.controlPoint1[1], airplane.controlPoint2[1], airplane.destination[1]);
+          
+          // Calcular ángulo a partir de la tangente
+          const cosLat = Math.cos(currentLat * Math.PI / 180);
+          const angle = Math.atan2(-tangentLat, tangentLng * cosLat) * (180 / Math.PI);
+          
+          // Ajustar tamaño del avión basado en el zoom
+          const zoom = map.getZoom();
+          const airplaneSize = 20 + (zoom - 2) * 3;
+          const offset = airplaneSize / 2;
+          
+          airplane.airplaneImage.setAttribute('width', airplaneSize.toString());
+          airplane.airplaneImage.setAttribute('height', airplaneSize.toString());
+          airplane.airplaneImage.setAttribute('x', (-offset).toString());
+          airplane.airplaneImage.setAttribute('y', (-offset).toString());
+          
+          // Establecer tamaño del SVG con margen para zoom
+          const size = map.getSize();
+          const margin = 1000;
+          airplane.svgElement.setAttribute('width', size.x + margin * 2);
+          airplane.svgElement.setAttribute('height', size.y + margin * 2);
+          airplane.svgElement.style.left = (-margin) + 'px';
+          airplane.svgElement.style.top = (-margin) + 'px';
+          
+          // Posicionar y rotar el avión
+          airplane.airplaneGroup.setAttribute('transform', `translate(${pointCoords.x + margin},${pointCoords.y + margin}) rotate(${angle} 0 0)`);
+        });
+      }
+      
+      // Animar
+      function animate() {
+        updatePointPosition();
+        requestAnimationFrame(animate);
+      }
+      
+      // Actualizar en eventos del mapa
+      map.on('move zoom moveend zoomend', updatePointPosition);
+      
+      animate();
+    }
+    
+    // Inicializar cuando el DOM esté listo
+    document.addEventListener('DOMContentLoaded', function() {
+      inicializarMapa();
+      
+      // Redimensionar el mapa cuando cambie el tamaño de la ventana
+      window.addEventListener('resize', function() {
+        if (map) {
+          map.invalidateSize();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tasf.B2B - Sistema de Gestión de Equipajes</title>
+  <link rel="stylesheet" href="css/estilo.css">
+  <style>
+    .hero-section {
+      background: linear-gradient(135deg, rgba(37, 100, 235, 0.05) 0%, rgba(37, 100, 235, 0.03) 50%, rgba(230, 240, 250, 0.5) 100%);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 56px 40px;
+      text-align: center;
+      margin-bottom: 56px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-section::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -10%;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(37, 100, 235, 0.05), transparent);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
+    }
+
+    .hero-icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translateY(0px);
+      }
+      50% {
+        transform: translateY(-20px);
+      }
+    }
+
+    .hero-title {
+      font-size: 44px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: var(--text-primary);
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-blue-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+
+    .hero-subtitle {
+      font-size: 18px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      margin-bottom: 60px;
+    }
+
+    .feature-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 28px;
+      text-align: center;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-3px);
+      border-color: var(--accent-blue);
+      box-shadow: var(--glow-blue);
+    }
+
+    .feature-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .feature-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 12px;
+    }
+
+    .feature-description {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .feature-link {
+      color: var(--accent-blue);
+      font-weight: 600;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .quick-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+      margin-bottom: 60px;
+    }
+
+    .quick-stat {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 18px;
+      text-align: center;
+    }
+
+    .quick-stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      margin-bottom: 6px;
+      text-shadow: none;
+    }
+
+    .quick-stat-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .cta-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 36px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+
+    .cta-title {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 14px;
+    }
+
+    .cta-description {
+      font-size: 16px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .cta-buttons {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 768px) {
+      .hero-title {
+        font-size: 32px;
+      }
+
+      .hero-subtitle {
+        font-size: 16px;
+      }
+
+      .cta-title {
+        font-size: 22px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-logo">
+      <div class="icon">✈️</div>
+      <span>Tasf.B2B</span>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html" style="color: var(--accent-blue); font-weight: 600;">Inicio</a>
+      <a href="pantallas/registro-maletas.html">Registrar Maletas</a>
+      <a href="pantallas/simulacion-config.html">Nueva Simulación</a>
+      <a href="pantallas/mapa-principal.html">Monitoreo</a>
+      <a href="pantallas/detalle-maleta.html">Búsqueda</a>
+    </nav>
+  </header>
+
+  <!-- Contenido Principal -->
+  <div class="container" style="padding-top: 40px;">
+    <!-- Sección Hero -->
+    <div class="hero-section fade-in">
+      <div class="hero-content">
+        <div class="hero-icon">✈️</div>
+        <h1 class="hero-title">Tasf.B2B</h1>
+        <p class="hero-subtitle">
+          Sistema Integral de Gestión de Equipajes para Transporte Aéreo Internacional
+        </p>
+        <p style="color: var(--text-muted); font-size: 14px;">
+          Registra, planifica y monitorea equipajes en tiempo real a través de América, Europa y Asia
+        </p>
+      </div>
+    </div>
+
+    <!-- Estadísticas Rápidas -->
+    <div class="quick-stats fade-in" style="animation-delay: 0.1s;">
+      <div class="quick-stat">
+        <div class="quick-stat-value">50+</div>
+        <div class="quick-stat-label">Líneas Aéreas</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-value">21</div>
+        <div class="quick-stat-label">Ciudades Globales</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-value">100K+</div>
+        <div class="quick-stat-label">Maletas al Mes</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-value">98.3%</div>
+        <div class="quick-stat-label">Puntualidad</div>
+      </div>
+    </div>
+
+    <!-- Características Principales -->
+    <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 40px; text-align: center; color: var(--text-primary);">
+      Funcionalidades Principales
+    </h2>
+
+    <div class="features-grid fade-in" style="animation-delay: 0.2s;">
+      <!-- Feature 1: Registro -->
+      <a href="pantallas/registro-maletas.html" style="text-decoration: none; color: inherit;">
+        <div class="feature-card">
+          <div class="feature-icon">📦</div>
+          <h3 class="feature-title">Registro de Maletas</h3>
+          <p class="feature-description">
+            Registra maletas de líneas aéreas con origen, destino y cantidad. Gestión automática de capacidades.
+          </p>
+          <div class="feature-link">Acceder →</div>
+        </div>
+      </a>
+
+      <!-- Feature 2: Simulación -->
+      <a href="pantallas/simulacion-config.html" style="text-decoration: none; color: inherit;">
+        <div class="feature-card">
+          <div class="feature-icon">⚙️</div>
+          <h3 class="feature-title">Configuración de Simulación</h3>
+          <p class="feature-description">
+            Crea simulaciones de período, operación día a día o hasta el colapso con parámetros personalizables.
+          </p>
+          <div class="feature-link">Configurar →</div>
+        </div>
+      </a>
+
+      <!-- Feature 3: Monitoreo -->
+      <a href="pantallas/mapa-principal.html" style="text-decoration: none; color: inherit;">
+        <div class="feature-card">
+          <div class="feature-icon">🗺️</div>
+          <h3 class="feature-title">Monitoreo en Tiempo Real</h3>
+          <p class="feature-description">
+            Visualiza en mapa interactivo con ciclo día/noche, rutas animadas y estadísticas en vivo.
+          </p>
+          <div class="feature-link">Monitorear →</div>
+        </div>
+      </a>
+
+      <!-- Feature 4: Detalle -->
+      <a href="pantallas/detalle-maleta.html" style="text-decoration: none; color: inherit;">
+        <div class="feature-card">
+          <div class="feature-icon">🔍</div>
+          <h3 class="feature-title">Detalle de Maleta</h3>
+          <p class="feature-description">
+            Consulta el historial completo, ruta, plazo de entrega y eventos de cada maleta individual.
+          </p>
+          <div class="feature-link">Buscar →</div>
+        </div>
+      </a>
+
+      <!-- Feature 5: Planificador -->
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3 class="feature-title">Planificador Inteligente</h3>
+        <p class="feature-description">
+          Algoritmos metaheurísticos que optimizan rutas, cumplen plazos y se replantean ante cancelaciones.
+        </p>
+        <div style="color: var(--text-muted); font-size: 12px;">Componente de backend</div>
+      </div>
+
+      <!-- Feature 6: Semáforo -->
+      <div class="feature-card">
+        <div class="feature-icon">🚦</div>
+        <h3 class="feature-title">Indicadores de Semáforo</h3>
+        <p class="feature-description">
+          Verde, Ámbar y Rojo para estado de almacenes. Umbrales parametrizables según operación.
+        </p>
+        <div style="color: var(--text-muted); font-size: 12px;">En todas las vistas</div>
+      </div>
+    </div>
+
+    <!-- Sección de Información -->
+    <div class="card fade-in" style="margin-top: 60px; margin-bottom: 40px; animation-delay: 0.3s;">
+      <h2 style="font-size: 22px; font-weight: 700; margin-bottom: 24px; color: var(--text-primary);">
+        ℹ️ Información del Sistema
+      </h2>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 24px;">
+        <div>
+          <h3 style="color: var(--accent-blue); margin-bottom: 12px; font-size: 16px;">🌍 Cobertura Global</h3>
+          <ul style="color: var(--text-secondary); font-size: 14px; line-height: 2;">
+            <li>✓ América: Lima, Miami, São Paulo, Ciudad de México, Nueva York, Atlanta</li>
+            <li>✓ Europa: Frankfurt, Madrid, Londres, París, Ámsterdam</li>
+            <li>✓ Asia: Tokio, Singapur, Hong Kong, Dubái, Bangkok</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 style="color: var(--accent-blue); margin-bottom: 12px; font-size: 16px;">⏱️ Plazos de Entrega</h3>
+          <ul style="color: var(--text-secondary); font-size: 14px; line-height: 2;">
+            <li>✓ Mismo continente: 1 día máximo</li>
+            <li>✓ Diferente continente: 2 días máximo</li>
+            <li>✓ Traslado entre ciudades: 0.5-1 día según continente</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 style="color: var(--accent-blue); margin-bottom: 12px; font-size: 16px;">📊 Capacidades</h3>
+          <ul style="color: var(--text-secondary); font-size: 14px; line-height: 2;">
+            <li>✓ Vuelos mismo continente: 150-250 maletas</li>
+            <li>✓ Vuelos distinto continente: 150-400 maletas</li>
+            <li>✓ Almacenes aeropuertos: 500-800 maletas</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- CTA Section -->
+    <div class="cta-section fade-in" style="animation-delay: 0.4s;">
+      <h2 class="cta-title">¿Listo para comenzar?</h2>
+      <p class="cta-description">
+        Accede a cualquiera de los módulos principales para registrar maletas, configurar simulaciones o monitorear operaciones en tiempo real.
+      </p>
+      <div class="cta-buttons">
+        <a href="pantallas/registro-maletas.html" class="btn btn-primary">
+          Ir a Registro de Maletas
+        </a>
+        <a href="pantallas/mapa-principal.html" class="btn btn-secondary">
+          Ver Monitoreo
+        </a>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer style="text-align: center; margin-top: 60px; padding-top: 40px; border-top: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px;">
+      <p>
+        Tasf.B2B © 2026 | Sistema de Gestión de Equipajes Aéreos Internacionales
+      </p>
+      <p>
+        Tecnología: HTML5 • CSS3 • JavaScript Vanilla | Tema: Dark Mode con Acentos Azul Neón
+      </p>
+    </footer>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

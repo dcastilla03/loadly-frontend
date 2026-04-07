@@ -1,0 +1,61 @@
+<svg viewBox="0 0 960 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fondo ligero -->
+  <rect width="960" height="500" fill="none"/>
+  
+  <!-- Océanos - fondo blanco/muy claro -->
+  <rect width="960" height="500" fill="#ffffff" opacity="0.02"/>
+  
+  <!-- Mapa del mundo simplificado en tonos grises más oscuros para mayor visibilidad -->
+  <g fill="#888888" stroke="#666666" stroke-width="0.5" opacity="0.50">
+    <!-- Norteamérica -->
+    <path d="M150,80 L280,60 L320,100 L300,180 L200,200 L150,140 Z"/>
+    
+    <!-- Sudamérica -->
+    <path d="M200,200 L250,190 L270,280 L220,320 L180,280 Z"/>
+    
+    <!-- Europa -->
+    <path d="M450,70 L520,60 L560,100 L480,120 Z"/>
+    
+    <!-- Rusia -->
+    <path d="M520,60 L700,50 L750,90 L680,120 L520,100 Z"/>
+    
+    <!-- Asia Este -->
+    <path d="M700,100 L800,80 L850,130 L800,160 L750,140 Z"/>
+    
+    <!-- Japón -->
+    <path d="M830,110 L850,105 L855,135 L840,140 Z"/>
+    
+    <!-- Sudeste Asiático -->
+    <path d="M680,140 L750,130 L780,170 L700,180 Z"/>
+    
+    <!-- India -->
+    <path d="M600,130 L650,120 L680,160 L620,170 Z"/>
+    
+    <!-- África -->
+    <path d="M500,150 L600,140 L620,270 L550,290 L480,250 Z"/>
+    
+    <!-- Oriente Medio -->
+    <path d="M550,120 L620,110 L640,160 L580,170 Z"/>
+    
+    <!-- Oceanía -->
+    <path d="M780,250 L820,240 L830,280 L800,290 Z"/>
+    <path d="M740,290 L780,280 L790,310 L760,320 Z"/>
+    
+    <!-- Nueva Zelanda -->
+    <path d="M820,310 L840,305 L845,340 L825,345 Z"/>
+  </g>
+  
+  <!-- Líneas de latitud/longitud para efecto de globo -->
+  <g stroke="#707070" stroke-width="0.3" opacity="0.30" fill="none">
+    <!-- Líneas horizontales (latitud) -->
+    <path d="M0,100 L960,100"/>
+    <path d="M0,200 L960,200"/>
+    <path d="M0,300 L960,300"/>
+    <path d="M0,400 L960,400"/>
+    
+    <!-- Líneas verticales (longitud) -->
+    <path d="M240,0 L240,500"/>
+    <path d="M480,0 L480,500"/>
+    <path d="M720,0 L720,500"/>
+  </g>
+</svg>

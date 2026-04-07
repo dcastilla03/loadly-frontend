@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tasf.B2B - Sistema de Gestión de Equipajes</title>
+  <title>Loadly - Sistema de Gestión de Equipajes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/estilo.css">
   <style>
     .hero-section {
@@ -50,7 +53,7 @@
     }
 
     .hero-title {
-      font-size: 44px;
+      font-size: 56px;
       font-weight: 700;
       margin-bottom: 16px;
       color: var(--text-primary);
@@ -184,7 +187,7 @@
 
     @media (max-width: 768px) {
       .hero-title {
-        font-size: 32px;
+        font-size: 40px;
       }
 
       .hero-subtitle {
@@ -198,193 +201,153 @@
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <header class="header">
-    <div class="header-logo">
-      <div class="icon">✈️</div>
-      <span>Tasf.B2B</span>
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="icon"><img src="logo.svg" alt="Loadly Logo"></div>
+        <span class="logo-text">Loadly</span>
+      </div>
+      <button class="sidebar-toggle" id="sidebarToggle" title="Desplegar/Contraer">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <nav class="header-nav">
-      <a href="index.html" style="color: var(--accent-blue); font-weight: 600;">Inicio</a>
-      <a href="pantallas/registro-maletas.html">Registrar Maletas</a>
-      <a href="pantallas/simulacion-config.html">Nueva Simulación</a>
-      <a href="pantallas/mapa-principal.html">Monitoreo</a>
-      <a href="pantallas/detalle-maleta.html">Búsqueda</a>
+    <nav class="sidebar-nav">
+      <a href="index.html" class="nav-item active">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-text">Inicio</span>
+      </a>
+      <a href="pantallas/registro-maletas.html" class="nav-item">
+        <span class="nav-icon">📦</span>
+        <span class="nav-text">Registrar Maletas</span>
+      </a>
+      <a href="pantallas/mapa-principal.html" class="nav-item">
+        <span class="nav-icon">🗺️</span>
+        <span class="nav-text">Monitoreo</span>
+      </a>
+      <a href="pantallas/detalle-maleta.html" class="nav-item">
+        <span class="nav-icon">🔍</span>
+        <span class="nav-text">Rastreo</span>
+      </a>
+      <a href="pantallas/gestion-vuelos.html" class="nav-item">
+        <span class="nav-icon">✈️</span>
+        <span class="nav-text">Gestión de Vuelos</span>
+      </a>
+      <a href="pantallas/aeropuertos.html" class="nav-item">
+        <img src="almacen.svg" alt="Almacenes" class="nav-icon" style="width: 20px; height: 20px;">
+        <span class="nav-text">Almacenes</span>
+      </a>
     </nav>
-  </header>
+    
+    <!-- Perfil y Cerrar Sesión -->
+    <div class="sidebar-footer">
+      <div class="profile-section">
+        <div class="profile-avatar"><svg width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
+        <div class="profile-info">
+          <div class="profile-name">Admin User</div>
+          <div class="profile-email">admin@tasf.com</div>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="cerrarSesion()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; margin-right: 6px; vertical-align: text-bottom;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>Cerrar Sesión</button>
+    </div>
+  </aside>
 
   <!-- Contenido Principal -->
-  <div class="container" style="padding-top: 40px;">
+  <div class="main-wrapper">
+    <div class="container">
     <!-- Sección Hero -->
-    <div class="hero-section fade-in">
-      <div class="hero-content">
-        <div class="hero-icon">✈️</div>
-        <h1 class="hero-title">Tasf.B2B</h1>
-        <p class="hero-subtitle">
-          Sistema Integral de Gestión de Equipajes para Transporte Aéreo Internacional
-        </p>
-        <p style="color: var(--text-muted); font-size: 14px;">
-          Registra, planifica y monitorea equipajes en tiempo real a través de América, Europa y Asia
-        </p>
+    <div class="card fade-in">
+      <h1 style="font-size: 32px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px;">
+        ✈️ Bienvenido a Loadly
+      </h1>
+      <p style="color: var(--text-secondary); font-size: 15px; line-height: 1.8; margin-bottom: 24px;">
+        Sistema integral de gestión de equipajes para transporte aéreo internacional. Usa el menú lateral para acceder a las funcionalidades disponibles.
+      </p>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
+        <a href="pantallas/registro-maletas.html" style="text-decoration: none;">
+          <div style="padding: 16px; background-color: var(--bg-tertiary); border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.backgroundColor='var(--bg-secondary)'; this.style.borderColor='var(--accent-blue)';" onmouseout="this.style.backgroundColor='var(--bg-tertiary)'; this.style.borderColor='var(--border-color)';" style="border: 1px solid var(--border-color);">
+            <div style="font-size: 32px; margin-bottom: 8px;">📦</div>
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 14px;">Registrar Maletas</div>
+          </div>
+        </a>
+        <a href="pantallas/mapa-principal.html" style="text-decoration: none;">
+          <div style="padding: 16px; background-color: var(--bg-tertiary); border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.backgroundColor='var(--bg-secondary)'; this.style.borderColor='var(--accent-blue)';" onmouseout="this.style.backgroundColor='var(--bg-tertiary)'; this.style.borderColor='var(--border-color)';" style="border: 1px solid var(--border-color);">
+            <div style="font-size: 32px; margin-bottom: 8px;">🗺️</div>
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 14px;">Monitoreo</div>
+          </div>
+        </a>
+        <a href="pantallas/detalle-maleta.html" style="text-decoration: none;">
+          <div style="padding: 16px; background-color: var(--bg-tertiary); border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.backgroundColor='var(--bg-secondary)'; this.style.borderColor='var(--accent-blue)';" onmouseout="this.style.backgroundColor='var(--bg-tertiary)'; this.style.borderColor='var(--border-color)';" style="border: 1px solid var(--border-color);">
+            <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 14px;">Rastreo</div>
+          </div>
+        </a>
+        <a href="pantallas/gestion-vuelos.html" style="text-decoration: none;">
+          <div style="padding: 16px; background-color: var(--bg-tertiary); border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.backgroundColor='var(--bg-secondary)'; this.style.borderColor='var(--accent-blue)';" onmouseout="this.style.backgroundColor='var(--bg-tertiary)'; this.style.borderColor='var(--border-color)';" style="border: 1px solid var(--border-color);">
+            <div style="font-size: 32px; margin-bottom: 8px;">✈️</div>
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 14px;">Gestión de Vuelos</div>
+          </div>
+        </a>
       </div>
     </div>
 
     <!-- Estadísticas Rápidas -->
-    <div class="quick-stats fade-in" style="animation-delay: 0.1s;">
-      <div class="quick-stat">
-        <div class="quick-stat-value">50+</div>
-        <div class="quick-stat-label">Líneas Aéreas</div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-bottom: 40px;">
+      <div class="stat-card">
+        <h3>Maletas en Sistema</h3>
+        <div class="value">2,458</div>
       </div>
-      <div class="quick-stat">
-        <div class="quick-stat-value">21</div>
-        <div class="quick-stat-label">Ciudades Globales</div>
+      <div class="stat-card">
+        <h3>Vuelos Activos</h3>
+        <div class="value">42</div>
       </div>
-      <div class="quick-stat">
-        <div class="quick-stat-value">100K+</div>
-        <div class="quick-stat-label">Maletas al Mes</div>
+      <div class="stat-card">
+        <h3>Almacenes</h3>
+        <div class="value">15</div>
       </div>
-      <div class="quick-stat">
-        <div class="quick-stat-value">98.3%</div>
-        <div class="quick-stat-label">Puntualidad</div>
-      </div>
-    </div>
-
-    <!-- Características Principales -->
-    <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 40px; text-align: center; color: var(--text-primary);">
-      Funcionalidades Principales
-    </h2>
-
-    <div class="features-grid fade-in" style="animation-delay: 0.2s;">
-      <!-- Feature 1: Registro -->
-      <a href="pantallas/registro-maletas.html" style="text-decoration: none; color: inherit;">
-        <div class="feature-card">
-          <div class="feature-icon">📦</div>
-          <h3 class="feature-title">Registro de Maletas</h3>
-          <p class="feature-description">
-            Registra maletas de líneas aéreas con origen, destino y cantidad. Gestión automática de capacidades.
-          </p>
-          <div class="feature-link">Acceder →</div>
-        </div>
-      </a>
-
-      <!-- Feature 2: Simulación -->
-      <a href="pantallas/simulacion-config.html" style="text-decoration: none; color: inherit;">
-        <div class="feature-card">
-          <div class="feature-icon">⚙️</div>
-          <h3 class="feature-title">Configuración de Simulación</h3>
-          <p class="feature-description">
-            Crea simulaciones de período, operación día a día o hasta el colapso con parámetros personalizables.
-          </p>
-          <div class="feature-link">Configurar →</div>
-        </div>
-      </a>
-
-      <!-- Feature 3: Monitoreo -->
-      <a href="pantallas/mapa-principal.html" style="text-decoration: none; color: inherit;">
-        <div class="feature-card">
-          <div class="feature-icon">🗺️</div>
-          <h3 class="feature-title">Monitoreo en Tiempo Real</h3>
-          <p class="feature-description">
-            Visualiza en mapa interactivo con ciclo día/noche, rutas animadas y estadísticas en vivo.
-          </p>
-          <div class="feature-link">Monitorear →</div>
-        </div>
-      </a>
-
-      <!-- Feature 4: Detalle -->
-      <a href="pantallas/detalle-maleta.html" style="text-decoration: none; color: inherit;">
-        <div class="feature-card">
-          <div class="feature-icon">🔍</div>
-          <h3 class="feature-title">Detalle de Maleta</h3>
-          <p class="feature-description">
-            Consulta el historial completo, ruta, plazo de entrega y eventos de cada maleta individual.
-          </p>
-          <div class="feature-link">Buscar →</div>
-        </div>
-      </a>
-
-      <!-- Feature 5: Planificador -->
-      <div class="feature-card">
-        <div class="feature-icon">🧠</div>
-        <h3 class="feature-title">Planificador Inteligente</h3>
-        <p class="feature-description">
-          Algoritmos metaheurísticos que optimizan rutas, cumplen plazos y se replantean ante cancelaciones.
-        </p>
-        <div style="color: var(--text-muted); font-size: 12px;">Componente de backend</div>
-      </div>
-
-      <!-- Feature 6: Semáforo -->
-      <div class="feature-card">
-        <div class="feature-icon">🚦</div>
-        <h3 class="feature-title">Indicadores de Semáforo</h3>
-        <p class="feature-description">
-          Verde, Ámbar y Rojo para estado de almacenes. Umbrales parametrizables según operación.
-        </p>
-        <div style="color: var(--text-muted); font-size: 12px;">En todas las vistas</div>
+      <div class="stat-card">
+        <h3>Puntualidad</h3>
+        <div class="value">98.5%</div>
       </div>
     </div>
 
-    <!-- Sección de Información -->
-    <div class="card fade-in" style="margin-top: 60px; margin-bottom: 40px; animation-delay: 0.3s;">
-      <h2 style="font-size: 22px; font-weight: 700; margin-bottom: 24px; color: var(--text-primary);">
+    <!-- Información Rápida -->
+    <div class="card fade-in">
+      <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 20px; color: var(--text-primary);">
         ℹ️ Información del Sistema
       </h2>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 24px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; font-size: 13px; line-height: 1.8; color: var(--text-secondary);">
         <div>
-          <h3 style="color: var(--accent-blue); margin-bottom: 12px; font-size: 16px;">🌍 Cobertura Global</h3>
-          <ul style="color: var(--text-secondary); font-size: 14px; line-height: 2;">
-            <li>✓ América: Lima, Miami, São Paulo, Ciudad de México, Nueva York, Atlanta</li>
+          <strong style="color: var(--text-primary);">Cobertura Global:</strong>
+          <ul style="margin-top: 8px; margin-left: 16px;">
+            <li>✓ América: Lima, Miami, São Paulo, México, NY, Atlanta</li>
             <li>✓ Europa: Frankfurt, Madrid, Londres, París, Ámsterdam</li>
             <li>✓ Asia: Tokio, Singapur, Hong Kong, Dubái, Bangkok</li>
           </ul>
         </div>
-
         <div>
-          <h3 style="color: var(--accent-blue); margin-bottom: 12px; font-size: 16px;">⏱️ Plazos de Entrega</h3>
-          <ul style="color: var(--text-secondary); font-size: 14px; line-height: 2;">
-            <li>✓ Mismo continente: 1 día máximo</li>
-            <li>✓ Diferente continente: 2 días máximo</li>
-            <li>✓ Traslado entre ciudades: 0.5-1 día según continente</li>
+          <strong style="color: var(--text-primary);">Plazos de Entrega:</strong>
+          <ul style="margin-top: 8px; margin-left: 16px;">
+            <li>✓ Mismo continente: 1 día</li>
+            <li>✓ Diferente continente: 2 días</li>
+            <li>✓ Traslado local: 0.5-1 día</li>
           </ul>
         </div>
-
         <div>
-          <h3 style="color: var(--accent-blue); margin-bottom: 12px; font-size: 16px;">📊 Capacidades</h3>
-          <ul style="color: var(--text-secondary); font-size: 14px; line-height: 2;">
-            <li>✓ Vuelos mismo continente: 150-250 maletas</li>
-            <li>✓ Vuelos distinto continente: 150-400 maletas</li>
-            <li>✓ Almacenes aeropuertos: 500-800 maletas</li>
+          <strong style="color: var(--text-primary);">Capacidades:</strong>
+          <ul style="margin-top: 8px; margin-left: 16px;">
+            <li>✓ Vuelos continental: 150-250 maletas</li>
+            <li>✓ Vuelos intercontinental: 250-400 maletas</li>
+            <li>✓ Almacenes: 500-800 maletas</li>
           </ul>
         </div>
       </div>
     </div>
-
-    <!-- CTA Section -->
-    <div class="cta-section fade-in" style="animation-delay: 0.4s;">
-      <h2 class="cta-title">¿Listo para comenzar?</h2>
-      <p class="cta-description">
-        Accede a cualquiera de los módulos principales para registrar maletas, configurar simulaciones o monitorear operaciones en tiempo real.
-      </p>
-      <div class="cta-buttons">
-        <a href="pantallas/registro-maletas.html" class="btn btn-primary">
-          Ir a Registro de Maletas
-        </a>
-        <a href="pantallas/mapa-principal.html" class="btn btn-secondary">
-          Ver Monitoreo
-        </a>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <footer style="text-align: center; margin-top: 60px; padding-top: 40px; border-top: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px;">
-      <p>
-        Tasf.B2B © 2026 | Sistema de Gestión de Equipajes Aéreos Internacionales
-      </p>
-      <p>
-        Tecnología: HTML5 • CSS3 • JavaScript Vanilla | Tema: Dark Mode con Acentos Azul Neón
-      </p>
-    </footer>
+  </div>
   </div>
 
   <script src="js/app.js"></script>

@@ -261,6 +261,115 @@ const RouteAnimation = {
     const animate = () => {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
+      element.style.transform = `translateX(${progress * 100}%)`;
+      if (progress < 1) requestAnimationFrame(animate);
+    };
+    animate();
+  }
+};
+
+// ============================================
+// SIDEBAR - GESTIÓN DE NAVEGACIÓN
+// ============================================
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Inicializar sidebar
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const sidebar = document.getElementById('sidebar');
+  const mainWrapper = document.querySelector('.main-wrapper');
+
+  if (sidebarToggle && sidebar) {
+    // Restaurar estado guardado
+    const sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    if (sidebarCollapsed) {
+      sidebar.classList.add('collapsed');
+      if (mainWrapper) mainWrapper.classList.add('sidebar-collapsed');
+    }
+
+    // Toggle del sidebar
+    sidebarToggle.addEventListener('click', function() {
+      sidebar.classList.toggle('collapsed');
+      if (mainWrapper) mainWrapper.classList.toggle('sidebar-collapsed');
+      
+      // Guardar estado
+      const isCollapsed = sidebar.classList.contains('collapsed');
+      localStorage.setItem('sidebarCollapsed', isCollapsed ? 'true' : 'false');
+    });
+  }
+
+  // Cerrar sesión
+  window.cerrarSesion = function() {
+    if (confirm('¿Deseas cerrar sesión?')) {
+      localStorage.clear();
+      window.location.href = '../index.html';
+    }
+  };
+});
+
+// ============================================
+// NOTIFICACIONES TOAST
+// ============================================
+
+function showNotification(message, type = 'info', duration = 4000) {
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.animation = 'slideUp 0.3s ease-out forwards';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// ============================================
+// VALIDACIÓN DE CÓDIGOS DE MALETAS
+// ============================================
+
+function validateBaggageCode(code) {
+  // Código especial para pruebas de error
+  if (code === '11111') {
+    showNotification('⚠️ Código de maleta inválido o no encontrado', 'error', 5000);
+    return false;
+  }
+  return true;
+}
+
+// ============================================
+// ESTADÍSTICAS EN TIEMPO REAL
+// ============================================
+
+function actualizarEstadisticas() {
+  const stats = {
+    'enTransito': Math.floor(Math.random() * 500) + 100,
+    'entregadas': Math.floor(Math.random() * 1000) + 500,
+    'espera': Math.floor(Math.random() * 200) + 50,
+    'retrasadas': Math.floor(Math.random() * 50) + 10
+  };
+
+  Object.keys(stats).forEach(key => {
+    const el = document.querySelector(`[data-stat="${key}"]`);
+    if (el) {
+      // Casos especiales para rutas y almacenes
+      if (key === 'espera' && el.id === 'routesValue') {
+        const numberSpan = el.querySelector('span:nth-child(2)');
+        if (numberSpan) {
+          numberSpan.textContent = (1196 + Math.floor(Math.random() * 100) - 50);
+        }
+      } else if (key === 'retrasadas' && el.id === 'warehouseValue') {
+        const numberSpan = el.querySelector('span:nth-child(2)');
+        if (numberSpan) {
+          numberSpan.textContent = (23 + Math.floor(Math.random() * 10) - 5) + ' almacenes';
+        }
+      } else {
+        el.textContent = stats[key];
+      }
+    }
+  });
+}
+
+// Auto-actualizar estadísticas cada 3 segundos
+setInterval(actualizarEstadisticas, 3000);
 
       element.style.left = (progress * 100) + '%';
       element.style.opacity = progress === 1 ? 0 : 1;

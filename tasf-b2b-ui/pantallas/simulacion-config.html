@@ -3,34 +3,86 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nueva Simulación - Tasf.B2B</title>
+  <title>Nueva Simulación - Loadly</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../css/estilo.css">
 </head>
 <body>
-  <!-- Header -->
-  <header class="header">
-    <div class="header-logo">
-      <div class="icon">✈️</div>
-      <span>Tasf.B2B</span>
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="icon"><img src="../logo.svg" alt="Loadly Logo"></div>
+        <span class="logo-text">Loadly</span>
+      </div>
+      <button class="sidebar-toggle" id="sidebarToggle" title="Desplegar/Contraer">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <nav class="header-nav">
-      <a href="../index.html">Inicio</a>
-      <a href="registro-maletas.html">Registrar Maletas</a>
-      <a href="simulacion-config.html" style="color: var(--accent-blue); font-weight: 600;">Nueva Simulación</a>
-      <a href="mapa-principal.html">Monitoreo</a>
-      <a href="detalle-maleta.html">Búsqueda</a>
+    <nav class="sidebar-nav">
+      <a href="../index.html" class="nav-item">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-text">Inicio</span>
+      </a>
+      <a href="registro-maletas.html" class="nav-item">
+        <span class="nav-icon">📦</span>
+        <span class="nav-text">Registrar Maletas</span>
+      </a>
+      <a href="mapa-principal.html" class="nav-item">
+        <span class="nav-icon">🗺️</span>
+        <span class="nav-text">Monitoreo</span>
+      </a>
+      <a href="detalle-maleta.html" class="nav-item">
+        <span class="nav-icon">🔍</span>
+        <span class="nav-text">Rastreo</span>
+      </a>
+      <a href="gestion-vuelos.html" class="nav-item">
+        <span class="nav-icon">✈️</span>
+        <span class="nav-text">Gestión de Vuelos</span>
+      </a>
+      <a href="aeropuertos.html" class="nav-item">
+        <img src="../almacen.svg" alt="Almacenes" class="nav-icon" style="width: 20px; height: 20px;">
+        <span class="nav-text">Almacenes</span>
+      </a>
     </nav>
-  </header>
+    
+    <!-- Perfil y Cerrar Sesión -->
+    <div class="sidebar-footer">
+      <div class="profile-section">
+        <div class="profile-avatar"><svg width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
+        <div class="profile-info">
+          <div class="profile-name">Admin User</div>
+          <div class="profile-email">admin@tasf.com</div>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="cerrarSesion()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; margin-right: 6px; vertical-align: text-bottom;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>Cerrar Sesión</button>
+    </div>
+  </aside>
 
   <!-- Contenido Principal -->
-  <div class="container">
-    <button class="btn btn-primary" onclick="abrirModalSimulacion()" style="margin-bottom: 24px;">
-      + Nueva Simulación
-    </button>
+  <div class="main-wrapper">
+    <div class="container">
+      <!-- Título Principal -->
+      <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 32px; color: var(--text-primary);">
+        ⚙️ Nueva Simulación
+      </h1>
 
-    <!-- Historial de Simulaciones -->
-    <div class="card fade-in">
-      <h2 style="margin-bottom: 20px; font-size: 20px; color: var(--text-primary);">Historial de Simulaciones</h2>
+      <!-- Sección de Acciones -->
+      <div style="margin-bottom: 32px;">
+        <button class="btn btn-primary" onclick="abrirModalSimulacion()">
+          + Nueva Simulación
+        </button>
+      </div>
+
+      <!-- Sección: Historial de Simulaciones -->
+      <div class="card fade-in">
+        <h2 style="margin-bottom: 20px; font-size: 24px; color: var(--text-primary);">📋 Historial de Simulaciones</h2>
 
       <div class="table-wrapper">
         <table>
@@ -98,9 +150,9 @@
       </div>
     </div>
 
-    <!-- Información de Simulaciones -->
+    <!-- Sección: Tipos de Simulación -->
     <div class="card fade-in" style="margin-top: 32px; animation-delay: 0.1s;">
-      <h3 style="color: var(--accent-blue); margin-bottom: 20px;">📊 Tipos de Simulación Disponibles</h3>
+      <h2 style="color: var(--accent-blue); margin-bottom: 20px; font-size: 24px;">📊 Tipos de Simulación Disponibles</h2>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
         <!-- Simulación de Período -->
@@ -140,9 +192,8 @@
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Modal del Wizard de Simulación -->
+    <!-- Modal del Wizard de Simulación -->
   <div id="modalOverlay" class="modal-overlay" style="display: none;">
     <div class="modal" style="max-width: 700px;">
       <!-- Modal Header -->
@@ -348,6 +399,7 @@
         </button>
       </div>
     </div>
+  </div>
   </div>
 
   <script src="../js/app.js"></script>

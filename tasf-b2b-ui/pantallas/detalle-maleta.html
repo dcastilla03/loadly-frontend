@@ -3,49 +3,36 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Detalle de Maleta - Tasf.B2B</title>
+  <title>Monitoreo en Tiempo Real - Tasf.B2B</title>
   <link rel="stylesheet" href="../css/estilo.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
-    .suitcase-header {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      padding: 24px;
-      margin-bottom: 28px;
-      box-shadow: var(--shadow);
+
+
+
+    .topbar {
+      background-color: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      border-radius: 12px;
     }
 
-    .suitcase-code {
-      font-size: 11px;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      margin-bottom: 8px;
-      font-weight: 600;
+    .topbar-info {
+      display: flex;
+      gap: 32px;
     }
 
-    .suitcase-id {
-      font-size: 32px;
-      font-weight: 700;
-      color: var(--accent-blue);
-      text-shadow: none;
-      text-shadow: var(--glow-blue);
-      margin-bottom: 20px;
-    }
-
-    .suitcase-info-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 20px;
-    }
-
-    .suitcase-info-item {
+    .topbar-item {
       display: flex;
       flex-direction: column;
       gap: 4px;
     }
 
-    .suitcase-info-label {
+    .topbar-label {
       font-size: 11px;
       color: var(--text-secondary);
       text-transform: uppercase;
@@ -53,454 +40,509 @@
       font-weight: 600;
     }
 
-    .suitcase-info-value {
+    .topbar-value {
       font-size: 16px;
-      color: var(--text-primary);
-      font-weight: 600;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-shadow: var(--glow-blue);
     }
 
-    .timeline-horizontal {
-      background-color: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      padding: 28px 20px;
-      margin-bottom: 28px;
-      overflow-x: auto;
-    }
-
-    .timeline-track {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-width: max-content;
-    }
-
-    .timeline-node {
-      display: flex;
-      flex-direction: column;
+    .status-badge {
+      display: inline-flex;
       align-items: center;
       gap: 8px;
-      position: relative;
-      flex-shrink: 0;
-      width: 100px;
-    }
-
-    .timeline-node::after {
-      content: '';
-      position: absolute;
-      width: 40px;
-      height: 2px;
-      background: linear-gradient(90deg, var(--border-color) 0%, transparent 100%);
-      left: 100%;
-      top: 20px;
-    }
-
-    .timeline-node:last-child::after {
-      display: none;
-    }
-
-    .timeline-circle {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      border: 3px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      padding: 8px 16px;
       background-color: var(--bg-tertiary);
-      font-size: 18px;
-      transition: all 0.3s ease;
-      position: relative;
-      z-index: 2;
-    }
-
-    .timeline-node.completed .timeline-circle {
-      background-color: var(--success-green);
-      border-color: var(--success-green);
-      color: white;
-      box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
-    }
-
-    .timeline-node.active .timeline-circle {
-      background-color: var(--warning-amber);
-      border-color: var(--warning-amber);
-      color: white;
-      box-shadow: 0 0 20px rgba(245, 158, 11, 0.8);
-      animation: pulse 2s infinite;
-    }
-
-    .timeline-node.pending .timeline-circle {
-      background-color: transparent;
-      border-color: var(--border-color);
-      color: var(--text-muted);
-    }
-
-    .timeline-label {
+      border-radius: 6px;
       font-size: 12px;
-      color: var(--text-secondary);
-      text-align: center;
-      font-weight: 500;
-      max-width: 90px;
-      word-wrap: break-word;
-    }
-
-    .timeline-node.completed .timeline-label {
-      color: var(--success-green);
       font-weight: 600;
-    }
-
-    .timeline-node.active .timeline-label {
-      color: var(--warning-amber);
-      font-weight: 600;
-    }
-
-    .info-cards-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-      margin-bottom: 32px;
-    }
-
-    .info-card {
-      background-color: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 20px;
-      transition: all 0.3s ease;
-    }
-
-    .info-card:hover {
-      border-color: var(--accent-blue);
-      box-shadow: var(--glow-blue);
-    }
-
-    .info-card h4 {
-      font-size: 12px;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 12px;
-      font-weight: 600;
-    }
-
-    .info-card-value {
-      font-size: 18px;
-      font-weight: 700;
       color: var(--text-primary);
-      margin-bottom: 8px;
     }
 
-    .info-card-subtext {
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-
-    .status-indicator {
-      display: inline-block;
+    .status-badge .dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      margin-right: 8px;
-    }
-
-    .status-indicator.success {
       background-color: var(--success-green);
-      box-shadow: 0 0 8px var(--success-green);
+      animation: blink 1s infinite;
     }
 
-    .status-indicator.warning {
-      background-color: var(--warning-amber);
-      box-shadow: 0 0 8px var(--warning-amber);
+    @keyframes blink {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.3;
+      }
     }
 
-    .status-indicator.danger {
-      background-color: var(--danger-red);
-      box-shadow: 0 0 8px var(--danger-red);
+    .sidebar-right {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
     }
 
-    .timeline-on-time {
-      color: var(--success-green);
+    .map-content {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 24px;
     }
 
-    .timeline-at-risk {
-      color: var(--danger-red);
-    }
-
-    .search-section {
-      background-color: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 24px;
-      margin-bottom: 32px;
-    }
-
-    .search-input-group {
+    .map-card {
+      min-height: 500px;
       display: flex;
-      gap: 12px;
+      flex-direction: column;
+      width: 100%;
     }
 
-    .search-input-group input {
-      flex: 1;
+    #leafletMap {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background: white;
+    }
+
+    @media (max-width: 1024px) {
+      .map-content {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+
+      .topbar {
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .topbar-info {
+        flex-direction: column;
+        gap: 16px;
+        width: 100%;
+      }
+
+      .sidebar-right {
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      }
     }
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <header class="header">
-    <div class="header-logo">
-      <div class="icon">✈️</div>
-      <span>Tasf.B2B</span>
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="icon"><img src="../logo.svg" alt="Loadly Logo"></div>
+        <span class="logo-text">Loadly</span>
+      </div>
+      <button class="sidebar-toggle" id="sidebarToggle" title="Desplegar/Contraer">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <nav class="header-nav">
-      <a href="../index.html">Inicio</a>
-      <a href="registro-maletas.html">Registrar Maletas</a>
-      <a href="simulacion-config.html">Nueva Simulación</a>
-      <a href="mapa-principal.html">Monitoreo</a>
-      <a href="detalle-maleta.html" style="color: var(--accent-blue); font-weight: 600;">Búsqueda</a>
+    <nav class="sidebar-nav">
+      <a href="../index.html" class="nav-item">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-text">Inicio</span>
+      </a>
+      <a href="registro-maletas.html" class="nav-item">
+        <span class="nav-icon">📦</span>
+        <span class="nav-text">Registrar Maletas</span>
+      </a>
+      <a href="mapa-principal.html" class="nav-item active">
+        <span class="nav-icon">🗺️</span>
+        <span class="nav-text">Monitoreo</span>
+      </a>
+      <a href="detalle-maleta.html" class="nav-item">
+        <span class="nav-icon">🔍</span>
+        <span class="nav-text">Rastreo</span>
+      </a>
+      <a href="gestion-vuelos.html" class="nav-item">
+        <span class="nav-icon">✈️</span>
+        <span class="nav-text">Gestión de Vuelos</span>
+      </a>
+      <a href="aeropuertos.html" class="nav-item">
+        <img src="../almacen.svg" alt="Almacenes" class="nav-icon" style="width: 20px; height: 20px;">
+        <span class="nav-text">Almacenes</span>
+      </a>
     </nav>
-  </header>
+    <div class="sidebar-footer">
+      <div class="profile-section">
+        <div class="profile-avatar"><svg width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
+        <div class="profile-info">
+          <div class="profile-name">Admin User</div>
+          <div class="profile-email">admin@tasf.com</div>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="cerrarSesion()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; margin-right: 6px; vertical-align: text-bottom;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>Cerrar Sesión</button>
+    </div>
+  </aside>
 
   <!-- Contenido Principal -->
+  <div class="main-wrapper">
+    <div class="container">
   <div class="container">
-    <!-- Sección de Búsqueda -->
-    <div class="search-section fade-in">
-      <h2 style="margin-bottom: 16px; font-size: 18px; color: var(--text-primary);">🔍 Buscar Maleta</h2>
-      <div class="search-input-group">
-        <input type="text" placeholder="Ingresa código de maleta (ej: MAL-01042)..." value="MAL-01042">
-        <button class="btn btn-primary">Buscar</button>
-      </div>
-    </div>
-
-    <!-- Header de la Maleta -->
-    <div class="suitcase-header fade-in">
-      <div class="suitcase-code">Código de Maleta</div>
-      <div class="suitcase-id">📦 MAL-01042</div>
-
-      <div class="suitcase-info-grid">
-        <div class="suitcase-info-item">
-          <span class="suitcase-info-label">Aerolínea</span>
-          <span class="suitcase-info-value">LATAM Airlines</span>
+    <!-- Top Bar con Información -->
+    <div class="topbar">
+      <div class="topbar-info">
+        <div class="topbar-item">
+          <span class="topbar-label">Estado de Simulación</span>
+          <div class="status-badge">
+            <span class="dot"></span>
+            En Ejecución
+          </div>
         </div>
-        <div class="suitcase-info-item">
-          <span class="suitcase-info-label">Aeropuerto Origen</span>
-          <span class="suitcase-info-value">Lima (LIM)</span>
+        <div class="topbar-item">
+          <span class="topbar-label">Progreso</span>
+          <span class="topbar-value">Día 3 de 5</span>
         </div>
-        <div class="suitcase-info-item">
-          <span class="suitcase-info-label">Aeropuerto Destino</span>
-          <span class="suitcase-info-value">Tokio (NRT)</span>
-        </div>
-        <div class="suitcase-info-item">
-          <span class="suitcase-info-label">Tipo de Ruta</span>
-          <span class="suitcase-info-value" style="color: var(--warning-amber);">Multi-continente</span>
+        <div class="topbar-item">
+          <span class="topbar-label">Hora Simulada</span>
+          <span class="topbar-value" id="simulatedTime">10:30 AM</span>
         </div>
       </div>
     </div>
 
-    <!-- Timeline Horizontal de Ruta -->
-    <div class="timeline-horizontal fade-in" style="animation-delay: 0.1s;">
-      <h3 style="margin-bottom: 24px; color: var(--text-primary); font-size: 16px;">Ruta Planificada</h3>
-
-      <div class="timeline-track">
-        <!-- Nodo 1: Lima (Completado) -->
-        <div class="timeline-node completed">
-          <div class="timeline-circle">✓</div>
-          <div class="timeline-label">Lima</div>
+    <!-- Mapa y Sidebar -->
+    <div class="map-content">
+        <div class="card map-card" style="padding: 0; overflow: hidden; position: relative; flex: 1;">
+          <div id="leafletMap"></div>
         </div>
 
-        <!-- Nodo 2: Miami (Completado) -->
-        <div class="timeline-node completed">
-          <div class="timeline-circle">✓</div>
-          <div class="timeline-label">Miami</div>
+      <!-- Sidebar Derecho con Estadísticas -->
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="stat-card">
+          <h3>Maletas en Tránsito</h3>
+          <div class="value" data-stat="enTransito">842</div>
         </div>
 
-        <!-- Nodo 3: São Paulo (Completado) -->
-        <div class="timeline-node completed">
-          <div class="timeline-circle">✓</div>
-          <div class="timeline-label">São Paulo</div>
+        <div class="stat-card">
+          <h3>Entregadas a Tiempo</h3>
+          <div class="value" style="color: var(--success-green);" data-stat="entregadas">1,284</div>
         </div>
 
-        <!-- Nodo 4: Frankfurt (Completado) -->
-        <div class="timeline-node completed">
-          <div class="timeline-circle">✓</div>
-          <div class="timeline-label">Frankfurt</div>
+        <div class="stat-card">
+          <h3>En Espera</h3>
+          <div class="value" style="color: var(--warning-amber);" data-stat="espera">142</div>
         </div>
 
-        <!-- Nodo 5: Dubái (Actual) -->
-        <div class="timeline-node active">
-          <div class="timeline-circle">✈️</div>
-          <div class="timeline-label">Dubái</div>
-        </div>
-
-        <!-- Nodo 6: Singapur (Pendiente) -->
-        <div class="timeline-node pending">
-          <div class="timeline-circle">7</div>
-          <div class="timeline-label">Singapur</div>
-        </div>
-
-        <!-- Nodo 7: Tokio (Pendiente) -->
-        <div class="timeline-node pending">
-          <div class="timeline-circle">8</div>
-          <div class="timeline-label">Tokio</div>
+        <div class="stat-card">
+          <h3>Retrasadas</h3>
+          <div class="value" style="color: var(--danger-red);" data-stat="retrasadas">23</div>
         </div>
       </div>
     </div>
 
-    <!-- Tarjetas de Información Importantes -->
-    <div class="info-cards-grid fade-in" style="animation-delay: 0.2s;">
-      <!-- Ubicación Actual -->
-      <div class="info-card">
-        <h4>📍 Ubicación Actual</h4>
-        <div class="info-card-value">Dubái (DXB)</div>
-        <div class="info-card-subtext">
-          Almacén - Cuello de botella identificado
-        </div>
-        <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary);">
-          <span class="status-indicator warning"></span>En tránsito hacia Singapur
-        </div>
-      </div>
+    <!-- Event Log -->
+    <div class="card fade-in" style="margin-top: 24px; animation-delay: 0.1s;">
+      <h3 style="margin-bottom: 16px; font-size: 16px; color: var(--text-primary);">📋 Registro de Eventos (Últimas 24 horas)</h3>
 
-      <!-- Plazo de Entrega -->
-      <div class="info-card">
-        <h4>⏰ Plazo de Entrega</h4>
-        <div class="info-card-value">29-Mar-2026</div>
-        <div class="info-card-subtext">
-          11:59 PM
-        </div>
-        <div style="margin-top: 12px; font-size: 12px; color: var(--success-green);">
-          <span class="status-indicator success"></span>A tiempo
-        </div>
-      </div>
-
-      <!-- Tiempo Restante -->
-      <div class="info-card">
-        <h4>⏳ Tiempo Restante</h4>
-        <div class="info-card-value timeline-on-time">34 horas</div>
-        <div class="info-card-subtext">
-          Margen de seguridad: 16 horas
-        </div>
-        <div style="margin-top: 12px; font-size: 12px; color: var(--success-green);">
-          <span class="status-indicator success"></span>En buen estado
-        </div>
-      </div>
-
-      <!-- Estado General -->
-      <div class="info-card">
-        <h4>📊 Estado General</h4>
-        <div class="info-card-value">Optimal</div>
-        <div class="info-card-subtext">
-          61% del viaje completado
-        </div>
-        <div style="margin-top: 12px; font-size: 12px;">
-          <span class="status-indicator success"></span><span style="color: var(--text-secondary);">No hay problemas detectados</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Historial de Eventos de la Maleta -->
-    <div class="card fade-in" style="animation-delay: 0.3s;">
-      <h3 style="margin-bottom: 16px; font-size: 16px; color: var(--text-primary);">📋 Historial de Eventos</h3>
-
-      <div class="event-log" style="max-height: 400px;">
+      <div class="event-log" style="max-height: 250px;">
         <div class="event-item">
-          <span class="event-time">2026-03-28 16:45</span>
+          <span class="event-time">14:28</span>
           <span class="event-icon success"></span>
-          <span class="event-text">Llegó en Dubái - Almacén en cuello de botella (capacidad: 78%)</span>
+          <span class="event-text">Maleta <strong>#1042</strong> entregada en Frankfurt</span>
         </div>
-
         <div class="event-item">
-          <span class="event-time">2026-03-28 09:30</span>
-          <span class="event-icon success"></span>
-          <span class="event-text">Despegó de Frankfurt en vuelo FRA-DXB-001</span>
-        </div>
-
-        <div class="event-item">
-          <span class="event-time">2026-03-28 03:20</span>
-          <span class="event-icon success"></span>
-          <span class="event-text">Llegó en Frankfurt - Sin demoras, listo para transferencia</span>
-        </div>
-
-        <div class="event-item">
-          <span class="event-time">2026-03-27 18:15</span>
-          <span class="event-icon success"></span>
-          <span class="event-text">Despegó de São Paulo en vuelo SP001-FRA</span>
-        </div>
-
-        <div class="event-item">
-          <span class="event-time">2026-03-27 12:00</span>
-          <span class="event-icon success"></span>
-          <span class="event-text">Llegó en São Paulo - Cambio de ruta confirmado</span>
-        </div>
-
-        <div class="event-item">
-          <span class="event-time">2026-03-27 06:30</span>
+          <span class="event-time">14:15</span>
           <span class="event-icon warning"></span>
-          <span class="event-text">Replanificación: Vuelo Miami-São Paulo retrasado 2 horas</span>
+          <span class="event-text">Vuelo cancelado: <strong>SNG→TOK</strong>, replanificando ruta</span>
         </div>
-
         <div class="event-item">
-          <span class="event-time">2026-03-27 03:00</span>
+          <span class="event-time">13:52</span>
           <span class="event-icon success"></span>
-          <span class="event-text">Despegó de Miami en vuelo MIA-SP-001</span>
+          <span class="event-text">Lote de 50 maletas llegó a Miami</span>
         </div>
-
         <div class="event-item">
-          <span class="event-time">2026-03-26 22:10</span>
-          <span class="event-icon success"></span>
-          <span class="event-text">Llegó en Miami - Aduanas y seguridad completadas</span>
+          <span class="event-time">13:30</span>
+          <span class="event-icon warning"></span>
+          <span class="event-text">Almacén en Dubái alcanzando capacidad (85%)</span>
         </div>
-
         <div class="event-item">
-          <span class="event-time">2026-03-26 16:45</span>
+          <span class="event-time">13:12</span>
           <span class="event-icon success"></span>
-          <span class="event-text">Despegó de Lima en vuelo LIM-MIA-002</span>
+          <span class="event-text">Vuelo <strong>TOK001</strong> desplegó con 320 maletas</span>
         </div>
-
         <div class="event-item">
-          <span class="event-time">2026-03-26 09:00</span>
+          <span class="event-time">12:45</span>
           <span class="event-icon success"></span>
-          <span class="event-text">Recibida por Tasf.B2B en Lima - Preparación para envío</span>
+          <span class="event-text">Maleta <strong>#890</strong> llegó a São Paulo</span>
         </div>
-
         <div class="event-item">
-          <span class="event-time">2026-03-25 18:30</span>
+          <span class="event-time">12:30</span>
+          <span class="event-icon error"></span>
+          <span class="event-text">Retraso detectado: Maleta <strong>#756</strong> puede perder plazo</span>
+        </div>
+        <div class="event-item">
+          <span class="event-time">12:00</span>
           <span class="event-icon success"></span>
-          <span class="event-text">Registro creado - Aerolínea: LATAM Airlines</span>
+          <span class="event-text">Simulación iniciada: Período 5 días</span>
         </div>
       </div>
     </div>
 
     <!-- Información Adicional -->
-    <div class="card fade-in" style="margin-top: 32px; animation-delay: 0.4s; border-left: 4px solid var(--success-green);">
-      <h3 style="color: var(--success-green); margin-bottom: 16px;">✓ Análisis de Desempeño</h3>
+    <div class="card fade-in" style="margin-top: 24px; animation-delay: 0.2s;">
+      <h3 style="color: var(--accent-blue); margin-bottom: 16px;">ℹ️ Métricas de Rendimiento</h3>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
         <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
-          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tiempo Total Planificado</small>
-          <div style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 8px;">48 horas</div>
-          <small style="color: var(--text-secondary);">Desde Lima a Tokio</small>
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tasa de Puntualidad</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--success-green); margin-top: 8px;">98.3%</div>
+          <small style="color: var(--text-muted);">↑ 2.1% respecto a ayer</small>
         </div>
 
         <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
-          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tiempo Transcurrido</small>
-          <div style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 8px;">30 horas</div>
-          <small style="color: var(--text-secondary);">62.5% del total</small>
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Ocupación Promedio</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--warning-amber); margin-top: 8px;">72%</div>
+          <small style="color: var(--text-muted);">En 7 almacenes activos</small>
         </div>
 
         <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
-          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Paradas Completadas</small>
-          <div style="font-size: 20px; font-weight: 700; color: var(--success-green); margin-top: 8px;">4 de 7</div>
-          <small style="color: var(--text-secondary);">2 en tránsito/pendientes</small>
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Tiempo Promedio</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue); margin-top: 8px;">18h 32m</div>
+          <small style="color: var(--text-muted);">Desde origen a destino</small>
         </div>
 
         <div style="padding: 12px; background-color: var(--bg-tertiary); border-radius: 8px;">
-          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Incidencias</small>
-          <div style="font-size: 20px; font-weight: 700; color: var(--warning-amber); margin-top: 8px;">1 Retraso</div>
-          <small style="color: var(--text-secondary);">Recuperado exitosamente</small>
+          <small style="color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Maletas Transitando</small>
+          <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue); margin-top: 8px;">3,247</div>
+          <small style="color: var(--text-muted);">A través de 12 rutas</small>
         </div>
       </div>
     </div>
   </div>
 
   <script src="../js/app.js"></script>
+  <!-- Leaflet Map JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
+  <script>
+    // Actualizar hora simulada
+    function actualizarHoraSimulada() {
+      const now = new Date();
+      const horas = String(now.getHours()).padStart(2, '0');
+      const minutos = String(now.getMinutes()).padStart(2, '0');
+      const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
+      document.getElementById('simulatedTime').textContent = `${horas}:${minutos} ${ampm}`;
+    }
+
+    setInterval(actualizarHoraSimulada, 1000);
+    actualizarHoraSimulada();
+
+    // Mapa simple - Leaflet
+    let map = null;
+    
+    function inicializarMapa() {
+      map = L.map('leafletMap', {
+        maxBounds: [[-85.05112878, -180], [85.05112878, 180]],
+        maxBoundsViscosity: 1.0,
+        minZoom: 2,
+        maxZoom: 19,
+        worldCopyJump: false,
+        continuousWorld: false
+      }).setView([20, 0], 2);
+      
+      // Tiles del mapa
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© CartoDB',
+        maxZoom: 19,
+        minZoom: 2,
+        subdomains: 'abcd',
+        noWrap: true,
+        bounds: [[-85.05112878, -180], [85.05112878, 180]]
+      }).addTo(map);
+      
+      // Coordenadas de los vuelos
+      const routes = [
+        {
+          name: 'São Paulo → Miami',
+          origin: [-23.55, -46.63],
+          destination: [25.76, -80.19],
+          color: '#2564eb'
+        },
+        {
+          name: 'México → Italia',
+          origin: [19.43, -99.13],
+          destination: [41.90, 12.50],
+          color: '#10b981'
+        },
+        {
+          name: 'Lima → Madrid',
+          origin: [-12.0462, -77.0428],
+          destination: [40.4168, -3.7038],
+          color: '#f97316'
+        }
+      ];
+      
+      // Definir funciones Bézier una sola vez (reutilizable)
+      function bezierPoint(t, p0, p1, p2, p3) {
+        const mt = 1 - t;
+        const mt2 = mt * mt;
+        const mt3 = mt2 * mt;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        
+        return mt3 * p0 + 3 * mt2 * t * p1 + 3 * mt * t2 * p2 + t3 * p3;
+      }
+      
+      function bezierTangent(t, p0, p1, p2, p3) {
+        const mt = 1 - t;
+        const mt2 = mt * mt;
+        const t2 = t * t;
+        
+        return 3 * mt2 * (p1 - p0) + 6 * mt * t * (p2 - p1) + 3 * t2 * (p3 - p2);
+      }
+      
+      // Array para almacenar los aviones
+      const airplanes = [];
+      
+      // Crear rutas, polylines y aviones
+      routes.forEach((route, index) => {
+        const origin = route.origin;
+        const destination = route.destination;
+        
+        // Puntos de control para línea recta
+        const controlPoint1 = [origin[0] + 2, origin[1] + 2];
+        const controlPoint2 = [destination[0] - 2, destination[1] - 2];
+        
+        // Generar puntos de la curva para la polyline
+        const curvePoints = [];
+        for (let i = 0; i <= 100; i++) {
+          const t = i / 100;
+          const lat = bezierPoint(t, origin[0], controlPoint1[0], controlPoint2[0], destination[0]);
+          const lng = bezierPoint(t, origin[1], controlPoint1[1], controlPoint2[1], destination[1]);
+          curvePoints.push([lat, lng]);
+        }
+        
+        // Dibujar la polyline
+        L.polyline(curvePoints, {
+          color: route.color,
+          weight: 2,
+          opacity: 0.8,
+          dashArray: '5, 5'
+        }).addTo(map);
+        
+        // Marcadores de origen y destino
+        L.marker(origin).addTo(map)
+          .bindPopup(`<b>${route.name.split('→')[0].trim()}</b><br>Lat: ${origin[0].toFixed(4)}<br>Lng: ${origin[1].toFixed(4)}`);
+        
+        L.marker(destination).addTo(map)
+          .bindPopup(`<b>${route.name.split('→')[1].trim()}</b><br>Lat: ${destination[0].toFixed(4)}<br>Lng: ${destination[1].toFixed(4)}`);
+        
+        // Crear SVG para el avión
+        const svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svgElement.style.position = 'absolute';
+        svgElement.style.top = '0';
+        svgElement.style.left = '0';
+        svgElement.style.pointerEvents = 'none';
+        svgElement.style.zIndex = '500';
+        
+        const airplaneGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        
+        const airplaneImage = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+        airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '../../airplane.svg');
+        airplaneImage.setAttribute('x', '-30');
+        airplaneImage.setAttribute('y', '-30');
+        airplaneImage.setAttribute('width', '60');
+        airplaneImage.setAttribute('height', '60');
+        airplaneImage.setAttribute('style', `filter: hue-rotate(${index * 120}deg) brightness(1.1);`);
+        
+        airplaneGroup.appendChild(airplaneImage);
+        svgElement.appendChild(airplaneGroup);
+        map.getPanes().overlayPane.appendChild(svgElement);
+        
+        // Guardar información del avión
+        airplanes.push({
+          svgElement,
+          airplaneGroup,
+          airplaneImage,
+          origin,
+          destination,
+          controlPoint1,
+          controlPoint2
+        });
+      });
+      
+      // Variables de animación
+      const animationDuration = 30000; // 30 segundos
+      let animationStartTime = performance.now();
+      
+      // Función para actualizar posición de todos los aviones
+      function updatePointPosition() {
+        const currentTime = performance.now();
+        const elapsed = currentTime - animationStartTime;
+        const progress = (elapsed % animationDuration) / animationDuration;
+        
+        // Actualizar cada avión
+        airplanes.forEach((airplane) => {
+          // Calcular posición en la curva Bézier
+          const currentLat = bezierPoint(progress, airplane.origin[0], airplane.controlPoint1[0], airplane.controlPoint2[0], airplane.destination[0]);
+          const currentLng = bezierPoint(progress, airplane.origin[1], airplane.controlPoint1[1], airplane.controlPoint2[1], airplane.destination[1]);
+          
+          // Obtener las coordenadas del mapa
+          const pointCoords = map.latLngToLayerPoint([currentLat, currentLng]);
+          
+          // Calcular la tangente de la curva para obtener la dirección correcta
+          const tangentLat = bezierTangent(progress, airplane.origin[0], airplane.controlPoint1[0], airplane.controlPoint2[0], airplane.destination[0]);
+          const tangentLng = bezierTangent(progress, airplane.origin[1], airplane.controlPoint1[1], airplane.controlPoint2[1], airplane.destination[1]);
+          
+          // Calcular ángulo a partir de la tangente
+          const cosLat = Math.cos(currentLat * Math.PI / 180);
+          const angle = Math.atan2(-tangentLat, tangentLng * cosLat) * (180 / Math.PI);
+          
+          // Ajustar tamaño del avión basado en el zoom
+          const zoom = map.getZoom();
+          const airplaneSize = 20 + (zoom - 2) * 3;
+          const offset = airplaneSize / 2;
+          
+          airplane.airplaneImage.setAttribute('width', airplaneSize.toString());
+          airplane.airplaneImage.setAttribute('height', airplaneSize.toString());
+          airplane.airplaneImage.setAttribute('x', (-offset).toString());
+          airplane.airplaneImage.setAttribute('y', (-offset).toString());
+          
+          // Establecer tamaño del SVG con margen para zoom
+          const size = map.getSize();
+          const margin = 1000;
+          airplane.svgElement.setAttribute('width', size.x + margin * 2);
+          airplane.svgElement.setAttribute('height', size.y + margin * 2);
+          airplane.svgElement.style.left = (-margin) + 'px';
+          airplane.svgElement.style.top = (-margin) + 'px';
+          
+          // Posicionar y rotar el avión
+          airplane.airplaneGroup.setAttribute('transform', `translate(${pointCoords.x + margin},${pointCoords.y + margin}) rotate(${angle} 0 0)`);
+        });
+      }
+      
+      // Animar
+      function animate() {
+        updatePointPosition();
+        requestAnimationFrame(animate);
+      }
+      
+      // Actualizar en eventos del mapa
+      map.on('move zoom moveend zoomend', updatePointPosition);
+      
+      animate();
+    }
+    
+    // Inicializar cuando el DOM esté listo
+    document.addEventListener('DOMContentLoaded', function() {
+      inicializarMapa();
+      
+      // Redimensionar el mapa cuando cambie el tamaño de la ventana
+      window.addEventListener('resize', function() {
+        if (map) {
+          map.invalidateSize();
+        }
+      });
+    });
+  </script>
 </body>
 </html>
+
+
+

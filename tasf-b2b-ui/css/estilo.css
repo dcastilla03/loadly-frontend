@@ -103,61 +103,6 @@ label {
 }
 
 /* ============================================
-   HEADER / TOP BAR
-   ============================================ */
-
-.header {
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  padding: 14px 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  box-shadow: var(--shadow);
-}
-
-.header-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--accent-blue);
-  text-shadow: none;
-}
-
-.header-logo .icon {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, var(--accent-blue), var(--accent-blue-light));
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-}
-
-.header-nav {
-  display: flex;
-  gap: 24px;
-  align-items: center;
-}
-
-.header-nav a {
-  color: var(--text-secondary);
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  transition: all 0.15s ease;
-  font-weight: 500;
-}
-
-.header-nav a:hover {
-  background-color: var(--bg-tertiary);
-  color: var(--text-primary);
-}
-
-/* ============================================
    CONTENEDOR PRINCIPAL
    ============================================ */
 
@@ -842,15 +787,6 @@ input[type="range"]::-moz-range-thumb:hover {
     grid-template-columns: 1fr;
   }
 
-  .header-nav {
-    gap: 12px;
-  }
-
-  .header-nav a {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-
   .modal {
     width: 95%;
   }
@@ -865,15 +801,6 @@ input[type="range"]::-moz-range-thumb:hover {
 }
 
 @media (max-width: 480px) {
-  .header {
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .header-logo {
-    font-size: 16px;
-  }
-
   .btn {
     padding: 10px 16px;
     font-size: 12px;

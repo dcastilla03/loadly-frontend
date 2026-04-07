@@ -85,7 +85,7 @@
                 <th>Código IATA</th>
                 <th>Ciudad</th>
                 <th>País</th>
-                <th>Capacidad (m²)</th>
+                <th>Capacidad (Maletas)</th>
                 <th>GMT</th>
               </tr>
             </thead>
@@ -302,7 +302,7 @@
           </div>
           <div class="stat-card">
             <h3>Capacidad Promedio</h3>
-            <div class="value" style="font-size: 32px;">435 m²</div>
+            <div class="value" style="font-size: 32px;">435 maletas</div>
           </div>
           <div class="stat-card">
             <h3>Regiones</h3>
@@ -339,8 +339,8 @@
             <input type="text" id="nombrePais" placeholder="Ej: Colombia" required style="padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; background-color: var(--bg-primary); color: var(--text-primary);">
           </div>
           <div>
-            <label for="capacidad">Capacidad de Espacio (m²) <span style="color: var(--danger-red);">*</span></label>
-            <input type="number" id="capacidad" placeholder="Ej: 430" required style="padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; background-color: var(--bg-primary); color: var(--text-primary);">
+            <label for="capacidad">Capacidad (Maletas) <span style="color: var(--danger-red);">*</span></label>
+            <input type="number" id="capacidad" placeholder="Ej: 500" required style="padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; background-color: var(--bg-primary); color: var(--text-primary);">
           </div>
           <div>
             <label for="gmt">GMT <span style="color: var(--danger-red);">*</span></label>
@@ -375,7 +375,7 @@
             <p style="color: var(--text-secondary); font-size: 12px; margin: 0;">
               <strong>Formato esperado:</strong><br>
               ID,Código IATA,Ciudad,País,Capacidad,GMT<br>
-              01,SKBO,Bogotá,Colombia,430,-5
+              01,SKBO,Bogotá,Colombia,500,-5
             </p>
           </div>
         </form>
@@ -416,7 +416,7 @@
       const gmt = document.getElementById('gmt').value;
 
       if (codigo && ciudad && pais && capacidad && gmt) {
-        alert(`✓ Almacén agregado:\n${codigo} - ${ciudad}, ${pais}\nCapacidad: ${capacidad}m² | GMT: ${gmt}`);
+        alert(`✓ Almacén agregado:\n${codigo} - ${ciudad}, ${pais}\nCapacidad: ${capacidad} maletas | GMT: ${gmt}`);
         document.getElementById('formAgregarAlmacen').reset();
         cerrarModalAgregarAlmacen();
       } else {

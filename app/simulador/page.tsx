@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { showNotification } from '../../lib/notifications';
 
 declare global {
@@ -60,6 +60,7 @@ const ROUTES = [
 export default function Simulador() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
+  const [selectedAirplane, setSelectedAirplane] = useState<any>(null);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -186,8 +187,17 @@ export default function Simulador() {
           routeName: route.name,
           routeColor: route.color,
           currentLat: origin[0],
-          currentLng: origin[1]
+          currentLng: origin[1],
+          flightCode: `${route.name.split('→')[0].trim().substring(0, 3).toUpperCase()}-${1000 + index}`,
+          status: 'En Vuelo',
+          altitude: Math.floor(Math.random() * 35000 + 5000),
+          speed: Math.floor(Math.random() * 450 + 350),
+          luggage: Math.floor(Math.random() * 150 + 50)
         };
+
+        airplaneImage.addEventListener('click', () => {
+          setSelectedAirplane(airplane);
+        });
 
         airplanes.push(airplane);
 
@@ -641,6 +651,96 @@ export default function Simulador() {
         </div>
         </div>
       </div>
+
+      {/* Modal de Detalles del Vuelo */}
+      {selectedAirplane && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999 }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', maxWidth: '500px', width: '90%', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '20px' }}>
+              <div>
+                <h2 style={{ margin: '0 0 8px 0', fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)' }}>✈️ Detalles del Vuelo</h2>
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)' }}>Código: <strong>{selectedAirplane.flightCode}</strong></p>
+              </div>
+              <button onClick={() => setSelectedAirplane(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '10px' }}>Ruta</small>
+                <p style={{ margin: '8px 0 0 0', fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {selectedAirplane.routeName}
+                </p>
+              </div>
+
+              <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '10px' }}>Estado</small>
+                <p style={{ margin: '8px 0 0 0', fontSize: '14px', fontWeight: 700, color: '#22c55e' }}>
+                  {selectedAirplane.status}
+                </p>
+              </div>
+
+              <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '10px' }}>Altitud</small>
+                <p style={{ margin: '8px 0 0 0', fontSize: '14px', fontWeight: 700, color: 'var(--accent-blue)' }}>
+                  {selectedAirplane.altitude.toLocaleString()} ft
+                </p>
+              </div>
+
+              <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '10px' }}>Velocidad</small>
+                <p style={{ margin: '8px 0 0 0', fontSize: '14px', fontWeight: 700, color: 'var(--accent-blue)' }}>
+                  {selectedAirplane.speed} km/h
+                </p>
+              </div>
+
+              <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '10px' }}>Maletas</small>
+                <p style={{ margin: '8px 0 0 0', fontSize: '14px', fontWeight: 700, color: '#f97316' }}>
+                  {selectedAirplane.luggage}
+                </p>
+              </div>
+
+              <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '10px' }}>Capacidad</small>
+                <p style={{ margin: '8px 0 0 0', fontSize: '14px', fontWeight: 700, color: '#8b5cf6' }}>
+                  {Math.round(selectedAirplane.capacity * 100)}%
+                </p>
+              </div>
+            </div>
+
+            <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', marginBottom: '20px' }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>📍 Coordenadas</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <div>
+                  <small style={{ fontWeight: 600 }}>Origen:</small><br />
+                  {selectedAirplane.origin[0].toFixed(2)}, {selectedAirplane.origin[1].toFixed(2)}
+                </div>
+                <div>
+                  <small style={{ fontWeight: 600 }}>Destino:</small><br />
+                  {selectedAirplane.destination[0].toFixed(2)}, {selectedAirplane.destination[1].toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setSelectedAirplane(null)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                backgroundColor: 'var(--accent-blue)',
+                border: 'none',
+                borderRadius: '8px',
+                color: 'white',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

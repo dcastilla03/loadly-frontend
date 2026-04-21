@@ -44,13 +44,23 @@ export default function RootLayout({
 
   // Wizard handlers
   const handleNextStep = () => {
-    if (wizardStep < 3) {
-      setWizardStep(wizardStep + 1);
+    if (selectedType === 'Periodo') {
+      // Para Período, mostrar paso de duración
+      if (wizardStep < 3) {
+        setWizardStep(wizardStep + 1);
+      }
+    } else if (selectedType === 'DiaDia' || selectedType === 'Colapso') {
+      // Para Día a Día y Colapso, saltar directamente a confirmación
+      setWizardStep(3);
     }
   };
 
   const handlePrevStep = () => {
-    if (wizardStep > 1) {
+    if (wizardStep === 3 && (selectedType === 'DiaDia' || selectedType === 'Colapso')) {
+      // Si es Día a Día o Colapso, volver al paso 1
+      setWizardStep(1);
+    } else if (wizardStep > 1) {
+      // En otros casos, volver un paso atrás
       setWizardStep(wizardStep - 1);
     }
   };
@@ -116,12 +126,14 @@ export default function RootLayout({
                   <div className="step-number">1</div>
                   <div className="step-label">Tipo de Simulación</div>
                 </div>
-                <div className={`step ${wizardStep === 2 ? 'active' : wizardStep > 2 ? 'completed' : ''}`}>
-                  <div className="step-number">2</div>
-                  <div className="step-label">Duración</div>
-                </div>
-                <div className={`step ${wizardStep === 3 ? 'active' : ''}`}>
-                  <div className="step-number">3</div>
+                {selectedType === 'Periodo' && (
+                  <div className={`step ${wizardStep === 2 ? 'active' : wizardStep > 2 ? 'completed' : ''}`}>
+                    <div className="step-number">2</div>
+                    <div className="step-label">Duración</div>
+                  </div>
+                )}
+                <div className={`step ${wizardStep === 3 ? 'active' : wizardStep > 3 ? 'completed' : selectedType && wizardStep > 1 ? 'completed' : ''}`}>
+                  <div className="step-number">{selectedType === 'Periodo' ? '3' : '2'}</div>
                   <div className="step-label">Confirmación</div>
                 </div>
               </div>
@@ -174,7 +186,7 @@ export default function RootLayout({
               )}
 
               {/* STEP 2: Configuración de Duración */}
-              {wizardStep === 2 && (
+              {wizardStep === 2 && selectedType === 'Periodo' && (
                 <div>
                   <h3 style={{ color: 'var(--text-primary)', marginBottom: '28px', fontSize: '16px' }}>
                     Duración del Período
@@ -210,12 +222,14 @@ export default function RootLayout({
                       </div>
                     </div>
 
-                    <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
-                      <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Duración</small>
-                      <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginTop: '4px' }}>
-                        {duration} días
+                    {selectedType === 'Periodo' && (
+                      <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                        <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Duración</small>
+                        <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginTop: '4px' }}>
+                          {duration} días
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   <div style={{ marginTop: '24px', padding: '16px', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid var(--success-green)', borderRadius: '8px' }}>

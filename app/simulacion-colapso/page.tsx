@@ -53,6 +53,9 @@ export default function SimulacionColapso() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const [collapsePoint, setCollapsePoint] = useState<{ location: string; reason: string; time: string } | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [collapseDay, setCollapseDay] = useState(1);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -236,6 +239,23 @@ export default function SimulacionColapso() {
     });
   }, []);
 
+  // Lógica para simular el avance del colapso
+  useEffect(() => {
+    if (!isRunning || isPaused) return;
+
+    const interval = setInterval(() => {
+      setCollapseDay((prev) => {
+        if (prev >= 3) {
+          setIsRunning(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 3000); // Avanza cada 3 segundos
+
+    return () => clearInterval(interval);
+  }, [isRunning, isPaused]);
+
   return (
     <div className="main-wrapper">
       <div className="card map-card" style={{ padding: 0, overflow: 'visible', minHeight: '100vh', display: 'flex', flexDirection: 'column', width: '100%', margin: '0', borderRadius: 0, position: 'relative' }}>
@@ -298,9 +318,45 @@ export default function SimulacionColapso() {
                   <div style={{ fontSize: '14px', fontWeight: 700, color: '#ef4444', marginTop: '2px' }}>Miami (MIA)</div>
                 </div>
                 <div style={{ minWidth: 0 }}>
-                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: '10px' }}>Tiempo</small>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#ef4444', marginTop: '2px' }}>3d 14:35</div>
+                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: '10px' }}>Día</small>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#ef4444', marginTop: '2px' }}>Día {collapseDay} / 3</div>
                 </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                <button 
+                  onClick={() => {
+                    setIsRunning(true);
+                    setIsPaused(false);
+                  }} 
+                  disabled={isRunning}
+                  style={{ padding: '8px 12px', fontSize: '12px', backgroundColor: isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: '6px', cursor: isRunning ? 'default' : 'pointer', color: 'white', opacity: isRunning ? 0.6 : 1 }}
+                >
+                  ▶️ Iniciar
+                </button>
+                <button 
+                  onClick={() => setIsPaused(true)} 
+                  disabled={!isRunning || isPaused}
+                  style={{ padding: '8px 12px', fontSize: '12px', backgroundColor: !isRunning || isPaused ? 'var(--border-color)' : '#f97316', border: 'none', borderRadius: '6px', cursor: !isRunning || isPaused ? 'default' : 'pointer', color: 'white', opacity: !isRunning || isPaused ? 0.6 : 1 }}
+                >
+                  ⏸️ Pausar
+                </button>
+                <button 
+                  onClick={() => setIsPaused(false)} 
+                  disabled={!isRunning || !isPaused}
+                  style={{ padding: '8px 12px', fontSize: '12px', backgroundColor: !isRunning || !isPaused ? 'var(--border-color)' : '#10b981', border: 'none', borderRadius: '6px', cursor: !isRunning || !isPaused ? 'default' : 'pointer', color: 'white', opacity: !isRunning || !isPaused ? 0.6 : 1 }}
+                >
+                  ▶️ Reanudar
+                </button>
+                <button 
+                  onClick={() => {
+                    setIsRunning(false);
+                    setIsPaused(false);
+                    setCollapseDay(1);
+                  }}
+                  style={{ padding: '8px 12px', fontSize: '12px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', color: 'white' }}
+                >
+                  ⏹️ Detener
+                </button>
               </div>
               <style>{`
                 @keyframes blink {
@@ -349,57 +405,44 @@ export default function SimulacionColapso() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '24px' }}>
             <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #fecaca' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>⚠️ Punto de Fallo</div>
-              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Almacén Miami</div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>💥 Tipo de Colapso</div>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Congestión de Almacén</div>
               <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                <div>Capacidad: 800 maletas</div>
-                <div>Stock Actual: 850 maletas</div>
-                <div>Exceso: 50 maletas (+6.25%)</div>
+                <div>Ubicación: Miami</div>
+                <div>Categoría: Capacidad</div>
               </div>
             </div>
 
             <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #fecaca' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>📅 Cuándo Ocurre</div>
-              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Período: Día 3</div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>🔴 Severidad</div>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Crítica</div>
               <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                <div>Hora: 14:35 hrs</div>
-                <div>Tiempo de llegada al colapso: ~86 horas</div>
+                <div>Requiere intervención inmediata</div>
               </div>
             </div>
 
             <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #fecaca' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>📊 Impacto</div>
-              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Crítico</div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>📦 Maletas Afectadas</div>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>850</div>
               <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                <div>Maletas sin procesar: 50</div>
-                <div>Plazos incumplidos: Múltiples</div>
+                <div>Sobre capacidad: 50 maletas</div>
               </div>
             </div>
 
             <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #fecaca' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>💡 Recomendación</div>
-              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Aumentar Capacidad</div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>📊 Impacto en Puntualidad</div>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>↓ 32%</div>
               <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                <div>Incrementar: +100 maletas</div>
-                <div>Nueva Capacidad: 900 maletas</div>
+                <div>Caída significativa en rendimiento</div>
               </div>
             </div>
-          </div>
 
-          <div style={{ padding: '20px', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #fecaca' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' }}>📈 Evolución del Stock en Miami</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-              {['Día 1', 'Día 2', 'Día 3'].map((day, idx) => (
-                <div key={idx} style={{ padding: '12px', backgroundColor: idx === 2 ? '#fee2e2' : 'var(--bg-tertiary)', borderRadius: '6px', borderLeft: `3px solid ${idx === 2 ? '#ef4444' : '#22c55e'}` }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: idx === 2 ? '#dc2626' : 'var(--text-secondary)', marginBottom: '8px' }}>{day}</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: idx === 2 ? '#ef4444' : 'var(--accent-blue)' }}>
-                    {idx === 0 ? '450' : idx === 1 ? '650' : '850'}
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                    Capacidad: 800
-                  </div>
-                </div>
-              ))}
+            <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #fecaca' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '12px' }}>💡 Acción Recomendada</div>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Redistribuir Carga</div>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                <div>Derivar maletas a almacenes cercanos</div>
+              </div>
             </div>
           </div>
 
@@ -464,27 +507,27 @@ export default function SimulacionColapso() {
               <h3 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 700, color: 'var(--accent-blue)' }}>ℹ️ Métricas de Rendimiento</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Estado del Sistema</small>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>COLAPSO</div>
-                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>Crítico - Requerida intervención</small>
+                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Tasa de Puntualidad</small>
+                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>62%</div>
+                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>↓ 32% por colapso</small>
                 </div>
 
                 <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Tiempo hasta Colapso</small>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>3d 14:35</div>
-                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>Desde inicio de simulación</small>
+                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Ocupación Promedio</small>
+                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>106%</div>
+                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>Sobre capacidad máxima</small>
                 </div>
 
                 <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Maletas Afectadas</small>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>850</div>
-                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>Sobre capacidad de 800</small>
+                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Tiempo Promedio</small>
+                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>28h 15m</div>
+                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>Retrasado por congestión</small>
                 </div>
 
                 <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Incumplimiento</small>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>50+</div>
-                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>Entregas perdidas</small>
+                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Entregas Retrasadas</small>
+                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>8.5%</div>
+                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>↑ 7.2% crítico</small>
                 </div>
               </div>
             </div>

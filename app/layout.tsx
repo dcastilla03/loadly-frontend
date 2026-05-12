@@ -1,6 +1,7 @@
 'use client';
 
 import React, { ReactNode, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import './globals.css';
 import { Sidebar } from '../components/Sidebar';
 
@@ -17,9 +18,10 @@ export default function RootLayout({
 }: {
   children: ReactNode;
 }) {
+  const router = useRouter();
   const [wizardStep, setWizardStep] = useState(1);
   const [selectedType, setSelectedType] = useState<string | null>(null);
-  const [duration, setDuration] = useState(5);
+  const [startDate, setStartDate] = useState<string>('');
   const [showModal, setShowModal] = useState(false);
 
   React.useEffect(() => {
@@ -33,7 +35,7 @@ export default function RootLayout({
         // Reset wizard state when modal is closed
         setWizardStep(1);
         setSelectedType(null);
-        setDuration(5);
+        setStartDate('');
       }
     };
 
@@ -45,19 +47,20 @@ export default function RootLayout({
   // Wizard handlers
   const handleNextStep = () => {
     if (selectedType === 'Periodo') {
-      // Para Período, mostrar paso de duración
-      if (wizardStep < 3) {
-        setWizardStep(wizardStep + 1);
-      }
+      // Para Período, ir directo a confirmación (siempre 5 días)
+      setWizardStep(2);
     } else if (selectedType === 'DiaDia' || selectedType === 'Colapso') {
       // Para Día a Día y Colapso, saltar directamente a confirmación
-      setWizardStep(3);
+      setWizardStep(2);
     }
   };
 
   const handlePrevStep = () => {
-    if (wizardStep === 3 && (selectedType === 'DiaDia' || selectedType === 'Colapso')) {
+    if (wizardStep === 2 && (selectedType === 'DiaDia' || selectedType === 'Colapso')) {
       // Si es Día a Día o Colapso, volver al paso 1
+      setWizardStep(1);
+    } else if (wizardStep === 2 && selectedType === 'Periodo') {
+      // Si es Período, volver al paso 1
       setWizardStep(1);
     } else if (wizardStep > 1) {
       // En otros casos, volver un paso atrás
@@ -70,23 +73,39 @@ export default function RootLayout({
   };
 
   const handleStartSimulation = () => {
-    const typeNames: { [key: string]: string } = {
-      'Periodo': '📅 Simulación de Período',
-      'DiaDia': '⏱️ Operación Día a Día',
-      'Colapso': '💥 Simulación hasta el Colapso'
-    };
-    alert(`¡Simulación iniciada!\n\nTipo: ${typeNames[selectedType!]}\nDuración: ${duration} días`);
+    if (selectedType === 'Periodo') {
+      // Validar que la fecha esté seleccionada
+      if (!startDate) {
+        alert('Por favor selecciona una fecha de inicio.');
+        return;
+      }
+      
+      // Redirigir a simulacion-periodo con la fecha como parámetro
+      const dateStr = new Date(startDate).toISOString().split('T')[0]; // Formato YYYY-MM-DD
+      router.push(`/simulacion-periodo?startDate=${dateStr}`);
+    } else if (selectedType === 'DiaDia') {
+      router.push('/operacion-dia-dia');
+    } else if (selectedType === 'Colapso') {
+      router.push('/simulacion-colapso');
+    }
+    
     setShowModal(false);
     setWizardStep(1);
     setSelectedType(null);
-    setDuration(5);
+    setStartDate('');
   };
 
   const handleConfirmStep = () => {
     if (wizardStep === 1 && selectedType) {
       handleNextStep();
     } else if (wizardStep === 2) {
-      handleNextStep();
+      // Si es Período, validar fecha antes de ir a confirmación
+      if (selectedType === 'Periodo' && !startDate) {
+        alert('Por favor selecciona una fecha de inicio.');
+        return;
+      }
+      // Ir al paso 3 (Confirmación)
+      setWizardStep(3);
     } else if (wizardStep === 3) {
       handleStartSimulation();
     }
@@ -129,7 +148,13 @@ export default function RootLayout({
                 {selectedType === 'Periodo' && (
                   <div className={`step ${wizardStep === 2 ? 'active' : wizardStep > 2 ? 'completed' : ''}`}>
                     <div className="step-number">2</div>
-                    <div className="step-label">Duración</div>
+                    <div className="step-label">Fecha de Inicio</div>
+                  </div>
+                )}
+                {(selectedType === 'DiaDia' || selectedType === 'Colapso') && (
+                  <div className={`step ${wizardStep === 2 ? 'active' : wizardStep > 2 ? 'completed' : ''}`}>
+                    <div className="step-number">2</div>
+                    <div className="step-label">Confirmación</div>
                   </div>
                 )}
                 <div className={`step ${wizardStep === 3 ? 'active' : wizardStep > 3 ? 'completed' : selectedType && wizardStep > 1 ? 'completed' : ''}`}>
@@ -153,7 +178,7 @@ export default function RootLayout({
                     >
                       <div className="checkmark">✓</div>
                       <h3>📅 Simulación de Período</h3>
-                      <p>Simula 3, 5 o 7 días de operaciones con planificación automática y replanificación.</p>
+                      <p>Simula 5 días de operaciones con planificación automática y replanificación. Selecciona la fecha de inicio.</p>
                     </div>
 
                     <div 
@@ -185,25 +210,54 @@ export default function RootLayout({
                 </div>
               )}
 
-              {/* STEP 2: Configuración de Duración */}
+              {/* STEP 2: Configuración de Fecha (Solo para Período) */}
               {wizardStep === 2 && selectedType === 'Periodo' && (
                 <div>
                   <h3 style={{ color: 'var(--text-primary)', marginBottom: '28px', fontSize: '16px' }}>
-                    Duración del Período
+                    Fecha de Inicio (Período de 5 Días)
                   </h3>
 
-                  <div className="slider-container">
-                    <input 
-                      type="range" 
-                      id="duracion" 
-                      min="3" 
-                      max="7" 
-                      value={duration}
-                      onChange={(e) => setDuration(parseInt(e.target.value))}
-                      step="1" 
-                    />
-                    <span className="slider-value" id="duracionDisplay">{duration}</span>
+                  <div style={{ display: 'grid', gap: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: '600' }}>
+                        Selecciona la fecha de inicio:
+                      </label>
+                      <input 
+                        type="date" 
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-secondary)',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid var(--accent-blue)', borderRadius: '8px' }}>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
+                        📅 La simulación durará <strong>5 días</strong> a partir de la fecha seleccionada.
+                      </p>
+                    </div>
                   </div>
+                </div>
+              )}
+
+              {/* STEP 2: Placeholder para otras simulaciones */}
+              {wizardStep === 2 && (selectedType === 'DiaDia' || selectedType === 'Colapso') && (
+                <div>
+                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
+                    ✓ Configuración Lista
+                  </h3>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+                    {selectedType === 'DiaDia' 
+                      ? 'Se iniciará el monitoreo de operaciones en tiempo real.'
+                      : 'Se ejecutará la simulación hasta detectar un colapso en el sistema.'}
+                  </p>
                 </div>
               )}
 
@@ -223,12 +277,20 @@ export default function RootLayout({
                     </div>
 
                     {selectedType === 'Periodo' && (
-                      <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
-                        <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Duración</small>
-                        <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginTop: '4px' }}>
-                          {duration} días
+                      <>
+                        <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                          <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fecha de Inicio</small>
+                          <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginTop: '4px' }}>
+                            {startDate ? new Date(startDate).toLocaleDateString('es-ES') : '-'}
+                          </div>
                         </div>
-                      </div>
+                        <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                          <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Duración</small>
+                          <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginTop: '4px' }}>
+                            5 días (fijo)
+                          </div>
+                        </div>
+                      </>
                     )}
                   </div>
 
@@ -261,7 +323,10 @@ export default function RootLayout({
                 id="btnSiguiente" 
                 className="btn btn-primary"
                 onClick={handleConfirmStep}
-                disabled={wizardStep === 1 && !selectedType}
+                disabled={
+                  (wizardStep === 1 && !selectedType) ||
+                  (wizardStep === 2 && selectedType === 'Periodo' && !startDate)
+                }
               >
                 {wizardStep === 3 ? 'Iniciar Simulación' : 'Siguiente →'}
               </button>

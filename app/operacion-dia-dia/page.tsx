@@ -563,9 +563,9 @@ export default function OperacionDiaDia() {
                 </div>
 
                 <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Maletas Transitando</small>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent-blue)', marginTop: '8px' }}>3,247</div>
-                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>A través de 12 rutas</small>
+                  <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: '11px' }}>Entregas Retrasadas</small>
+                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '8px' }}>1.3%</div>
+                  <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block', marginTop: '4px' }}>↓ 0.8% respecto a ayer</small>
                 </div>
               </div>
             </div>

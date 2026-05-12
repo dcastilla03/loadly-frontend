@@ -1,360 +1,360 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+interface PlanVuelo {
+  idPlanVuelo: number;
+  idAeropuertoOrigen: number;
+  idAeropuertoDestino: number;
+  horaSalida: string;
+  horaLlegada: string;
+  capacidad: number;
+  cancelado: boolean;
+}
+
+interface Aeropuerto {
+  idAeropuerto: number;
+  codigo: string;
+  ciudad: string;
+}
+
 
 export default function GestionVuelos() {
-  const [numVuelo, setNumVuelo] = useState('');
-  const [fechaSalida, setFechaSalida] = useState('');
-  const [horaSalida, setHoraSalida] = useState('');
-  const [fechaLlegada, setFechaLlegada] = useState('');
-  const [horaLlegada, setHoraLlegada] = useState('');
-  const [capacidadVuelo, setCapacidadVuelo] = useState('');
-  const [archivos, setArchivos] = useState<File | null>(null);
-  const [mostrarInfo, setMostrarInfo] = useState(false);
-  const [mostrarProgreso, setMostrarProgreso] = useState(false);
-  const [progreso, setProgreso] = useState(0);
-  const [nombreArchivo, setNombreArchivo] = useState('');
+  const [planesVuelo, setPlanesVuelo] = useState<PlanVuelo[]>([]);
+  const [aeropuertos, setAeropuertos] = useState<Map<number, Aeropuerto>>(new Map());
+  const [cargandoPlanesVuelo, setCargandoPlanesVuelo] = useState(true);
+  const [showFormCargaMasiva, setShowFormCargaMasiva] = useState(false);
+  const [archivoSeleccionado, setArchivoSeleccionado] = useState<File | null>(null);
+  const [mensajeCarga, setMensajeCarga] = useState('');
+  const [tipoMensaje, setTipoMensaje] = useState<'success' | 'error'>('success');
+  const [cargando, setCargando] = useState(false);
 
-  const registrarPlanVuelo = () => {
-    if (!numVuelo || !fechaSalida || !horaSalida || !fechaLlegada || !horaLlegada) {
-      alert('❌ Por favor completa todos los campos requeridos');
-      return;
-    }
-    alert(`✓ Plan de vuelo ${numVuelo} registrado exitosamente\n\nSalida: ${fechaSalida} ${horaSalida}\nLlegada: ${fechaLlegada} ${horaLlegada}`);
-    setNumVuelo('');
-    setFechaSalida('');
-    setHoraSalida('');
-    setFechaLlegada('');
-    setHoraLlegada('');
-    setCapacidadVuelo('');
-  };
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
-  const validarArchivo = (archivo: File) => {
-    const extensionesValidas = ['xls', 'xlsx'];
-    const extension = archivo.name.split('.').pop()?.toLowerCase();
-    const tamanoMaximo = 5 * 1024 * 1024;
+  // Cargar planes de vuelo y aeropuertos al montar
+  useEffect(() => {
+    cargarDatos();
+  }, []);
 
-    if (!extension || !extensionesValidas.includes(extension)) {
-      alert('❌ Formato no válido. Solo se aceptan .xls y .xlsx');
-      limpiarCarga();
-      return false;
-    }
+  const cargarDatos = async () => {
+    try {
+      setCargandoPlanesVuelo(true);
+      const [planesRes, aeropuertosRes] = await Promise.all([
+        fetch(`${API_URL}/api/planes-vuelo`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        }),
+        fetch(`${API_URL}/api/aeropuertos`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        })
+      ]);
 
-    if (archivo.size > tamanoMaximo) {
-      alert('❌ Archivo muy grande. Máximo: 5MB');
-      limpiarCarga();
-      return false;
-    }
+      const planesData = await planesRes.json();
+      const aeropuertosData = await aeropuertosRes.json();
 
-    setArchivos(archivo);
-    setMostrarInfo(true);
-    setNombreArchivo(`${archivo.name} (${(archivo.size / 1024).toFixed(2)} KB)`);
-    return true;
-  };
-
-  const procesarCargaMasiva = () => {
-    if (!archivos) {
-      alert('Selecciona un archivo primero');
-      return;
-    }
-
-    setMostrarProgreso(true);
-    let currentProgreso = 0;
-    const intervalo = setInterval(() => {
-      currentProgreso += Math.random() * 30;
-      if (currentProgreso >= 100) currentProgreso = 100;
-
-      setProgreso(Math.floor(currentProgreso));
-
-      if (currentProgreso >= 100) {
-        clearInterval(intervalo);
-        setTimeout(() => {
-          alert(`✓ Archivo procesado exitosamente. ${Math.floor(Math.random() * 50 + 10)} registros importados.`);
-          limpiarCarga();
-        }, 500);
+      if (planesData.exito && planesData.datos) {
+        setPlanesVuelo(planesData.datos);
       }
-    }, 200);
-  };
 
-  const limpiarCarga = () => {
-    setArchivos(null);
-    setMostrarInfo(false);
-    setMostrarProgreso(false);
-    setProgreso(0);
-    setNombreArchivo('');
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files.length > 0) {
-      validarArchivo(e.dataTransfer.files[0]);
+      if (aeropuertosData.exito && aeropuertosData.datos) {
+        const mapa = new Map();
+        aeropuertosData.datos.forEach((aero: Aeropuerto) => {
+          mapa.set(aero.idAeropuerto, aero);
+        });
+        setAeropuertos(mapa);
+      }
+    } catch (error) {
+      console.error('Error al cargar datos:', error);
+    } finally {
+      setCargandoPlanesVuelo(false);
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
+  const handleArchivoSeleccionado = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const archivo = e.target.files?.[0];
+    if (!archivo) return;
+
+    if (!archivo.name.endsWith('.txt')) {
+      setTipoMensaje('error');
+      setMensajeCarga('❌ El archivo debe ser de tipo .txt');
+      return;
+    }
+
+    setArchivoSeleccionado(archivo);
+    setMensajeCarga('');
+  };
+
+  const procesarCargaMasiva = async () => {
+    if (!archivoSeleccionado) {
+      setTipoMensaje('error');
+      setMensajeCarga('❌ Por favor selecciona un archivo');
+      return;
+    }
+
+    setCargando(true);
+    setMensajeCarga('');
+
+    try {
+      const formDataEnvio = new FormData();
+      formDataEnvio.append('file', archivoSeleccionado);
+
+      const response = await fetch(`${API_URL}/api/planes-vuelo/cargar-masiva`, {
+        method: 'POST',
+        body: formDataEnvio,
+        cache: 'no-store'
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.exito) {
+        setTipoMensaje('success');
+        setMensajeCarga(`✓ ${data.mensaje}`);
+        setArchivoSeleccionado(null);
+
+        // Limpiar input
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+
+        // Recargar planes
+        await cargarDatos();
+
+        // Cerrar modal después de 2 segundos
+        setTimeout(() => {
+          setShowFormCargaMasiva(false);
+          setMensajeCarga('');
+        }, 2000);
+      } else {
+        setTipoMensaje('error');
+        setMensajeCarga(`❌ ${data.mensaje || 'Error al procesar el archivo'}`);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setTipoMensaje('error');
+      setMensajeCarga('❌ Error de conexión con el servidor');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const obtenerCodigoAeropuerto = (idAeropuerto: number) => {
+    return aeropuertos.get(idAeropuerto)?.codigo || '???';
+  };
+
+  const estadisticas = {
+    total: planesVuelo.length,
+    capacidadPromedio: planesVuelo.length > 0 ? Math.round(planesVuelo.reduce((sum, p) => sum + p.capacidad, 0) / planesVuelo.length) : 0,
+    capacidadTotal: planesVuelo.reduce((sum, p) => sum + p.capacidad, 0),
+    cancelados: planesVuelo.filter(p => p.cancelado).length
   };
 
   return (
     <div className="main-wrapper">
       <div className="container">
-        <div>
-          <h1 style={{ fontSize: '32px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '28px' }}>
-            ✈️ Gestión de Vuelos
-          </h1>
+        <h1 style={{ fontSize: '32px', fontWeight: 700, marginBottom: '12px' }}>✈️ Gestión de Vuelos</h1>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Administra planes de vuelo y carga de datos masiva</p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Total Planes</h3>
+            <div style={{ fontSize: '32px', fontWeight: 700 }}>{estadisticas.total}</div>
+          </div>
+          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Capacidad Promedio</h3>
+            <div style={{ fontSize: '32px', fontWeight: 700 }}>{estadisticas.capacidadPromedio}</div>
+          </div>
+          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Capacidad Total</h3>
+            <div style={{ fontSize: '32px', fontWeight: 700 }}>{estadisticas.capacidadTotal}</div>
+          </div>
+          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Cancelados</h3>
+            <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--danger-red)' }}>{estadisticas.cancelados}</div>
+          </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '24px', marginBottom: '32px' }}>
-          
-          {/* Plan de Vuelo */}
-          <div className="card fade-in">
-            <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>
-              📋 Plan de Vuelo
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px', lineHeight: 1.6 }}>
-              Registra los detalles del vuelo para organizar y planificar el transporte de maletas.
-            </p>
+        <div style={{ marginBottom: '24px' }}>
+          <button
+            onClick={() => setShowFormCargaMasiva(true)}
+            style={{
+              padding: '12px 24px',
+              backgroundColor: 'var(--accent-blue)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '14px'
+            }}
+          >
+            📤 Cargar Masiva
+          </button>
+        </div>
 
-            <form style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ marginBottom: '16px' }}>
-                <label htmlFor="numVuelo">Número de Vuelo <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                <input
-                  type="text"
-                  id="numVuelo"
-                  placeholder="Ej: AA123 o LAN456"
-                  value={numVuelo}
-                  onChange={(e) => setNumVuelo(e.target.value)}
-                  required
-                  style={{ width: '100%' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-                <div>
-                  <label htmlFor="fechaSalida">Fecha Salida <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <input
-                    type="date"
-                    id="fechaSalida"
-                    value={fechaSalida}
-                    onChange={(e) => setFechaSalida(e.target.value)}
-                    required
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="horaSalida">Hora Salida <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <input
-                    type="time"
-                    id="horaSalida"
-                    value={horaSalida}
-                    onChange={(e) => setHoraSalida(e.target.value)}
-                    required
-                    style={{ width: '100%' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-                <div>
-                  <label htmlFor="fechaLlegada">Fecha Llegada <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <input
-                    type="date"
-                    id="fechaLlegada"
-                    value={fechaLlegada}
-                    onChange={(e) => setFechaLlegada(e.target.value)}
-                    required
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="horaLlegada">Hora Llegada <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <input
-                    type="time"
-                    id="horaLlegada"
-                    value={horaLlegada}
-                    onChange={(e) => setHoraLlegada(e.target.value)}
-                    required
-                    style={{ width: '100%' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '16px' }}>
-                <label htmlFor="capacidadVuelo">Capacidad Total del Vuelo</label>
-                <input
-                  type="number"
-                  id="capacidadVuelo"
-                  min="100"
-                  max="500"
-                  placeholder="Ej: 300"
-                  step="10"
-                  value={capacidadVuelo}
-                  onChange={(e) => setCapacidadVuelo(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: 600 }}
-                  onClick={() => {
-                    setNumVuelo('');
-                    setFechaSalida('');
-                    setHoraSalida('');
-                    setFechaLlegada('');
-                    setHoraLlegada('');
-                    setCapacidadVuelo('');
-                  }}
-                >
-                  Limpiar Formulario
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: 600 }}
-                  onClick={registrarPlanVuelo}
-                >
-                  ✓ Registrar Plan de Vuelo
-                </button>
-              </div>
-            </form>
+        <div className="card">
+          <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '20px' }}>Listado de Planes de Vuelo</h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--border-color)' }}>
+                  <th style={{ padding: '12px', textAlign: 'left' }}>ID</th>
+                  <th style={{ padding: '12px', textAlign: 'left' }}>Origen</th>
+                  <th style={{ padding: '12px', textAlign: 'left' }}>Destino</th>
+                  <th style={{ padding: '12px', textAlign: 'left' }}>Salida</th>
+                  <th style={{ padding: '12px', textAlign: 'left' }}>Llegada</th>
+                  <th style={{ padding: '12px', textAlign: 'left' }}>Capacidad</th>
+                  <th style={{ padding: '12px', textAlign: 'left' }}>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cargandoPlanesVuelo ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: '20px', textAlign: 'center' }}>
+                      ⏳ Cargando planes de vuelo...
+                    </td>
+                  </tr>
+                ) : planesVuelo.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      📭 No hay planes de vuelo registrados
+                    </td>
+                  </tr>
+                ) : (
+                  planesVuelo.map((plan, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '12px' }}>{plan.idPlanVuelo}</td>
+                      <td style={{ padding: '12px' }}>{obtenerCodigoAeropuerto(plan.idAeropuertoOrigen)}</td>
+                      <td style={{ padding: '12px' }}>{obtenerCodigoAeropuerto(plan.idAeropuertoDestino)}</td>
+                      <td style={{ padding: '12px' }}>{plan.horaSalida}</td>
+                      <td style={{ padding: '12px' }}>{plan.horaLlegada}</td>
+                      <td style={{ padding: '12px', fontWeight: 600 }}>{plan.capacidad}</td>
+                      <td style={{ padding: '12px' }}>
+                        <span style={{
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          backgroundColor: plan.cancelado ? 'rgba(220, 53, 69, 0.1)' : 'rgba(40, 167, 69, 0.1)',
+                          color: plan.cancelado ? 'var(--danger-red)' : 'var(--success-green)'
+                        }}>
+                          {plan.cancelado ? '❌ Cancelado' : '✓ Activo'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
+        </div>
+      </div>
 
-          {/* Carga Masiva */}
-          <div className="card fade-in">
-            <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>
-              📤 Carga Masiva de Datos
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px', lineHeight: 1.6 }}>
-              Sube un archivo Excel o XLSX con múltiples registros de maletas, vuelos o planes.
+      {showFormCargaMasiva && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div className="card" style={{ maxWidth: '500px', width: '90%', padding: '32px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: 700 }}>📤 Cargar Planes de Vuelo</h2>
+              <button
+                onClick={() => {
+                  setShowFormCargaMasiva(false);
+                  setMensajeCarga('');
+                  setArchivoSeleccionado(null);
+                }}
+                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
+              ℹ️ Carga múltiples planes de vuelo desde un archivo TXT con el formato especificado.
             </p>
 
             <div
-              id="dropZone"
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onClick={() => document.getElementById('fileInput')?.click()}
+              onClick={() => document.querySelector('input[type="file"]')?.click()}
               style={{
                 border: '2px dashed var(--border-color)',
                 borderRadius: '8px',
                 padding: '40px 20px',
                 textAlign: 'center',
                 cursor: 'pointer',
-                transition: 'all 0.3s ease',
                 backgroundColor: 'var(--bg-tertiary)',
                 marginBottom: '20px'
               }}
             >
-              <div style={{ fontSize: '40px', marginBottom: '12px', display: 'block' }}>📁</div>
-              <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px', fontSize: '15px' }}>
-                Arrastra tu archivo aquí
-              </div>
-              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                o haz clic para seleccionar
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Formatos: .xls, .xlsx  |  Máximo: 5MB
-              </div>
+              <div style={{ fontSize: '32px', marginBottom: '8px' }}>📄</div>
+              <div>{archivoSeleccionado ? `✓ ${archivoSeleccionado.name}` : 'Haz clic o arrastra un archivo .txt'}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>Máximo 10MB</div>
               <input
-                id="fileInput"
                 type="file"
-                accept=".xls,.xlsx"
+                accept=".txt"
+                onChange={handleArchivoSeleccionado}
                 style={{ display: 'none' }}
-                onChange={(e) => {
-                  if (e.target.files?.[0]) {
-                    validarArchivo(e.target.files[0]);
-                  }
-                }}
               />
             </div>
 
-            {mostrarInfo && (
-              <div style={{ padding: '14px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', marginBottom: '16px', borderLeft: '3px solid var(--accent-blue)' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Archivo seleccionado:
-                </div>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '14px' }}>
-                  {nombreArchivo}
-                </div>
+            {mensajeCarga && (
+              <div style={{
+                padding: '12px',
+                marginBottom: '20px',
+                borderRadius: '6px',
+                backgroundColor: tipoMensaje === 'success' ? 'rgba(40, 167, 69, 0.1)' : 'rgba(220, 53, 69, 0.1)',
+                color: tipoMensaje === 'success' ? 'var(--success-green)' : 'var(--danger-red)',
+                fontSize: '14px'
+              }}>
+                {mensajeCarga}
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '12px', marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', gap: '12px' }}>
               <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: 600 }}
-                onClick={limpiarCarga}
+                onClick={() => {
+                  setShowFormCargaMasiva(false);
+                  setMensajeCarga('');
+                  setArchivoSeleccionado(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
               >
-                Cancelar Subida
+                Cancelar
               </button>
               <button
-                type="button"
-                className="btn btn-primary"
-                style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: 600 }}
                 onClick={procesarCargaMasiva}
+                disabled={!archivoSeleccionado || cargando}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: archivoSeleccionado && !cargando ? 'var(--accent-blue)' : 'var(--text-muted)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: archivoSeleccionado && !cargando ? 'pointer' : 'not-allowed',
+                  fontWeight: 600
+                }}
               >
-                ↑ Procesar Archivo
+                {cargando ? '⏳ Procesando...' : '✅ Procesar'}
               </button>
             </div>
-
-            {mostrarProgreso && (
-              <div style={{ marginTop: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    Procesando...
-                  </span>
-                  <span id="porcentajeCarga" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--success-green)' }}>
-                    {progreso}%
-                  </span>
-                </div>
-                <div style={{ width: '100%', height: '6px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
-                  <div
-                    id="barraProgreso"
-                    style={{
-                      width: `${progreso}%`,
-                      height: '100%',
-                      background: 'linear-gradient(90deg, var(--success-green), #4caf50)',
-                      transition: 'width 0.3s ease'
-                    }}
-                  />
-                </div>
-              </div>
-            )}
           </div>
         </div>
-
-        {/* Información Importante */}
-        <div className="card fade-in">
-          <h3 style={{ color: 'var(--accent-blue)', marginBottom: '16px', fontSize: '16px' }}>ℹ️ Información sobre Vuelos</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', fontSize: '13px', lineHeight: 1.8, color: 'var(--text-secondary)' }}>
-            <div>
-              <strong style={{ color: 'var(--text-primary)' }}>Datos Requeridos:</strong>
-              <ul style={{ marginTop: '8px', marginLeft: '16px' }}>
-                <li>✓ Número de vuelo único</li>
-                <li>✓ Fecha y hora de salida</li>
-                <li>✓ Fecha y hora de llegada</li>
-              </ul>
-            </div>
-            <div>
-              <strong style={{ color: 'var(--text-primary)' }}>Capacidades Estándar:</strong>
-              <ul style={{ marginTop: '8px', marginLeft: '16px' }}>
-                <li>✓ Vuelos domésticos: 150-250 maletas</li>
-                <li>✓ Vuelos internacionales: 250-400 maletas</li>
-              </ul>
-            </div>
-            <div>
-              <strong style={{ color: 'var(--text-primary)' }}>Formatos Excel Aceptados:</strong>
-              <ul style={{ marginTop: '8px', marginLeft: '16px' }}>
-                <li>✓ .xls (Excel 97-2003)</li>
-                <li>✓ .xlsx (Excel 2007+)</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

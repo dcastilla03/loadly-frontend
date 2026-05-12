@@ -191,8 +191,91 @@ export default function RegistroMaletas() {
               </thead>
               <tbody id="maletasRegistrosTabla">
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>
-                    No hay registros aún. Completa el formulario para agregar maletas.
+                  <td style={{ textAlign: 'center' }}>LATAM Airlines</td>
+                  <td style={{ textAlign: 'center' }}>Lima (JCH)</td>
+                  <td style={{ textAlign: 'center' }}>Tokio (NRT)</td>
+                  <td style={{ textAlign: 'center' }}>85</td>
+                  <td style={{ textAlign: 'center' }}>23-Abr-2026 14:32</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>Aeromexico</td>
+                  <td style={{ textAlign: 'center' }}>Ciudad de México (MEX)</td>
+                  <td style={{ textAlign: 'center' }}>Frankfurt (FRA)</td>
+                  <td style={{ textAlign: 'center' }}>120</td>
+                  <td style={{ textAlign: 'center' }}>23-Abr-2026 12:15</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>United Airlines</td>
+                  <td style={{ textAlign: 'center' }}>Nueva York (JFK)</td>
+                  <td style={{ textAlign: 'center' }}>Miami (MIA)</td>
+                  <td style={{ textAlign: 'center' }}>95</td>
+                  <td style={{ textAlign: 'center' }}>23-Abr-2026 11:45</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>Lufthansa</td>
+                  <td style={{ textAlign: 'center' }}>Madrid (MAD)</td>
+                  <td style={{ textAlign: 'center' }}>Dubái (DXB)</td>
+                  <td style={{ textAlign: 'center' }}>110</td>
+                  <td style={{ textAlign: 'center' }}>23-Abr-2026 10:20</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>Singapore Airlines</td>
+                  <td style={{ textAlign: 'center' }}>Singapur (SIN)</td>
+                  <td style={{ textAlign: 'center' }}>Bangkok (BKK)</td>
+                  <td style={{ textAlign: 'center' }}>75</td>
+                  <td style={{ textAlign: 'center' }}>23-Abr-2026 09:30</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>Emirates</td>
+                  <td style={{ textAlign: 'center' }}>Dubái (DXB)</td>
+                  <td style={{ textAlign: 'center' }}>Londres (LHR)</td>
+                  <td style={{ textAlign: 'center' }}>130</td>
+                  <td style={{ textAlign: 'center' }}>22-Abr-2026 16:45</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>Air France</td>
+                  <td style={{ textAlign: 'center' }}>París (CDG)</td>
+                  <td style={{ textAlign: 'center' }}>Ámsterdam (AMS)</td>
+                  <td style={{ textAlign: 'center' }}>65</td>
+                  <td style={{ textAlign: 'center' }}>22-Abr-2026 14:10</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>British Airways</td>
+                  <td style={{ textAlign: 'center' }}>Londres (LHR)</td>
+                  <td style={{ textAlign: 'center' }}>Hong Kong (HKG)</td>
+                  <td style={{ textAlign: 'center' }}>150</td>
+                  <td style={{ textAlign: 'center' }}>22-Abr-2026 13:25</td>
+                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
                   </td>
                 </tr>
               </tbody>
@@ -203,15 +286,15 @@ export default function RegistroMaletas() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginTop: '24px' }}>
             <div className="stat-card">
               <h3>Total Registrado</h3>
-              <div className="value" id="totalMaletas">0</div>
+              <div className="value" id="totalMaletas">1,240</div>
             </div>
             <div className="stat-card">
               <h3>Últimas 24h</h3>
-              <div className="value" id="ultimas24h">0</div>
+              <div className="value" id="ultimas24h">830</div>
             </div>
             <div className="stat-card">
               <h3>En Procesamiento</h3>
-              <div className="value">0</div>
+              <div className="value">142</div>
             </div>
           </div>
         </div>

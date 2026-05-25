@@ -1,7 +1,7 @@
 'use client';
 
-import React, { ReactNode, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { ReactNode, useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import './globals.css';
 import { Sidebar } from '../components/Sidebar';
 
@@ -19,10 +19,23 @@ export default function RootLayout({
   children: ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [wizardStep, setWizardStep] = useState(1);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [startDate, setStartDate] = useState<string>('');
   const [showModal, setShowModal] = useState(false);
+  const previousPathnameRef = React.useRef<string>('');
+
+  // Cerrar la modal solo cuando realmente navegamos a una ruta diferente
+  useEffect(() => {
+    if (previousPathnameRef.current && previousPathnameRef.current !== pathname) {
+      setShowModal(false);
+      setWizardStep(1);
+      setSelectedType(null);
+      setStartDate('');
+    }
+    previousPathnameRef.current = pathname;
+  }, [pathname]);
 
   React.useEffect(() => {
     window.cerrarSesion = () => {
@@ -123,7 +136,13 @@ export default function RootLayout({
         <div 
           id="modalOverlay" 
           className="modal-overlay" 
-          style={{ display: showModal ? 'flex' : 'none' }}
+          style={{ 
+            display: 'flex',
+            opacity: showModal ? 1 : 0,
+            pointerEvents: showModal ? 'auto' : 'none',
+            visibility: showModal ? 'visible' : 'hidden',
+            transition: showModal ? 'opacity 0.15s ease' : 'opacity 0.15s ease'
+          }}
         >
           <div className="modal" style={{ maxWidth: '700px' }}>
             {/* Modal Header */}

@@ -225,8 +225,17 @@ export default function Almacenes() {
       </div>
 
       {/* Modal Agregar */}
-      {showFormAgregar && (
-        <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setShowFormAgregar(false)}>
+      <div 
+        className="modal-overlay" 
+        style={{ 
+          display: 'flex',
+          opacity: showFormAgregar ? 1 : 0,
+          pointerEvents: showFormAgregar ? 'auto' : 'none',
+          visibility: showFormAgregar ? 'visible' : 'hidden',
+          transition: 'opacity 0.15s ease'
+        }} 
+        onClick={() => setShowFormAgregar(false)}
+      >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">➕ Agregar Almacén</h2>
@@ -245,11 +254,19 @@ export default function Almacenes() {
             </div>
           </div>
         </div>
-      )}
 
       {/* Modal Carga Masiva */}
-      {showFormCargaMasiva && (
-        <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setShowFormCargaMasiva(false)}>
+      <div 
+        className="modal-overlay" 
+        style={{ 
+          display: 'flex',
+          opacity: showFormCargaMasiva ? 1 : 0,
+          pointerEvents: showFormCargaMasiva ? 'auto' : 'none',
+          visibility: showFormCargaMasiva ? 'visible' : 'hidden',
+          transition: 'opacity 0.15s ease'
+        }} 
+        onClick={() => setShowFormCargaMasiva(false)}
+      >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">📤 Cargar Aeropuertos</h2>
@@ -322,7 +339,6 @@ export default function Almacenes() {
             </div>
           </div>
         </div>
-      )}
     </div>
   );
 }

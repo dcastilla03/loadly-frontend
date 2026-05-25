@@ -2,27 +2,9 @@
 
 import { useEffect } from 'react';
 
-declare global {
-  interface Window {
-    abrirModalSimulacion: () => void;
-    cerrarModal: (id: string) => void;
-  }
-}
-
 export default function Home() {
-  useEffect(() => {
-    // Funciones globales para el modal
-    window.abrirModalSimulacion = () => {
-      const modal = document.getElementById('modalOverlay');
-      if (modal) modal.style.display = 'flex';
-    };
-
-    window.cerrarModal = (id: string) => {
-      const modal = document.getElementById(id);
-      if (modal) modal.style.display = 'none';
-    };
-  }, []);
-
+  // Las funciones globales se definen en layout.tsx, no necesitamos redefinirlas aquí
+  
   return (
     <div className="main-wrapper">
       <div className="container">
@@ -49,12 +31,10 @@ export default function Home() {
                 <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>Registrar Maletas</div>
               </div>
             </a>
-            <a href="/simulador" style={{ textDecoration: 'none' }}>
-              <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid var(--border-color)' }} onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-blue)'; }} onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}>
-                <div style={{ fontSize: '32px', marginBottom: '8px' }}>🗺️</div>
-                <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>Simulador</div>
-              </div>
-            </a>
+            <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid var(--border-color)' }} onClick={() => window.abrirModalSimulacion()} onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-blue)'; }} onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}>
+              <div style={{ fontSize: '32px', marginBottom: '8px' }}>⚙️</div>
+              <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>Simulador</div>
+            </div>
             <a href="/rastreo" style={{ textDecoration: 'none' }}>
               <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid var(--border-color)' }} onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-blue)'; }} onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}>
                 <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔍</div>

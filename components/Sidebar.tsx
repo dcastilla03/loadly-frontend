@@ -8,6 +8,7 @@ interface SidebarProps {}
 
 export const Sidebar: React.FC<SidebarProps> = () => {
   const [collapsed, setCollapsed] = useState(false);
+  const [expandedSimulations, setExpandedSimulations] = useState(false);
   const pathname = usePathname();
 
   useEffect(() => {
@@ -15,7 +16,15 @@ export const Sidebar: React.FC<SidebarProps> = () => {
     setCollapsed(savedState);
     // Actualizar clase en el main-wrapper
     updateMainWrapperClass(savedState);
-  }, []);
+
+    // Expandir automáticamente la sección de simulaciones si estamos en una ruta de simulación
+    const isInSimulationRoute = pathname.startsWith('/operacion-dia-dia') || 
+                                pathname.startsWith('/simulacion-periodo') || 
+                                pathname.startsWith('/simulacion-colapso');
+    if (isInSimulationRoute) {
+      setExpandedSimulations(true);
+    }
+  }, [pathname]);
 
   const updateMainWrapperClass = (isCollapsed: boolean) => {
     const mainWrapper = document.querySelector('.main-wrapper');
@@ -35,6 +44,10 @@ export const Sidebar: React.FC<SidebarProps> = () => {
     updateMainWrapperClass(newState);
   };
 
+  const toggleSimulations = () => {
+    setExpandedSimulations(!expandedSimulations);
+  };
+
   const handleLogout = () => {
     if (confirm('¿Deseas cerrar sesión?')) {
       localStorage.clear();
@@ -50,13 +63,18 @@ export const Sidebar: React.FC<SidebarProps> = () => {
     return pathname.startsWith(href);
   };
 
-  const navItems = [
-    { href: '/', icon: '🏠', label: 'Inicio' },
-    { href: '/registro-maletas', icon: '📦', label: 'Registrar Maletas' },
-    { href: '/simulador', icon: '⚙️', label: 'Simulador' },
+  const simulationItems = [
     { href: '/operacion-dia-dia', icon: '⏱️', label: 'Operación Día a Día' },
     { href: '/simulacion-periodo', icon: '📅', label: 'Simulación Período' },
     { href: '/simulacion-colapso', icon: '💥', label: 'Simulación Colapso' },
+  ];
+
+  const navItems = [
+    { href: '/', icon: '🏠', label: 'Inicio' },
+    { href: '/registro-maletas', icon: '📦', label: 'Registrar Maletas' },
+  ];
+
+  const navItemsAfterSimulations = [
     { href: '/rastreo', icon: '🔍', label: 'Rastreo' },
     { href: '/gestion-vuelos', icon: '✈️', label: 'Gestión de Vuelos' },
     { href: '/almacenes', icon: '🏭', label: 'Almacenes' },
@@ -82,6 +100,48 @@ export const Sidebar: React.FC<SidebarProps> = () => {
 
       <nav className="sidebar-nav">
         {navItems.map((item) => (
+          <Link 
+            key={item.href}
+            href={item.href} 
+            className={`nav-item ${isActive(item.href) ? 'active' : ''}`}
+          >
+            <span className="nav-icon">{item.icon}</span>
+            <span className="nav-text">{item.label}</span>
+          </Link>
+        ))}
+
+        {/* Sección Desplegable de Simulaciones */}
+        <div className="nav-group">
+          <button
+            className={`nav-item nav-expandable ${expandedSimulations ? 'expanded' : ''}`}
+            onClick={toggleSimulations}
+          >
+            <span className="nav-icon">⚙️</span>
+            <span className="nav-text">Simulador</span>
+            <span className="nav-expand-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </span>
+          </button>
+
+          {expandedSimulations && (
+            <div className="nav-submenu">
+              {simulationItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-item nav-subitem ${isActive(item.href) ? 'active' : ''}`}
+                >
+                  <span className="nav-icon">{item.icon}</span>
+                  <span className="nav-text">{item.label}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {navItemsAfterSimulations.map((item) => (
           <Link 
             key={item.href}
             href={item.href} 

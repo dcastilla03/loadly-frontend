@@ -781,6 +781,22 @@ input[type="range"]::-moz-range-thumb:hover {
 }
 
 /* ============================================
+   MODAL HIDDEN STATE
+   ============================================ */
+
+.modal-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.modal-overlay:not(.hidden) {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+/* ============================================
    RESPONSIVE DESIGN
    ============================================ */
 
@@ -1050,6 +1066,110 @@ body {
 .sidebar.collapsed .nav-text {
   opacity: 0;
   width: 0;
+}
+
+/* Grupo de navegación para items desplegables */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Botón expandible en el sidebar */
+.nav-expandable {
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  color: var(--text-secondary);
+  width: 100%;
+  min-width: 0;
+  text-decoration: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nav-expandable:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--accent-blue);
+}
+
+.nav-expandable.expanded {
+  background-color: rgba(37, 100, 235, 0.1);
+  color: var(--accent-blue);
+  font-weight: 600;
+  padding-left: 8px;
+  border-bottom: 3px solid var(--accent-blue);
+  padding-bottom: 9px;
+}
+
+.nav-expandable .nav-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+/* Icono de expansión */
+.nav-expand-icon {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: transform 0.3s ease;
+}
+
+.nav-expandable.expanded .nav-expand-icon {
+  transform: rotate(180deg);
+}
+
+/* Submenú */
+.nav-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background-color: rgba(37, 100, 235, 0.05);
+  border-left: 2px solid rgba(37, 100, 235, 0.3);
+  margin-left: 12px;
+  animation: slideDown 0.3s ease;
+}
+
+/* Items del submenú */
+.nav-subitem {
+  padding: 10px 12px;
+  padding-left: 32px;
+  border-radius: 0;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.nav-subitem:hover {
+  background-color: rgba(37, 100, 235, 0.1);
+  color: var(--accent-blue);
+  padding-left: 28px;
+}
+
+.nav-subitem.active {
+  background-color: rgba(37, 100, 235, 0.15);
+  color: var(--accent-blue);
+  font-weight: 600;
+  border-left: 4px solid var(--accent-blue);
+  padding-left: 28px;
+}
+
+/* Ajustes para sidebar colapsado */
+.sidebar.collapsed .nav-expand-icon {
+  opacity: 0;
+  width: 0;
+}
+
+.nav-submenu {
+  margin-left: 12px;
 }
 
 .sidebar-footer {

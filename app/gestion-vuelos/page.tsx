@@ -281,7 +281,7 @@ export default function GestionVuelos() {
             </p>
 
             <div
-              onClick={() => document.querySelector('input[type="file"]')?.click()}
+              onClick={() => (document.querySelector('input[type="file"]') as HTMLInputElement | null)?.click()}
               style={{
                 border: '2px dashed var(--border-color)',
                 borderRadius: '8px',

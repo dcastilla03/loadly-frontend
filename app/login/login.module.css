@@ -1,0 +1,486 @@
+/* ============================================
+   LOGIN - Estilos Modernos
+   ============================================ */
+
+.loginContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(135deg, #fafbfc 0%, #eef2fa 50%, #e3eaf5 100%);
+  position: relative;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+}
+
+/* Formas flotantes decorativas */
+.backgroundGradient {
+  position: absolute;
+  top: -50%;
+  right: -50%;
+  width: 1000px;
+  height: 1000px;
+  background: radial-gradient(circle, rgba(37, 100, 235, 0.1) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: float 20s ease-in-out infinite;
+}
+
+.floatingShape1 {
+  position: absolute;
+  bottom: -100px;
+  left: -100px;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(37, 100, 235, 0.08) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: float 25s ease-in-out infinite reverse;
+}
+
+.floatingShape2 {
+  position: absolute;
+  top: 50%;
+  left: 5%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(6, 120, 87, 0.05) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: float 30s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(30px);
+  }
+}
+
+/* Contenedor principal del login */
+.loginBox {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  padding: 60px 50px;
+  width: 100%;
+  max-width: 450px;
+  z-index: 10;
+  position: relative;
+  animation: slideUp 0.5s ease-out;
+  backdrop-filter: blur(10px);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Sección del logo */
+.logoSection {
+  text-align: center;
+  margin-bottom: 40px;
+  animation: fadeIn 0.6s ease-out 0.2s both;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.logoWrapper {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+  animation: zoomIn 0.6s ease-out 0.3s both;
+}
+
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.logo {
+  width: 80px;
+  height: 80px;
+  display: block;
+  filter: drop-shadow(0 4px 12px rgba(37, 100, 235, 0.15));
+  transition: transform 0.3s ease;
+}
+
+.logo:hover {
+  transform: scale(1.05);
+}
+
+.title {
+  font-size: 32px;
+  font-weight: 700;
+  color: #162037;
+  margin: 0;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, #2564eb 0%, #1e50d4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #536478;
+  margin: 0;
+  font-weight: 500;
+}
+
+/* Banner de Desarrollo Simple */
+.devBanner {
+  background-color: #f3f4f6;
+  border: 1px solid #d0dce9;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 25px;
+}
+
+.devLabel {
+  font-size: 12px;
+  color: #536478;
+  display: block;
+}
+
+/* Formulario */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Mensaje de error */
+.errorMessage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: #fef2f2;
+  color: #b91c1c;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border-left: 4px solid #b91c1c;
+  font-size: 13px;
+  font-weight: 500;
+  animation: shake 0.4s ease;
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+.errorIcon {
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+}
+
+/* Grupo del formulario */
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slideInLeft 0.5s ease-out forwards;
+}
+
+.formGroup:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.formGroup:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Label */
+.label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #162037;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Input */
+.input {
+  background-color: #f5f7fc;
+  border: 2px solid #d0dce9;
+  color: #162037;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-family: inherit;
+  font-size: 14px;
+  transition: all 0.25s ease;
+  height: 44px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #2564eb;
+  box-shadow: 0 0 0 4px rgba(37, 100, 235, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.02);
+  background-color: white;
+}
+
+.input:disabled {
+  background-color: #eef2fa;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.input::placeholder {
+  color: #8895a9;
+}
+
+/* Checkbox grupo */
+.checkboxGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.checkbox {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #2564eb;
+  border: 2px solid #d0dce9;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.checkbox:checked {
+  background-color: #2564eb;
+  border-color: #2564eb;
+}
+
+.checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.checkboxLabel {
+  font-size: 13px;
+  color: #536478;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s ease;
+}
+
+.checkboxLabel:hover {
+  color: #2564eb;
+}
+
+/* Botón Submit */
+.submitButton {
+  background: linear-gradient(135deg, #2564eb 0%, #1e50d4 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  margin-top: 10px;
+  box-shadow: 0 4px 16px rgba(37, 100, 235, 0.25);
+}
+
+.submitButton:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(37, 100, 235, 0.35);
+}
+
+.submitButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.submitButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.buttonIcon {
+  font-size: 18px;
+  display: inline-block;
+}
+
+/* Spinner de carga */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Texto de ayuda */
+.helpText {
+  text-align: center;
+  margin-top: 20px;
+}
+
+.helpInfo {
+  font-size: 13px;
+  color: #536478;
+  margin: 0;
+}
+
+.helpLink {
+  color: #2564eb;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+}
+
+.helpLink:hover {
+  color: #1e50d4;
+  border-bottom-color: #1e50d4;
+}
+
+/* Footer */
+.footer {
+  margin-top: 40px;
+  text-align: center;
+  border-top: 1px solid #d0dce9;
+  padding-top: 20px;
+}
+
+.footerText {
+  font-size: 11px;
+  color: #8895a9;
+  margin: 0;
+  font-weight: 500;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .loginBox {
+    padding: 40px 30px;
+    margin: 20px;
+  }
+
+  .title {
+    font-size: 28px;
+  }
+
+  .subtitle {
+    font-size: 13px;
+  }
+
+  .logo {
+    width: 70px;
+    height: 70px;
+  }
+
+  .submitButton {
+    padding: 12px 16px;
+    height: 44px;
+    font-size: 14px;
+  }
+
+  .input {
+    padding: 11px 14px;
+    height: 40px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .loginBox {
+    padding: 30px 20px;
+    border-radius: 16px;
+  }
+
+  .logoSection {
+    margin-bottom: 30px;
+  }
+
+  .title {
+    font-size: 24px;
+  }
+
+  .subtitle {
+    font-size: 12px;
+  }
+
+  .logo {
+    width: 60px;
+    height: 60px;
+  }
+
+  .form {
+    gap: 16px;
+  }
+
+  .label {
+    font-size: 11px;
+  }
+
+  .input {
+    padding: 10px 12px;
+    height: 38px;
+    font-size: 12px;
+  }
+
+  .submitButton {
+    padding: 11px 14px;
+    height: 40px;
+    font-size: 13px;
+  }
+}

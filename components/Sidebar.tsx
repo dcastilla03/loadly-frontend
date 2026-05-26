@@ -50,8 +50,9 @@ export const Sidebar: React.FC<SidebarProps> = () => {
 
   const handleLogout = () => {
     if (confirm('¿Deseas cerrar sesión?')) {
-      localStorage.clear();
-      window.location.href = '/';
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('savedUsername');
+      window.location.href = '/login';
     }
   };
 

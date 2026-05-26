@@ -4,6 +4,7 @@ import React, { ReactNode, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import './globals.css';
 import { Sidebar } from '../components/Sidebar';
+import { ProtectedRoute } from '../components/ProtectedRoute';
 
 declare global {
   interface Window {
@@ -23,6 +24,7 @@ export default function RootLayout({
   const [wizardStep, setWizardStep] = useState(1);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [startDate, setStartDate] = useState<string>('');
+  const [startTime, setStartTime] = useState<string>('00:00');
   const [showModal, setShowModal] = useState(false);
   const previousPathnameRef = React.useRef<string>('');
 
@@ -33,13 +35,16 @@ export default function RootLayout({
       setWizardStep(1);
       setSelectedType(null);
       setStartDate('');
+      setStartTime('00:00');
     }
     previousPathnameRef.current = pathname;
   }, [pathname]);
 
   React.useEffect(() => {
     window.cerrarSesion = () => {
-      alert('Cerrando sesión...');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('savedUsername');
+      router.push('/login');
     };
     
     window.cerrarModal = (id: string) => {
@@ -49,13 +54,14 @@ export default function RootLayout({
         setWizardStep(1);
         setSelectedType(null);
         setStartDate('');
+        setStartTime('00:00');
       }
     };
 
     window.abrirModalSimulacion = () => {
       setShowModal(true);
     };
-  }, []);
+  }, [router]);
 
   // Wizard handlers
   const handleNextStep = () => {
@@ -93,9 +99,10 @@ export default function RootLayout({
         return;
       }
       
-      // Redirigir a simulacion-periodo con la fecha como parámetro
+      // Redirigir a simulacion-periodo con la fecha y hora como parámetros
       const dateStr = new Date(startDate).toISOString().split('T')[0]; // Formato YYYY-MM-DD
-      router.push(`/simulacion-periodo?startDate=${dateStr}`);
+      const timeStr = startTime || '00:00'; // Formato HH:MM
+      router.push(`/simulacion-periodo?startDate=${dateStr}&startTime=${timeStr}`);
     } else if (selectedType === 'DiaDia') {
       router.push('/operacion-dia-dia');
     } else if (selectedType === 'Colapso') {
@@ -106,6 +113,7 @@ export default function RootLayout({
     setWizardStep(1);
     setSelectedType(null);
     setStartDate('');
+    setStartTime('00:00');
   };
 
   const handleConfirmStep = () => {
@@ -127,10 +135,11 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <Sidebar />
+        <ProtectedRoute>
+          {pathname !== '/login' && <Sidebar />}
 
-        {/* Contenido Principal */}
-        {children}
+          {/* Contenido Principal */}
+          {children}
 
         {/* Modal del Wizard de Simulación */}
         <div 
@@ -233,7 +242,7 @@ export default function RootLayout({
               {wizardStep === 2 && selectedType === 'Periodo' && (
                 <div>
                   <h3 style={{ color: 'var(--text-primary)', marginBottom: '28px', fontSize: '16px' }}>
-                    Fecha de Inicio (Período de 5 Días)
+                    Fecha y Hora de Inicio (Período de 5 Días)
                   </h3>
 
                   <div style={{ display: 'grid', gap: '16px' }}>
@@ -257,9 +266,29 @@ export default function RootLayout({
                         }}
                       />
                     </div>
+                    <div>
+                      <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: '600' }}>
+                        Selecciona la hora de inicio:
+                      </label>
+                      <input 
+                        type="time" 
+                        value={startTime}
+                        onChange={(e) => setStartTime(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-secondary)',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
                     <div style={{ padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid var(--accent-blue)', borderRadius: '8px' }}>
                       <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
-                        📅 La simulación durará <strong>5 días</strong> a partir de la fecha seleccionada.
+                        📅 La simulación durará <strong>5 días</strong> a partir de la fecha y hora seleccionadas.
                       </p>
                     </div>
                   </div>
@@ -298,9 +327,16 @@ export default function RootLayout({
                     {selectedType === 'Periodo' && (
                       <>
                         <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
-                          <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fecha de Inicio</small>
+                          <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fecha y Hora de Inicio</small>
                           <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginTop: '4px' }}>
-                            {startDate ? new Date(startDate).toLocaleDateString('es-ES') : '-'}
+                            {startDate ? (() => {
+                              const date = new Date(startDate + 'T00:00:00');
+                              const day = String(date.getDate()).padStart(2, '0');
+                              const month = String(date.getMonth() + 1).padStart(2, '0');
+                              const year = date.getFullYear();
+                              const time = startTime || '00:00';
+                              return `${day}/${month}/${year} ${time}`;
+                            })() : '-'}
                           </div>
                         </div>
                         <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
@@ -352,6 +388,7 @@ export default function RootLayout({
             </div>
           </div>
         </div>
+        </ProtectedRoute>
       </body>
     </html>
   );

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { useSimulacion, FlightEvent } from './useSimulacion';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { useSimulacion, FlightEvent, LogEvent } from './useSimulacion';
 
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
@@ -37,13 +37,37 @@ function bezierCurve(
   return pts;
 }
 
-/** Formatea minutos desde el inicio de la simulación como "Día N — HH:MM" */
-function formatSimTime(minutos: number): string {
-  const dia = Math.floor(minutos / (24 * 60)) + 1;
-  const minDelDia = minutos % (24 * 60);
-  const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
-  const mm = String(minDelDia % 60).padStart(2, '0');
-  return `Día ${dia} — ${hh}:${mm}`;
+/** Formatea minutos desde el inicio de la simulación como "DD/MM/AAAA HH:MM" */
+function formatSimTime(minutos: number, startDate: string | null, startTime: string | null): string {
+  if (!startDate) return 'DD/MM/AAAA HH:MM';
+  
+  try {
+    // Parse startDate format "YYYY-MM-DD"
+    const [year, month, day] = startDate.split('-').map(Number);
+    
+    // Parse startTime format "HH:MM"
+    let hour = 0, minute = 0;
+    if (startTime) {
+      const [h, m] = startTime.split(':').map(Number);
+      hour = h || 0;
+      minute = m || 0;
+    }
+    
+    const date = new Date(year, month - 1, day, hour, minute);
+    
+    // Add simulated minutes
+    date.setMinutes(date.getMinutes() + minutos);
+    
+    // Format as DD/MM/AAAA HH:MM
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mi = String(date.getMinutes()).padStart(2, '0');
+    return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+  } catch (e) {
+    return 'DD/MM/AAAA HH:MM';
+  }
 }
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
@@ -55,6 +79,7 @@ const TOTAL_MINUTOS_SIM = 5 * 24 * 60; // 7 200
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function SimulacionPeriodo() {
   const [startDate, setStartDate] = useState<string | null>(null);
+  const [startTime, setStartTime] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInst = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
@@ -65,30 +90,64 @@ export default function SimulacionPeriodo() {
   // Lista viva de FlightEvent (con svgElement adjunto cuando están activos)
   const flightEventsRef = useRef<FlightEvent[]>([]);
 
+  // Lista viva de LogEvent temporizados (se disparan al compas del cronómetro)
+  const logEventsRef = useRef<LogEvent[]>([]);
+
+  // Ref estable a addLog (evita problemas de closure en el loop de animación)
+  const addLogRef = useRef<(text: string, color: string) => void>(() => {});
+
   // Tiempo real en que arrancó la animación del cronómetro
   const clockStartRef = useRef<number | null>(null);
 
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(0);
+  
+  // Estado para rastrear si la simulación fue detenida
+  const [isStopped, setIsStopped] = useState(false);
+  // Estado anterior de isRunning para detectar cuándo cambió
+  const prevIsRunningRef = useRef(false);
 
   const isInitialized = useRef(false);
 
-  // Leer fecha de inicio del query param
+  // Leer fecha y hora de inicio del query param
   useEffect(() => {
     const dateParam = new URLSearchParams(window.location.search).get('startDate');
+    const timeParam = new URLSearchParams(window.location.search).get('startTime');
     if (dateParam) setStartDate(dateParam);
+    if (timeParam) setStartTime(timeParam);
   }, []);
 
-  const sim = useSimulacion(startDate || undefined);
+  const sim = useSimulacion(startDate || undefined, startTime || undefined);
 
   // Iniciar simulación automáticamente cuando tenemos la fecha
   useEffect(() => {
     if (startDate && !isInitialized.current) {
       sim.iniciar();
       isInitialized.current = true;
-      clockStartRef.current = performance.now();
+      // El reloj se iniciará cuando iteracion > 0
     }
   }, [startDate, sim.iniciar]);
+
+  // ── Detectar cambios en isRunning para rastrear detenido ──────────────────
+  useEffect(() => {
+    if (prevIsRunningRef.current && !sim.isRunning && sim.iteracion > 0) {
+      // Cambió de true a false: fue detenido
+      setIsStopped(true);
+    } else if (sim.isRunning && !prevIsRunningRef.current) {
+      // Cambió de false a true: reinició, resetear estado
+      setIsStopped(false);
+    }
+    prevIsRunningRef.current = sim.isRunning;
+  }, [sim.isRunning, sim.iteracion]);
+
+  // ── Iniciar cronómetro solo después de la primera iteración ───────────────
+  useEffect(() => {
+    if (sim.isRunning && sim.iteracion === 0) {
+      clockStartRef.current = null; // Reiniciar
+    } else if (sim.isRunning && sim.iteracion > 0 && clockStartRef.current === null) {
+      clockStartRef.current = performance.now(); // Arrancar reloj
+    }
+  }, [sim.isRunning, sim.iteracion]);
 
   // ── Inicializar mapa ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -173,8 +232,10 @@ export default function SimulacionPeriodo() {
       };
 
       const m = L.marker([a.latitud, a.longitud], { icon }).addTo(mapInst.current);
+      m.airportCode = a.codigo;
+      m.generarPopupHTML = generarPopupHTML;
       m.bindPopup(generarPopupHTML(), { maxWidth: 300 });
-      m.on('popupopen', () => m.setPopupContent(generarPopupHTML()));
+      m.on('popupopen', () => m.setPopupContent(m.generarPopupHTML()));
       markersRef.current.push(m);
     });
   }, [sim.aeropuertos]);
@@ -190,6 +251,75 @@ export default function SimulacionPeriodo() {
       flightEventsRef.current = [...flightEventsRef.current, ...nuevos];
     }
   }, [sim.allFlightEvents]);
+
+  // ── Sincronizar logEvents del hook → ref local ────────────────────────────
+  useEffect(() => {
+    if (sim.allLogEvents.length === 0) {
+      // Reset al reiniciar la simulación
+      logEventsRef.current = [];
+      return;
+    }
+    const nuevos = sim.allLogEvents.slice(logEventsRef.current.length);
+    if (nuevos.length > 0) {
+      logEventsRef.current = [...logEventsRef.current, ...nuevos];
+    }
+  }, [sim.allLogEvents]);
+
+  // ── Mantener addLogRef siempre apuntando a la función actual ──────────────
+  useEffect(() => {
+    addLogRef.current = sim.addLog;
+  }, [sim.addLog]);
+
+  // ── Calcular métricas en tiempo real (memoizado para renderizado eficiente) ───
+  const metricas = useMemo(() => {
+    if (!sim.isRunning || sim.iteracion === 0) {
+      return {
+        vuelosOperando: 0,
+        maletasEnTransito: 0,
+        almacenesConCarga: 0,
+        ocupacionPromedio: 0,
+        tiempoPromedio: 0,
+        entregasExitosas: 0,
+      };
+    }
+
+    const activeFlights = flightEventsRef.current.filter(fe => fe.active);
+    const completedFlights = flightEventsRef.current.filter(fe => fe.done === true);
+    const almacenes = Array.from(airportStateRef.current.values());
+
+    // Vuelos operando
+    const vuelosOperando = activeFlights.length;
+
+    // Maletas en tránsito
+    const maletasEnTransito = activeFlights.reduce((sum, fe) => sum + fe.maletasVuelo, 0);
+
+    // Almacenes con carga
+    const almacenesConCarga = almacenes.filter(a => a.ocupacion > 0).length;
+
+    // Ocupación promedio de almacenes
+    const ocupacionPromedio = almacenes.length > 0 
+      ? almacenes.reduce((sum, a) => sum + (a.capacidad > 0 ? (a.ocupacion / a.capacidad) * 100 : 0), 0) / almacenes.length
+      : 0;
+
+    // Entregas exitosas
+    const entregasExitosas = completedFlights.length;
+
+    // Tiempo promedio de envío
+    const tiempoPromedio = completedFlights.length > 0
+      ? completedFlights.reduce((sum, fe) => sum + (fe.minutosFin - fe.minutosInicio), 0) / completedFlights.length
+      : 0;
+
+    return {
+      vuelosOperando,
+      maletasEnTransito,
+      almacenesConCarga,
+      ocupacionPromedio,
+      tiempoPromedio,
+      entregasExitosas,
+    };
+  }, [sim.isRunning, sim.iteracion, simMinutos]); // Re-calcula cada vez que simMinutos cambia
+
+
 
   // ── Cronómetro + Loop de animación ───────────────────────────────────────
   useEffect(() => {
@@ -361,6 +491,33 @@ export default function SimulacionPeriodo() {
           }
         }
 
+        // ── Disparar LogEvents temporizados al compas del cronómetro ──────────
+        const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
+        for (const le of logEventsRef.current) {
+          if (!le.fired && minSim >= le.minutosDisparo) {
+            le.fired = true;
+            pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
+            
+            if (le.updatePopupCode !== undefined) {
+               const estado = airportStateRef.current.get(le.updatePopupCode);
+               if (estado) {
+                  estado.ocupacion = le.updatePopupOcupacion!;
+                  estado.capacidad = le.updatePopupCapacidad!;
+                  const marker = markersRef.current.find(m => m.airportCode === le.updatePopupCode);
+                  if (marker && marker.isPopupOpen()) {
+                     marker.setPopupContent(marker.generarPopupHTML());
+                  }
+               }
+            }
+          }
+        }
+        if (pendingLogs.length > 0) {
+          // Ordenados cronológicamente (minutosDisparo asc) → el más reciente va primero en el log
+          for (const entry of pendingLogs) {
+            addLogRef.current(entry.text, entry.color, entry.minutosDisparo);
+          }
+        }
+
         frameId = requestAnimationFrame(loop);
       }
 
@@ -473,8 +630,8 @@ export default function SimulacionPeriodo() {
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
         <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">VENTANA HORARIA</div>
         <div style="font-size:11px;color:#374151;">
-          Sale: ${formatSimTime(fe.minutosInicio)}<br/>
-          Llega: ${formatSimTime(fe.minutosFin)}
+          Sale: ${formatSimTime(fe.minutosInicio, startDate, startTime)}<br/>
+          Llega: ${formatSimTime(fe.minutosFin, startDate, startTime)}
         </div>
       </div>
     `;
@@ -486,7 +643,7 @@ export default function SimulacionPeriodo() {
 
   // ── Barra de progreso del cronómetro ─────────────────────────────────────
   const pct = Math.round(sim.progreso);
-  const simTimeLabel = formatSimTime(simMinutos);
+  const simTimeLabel = formatSimTime(simMinutos, startDate, startTime);
 
   return (
     <div className="main-wrapper">
@@ -497,7 +654,56 @@ export default function SimulacionPeriodo() {
         <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
           <div style={{ pointerEvents: 'auto', padding: '8px 12px' }}>
             <div className="card" style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center' }}>
-              <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>📅 Simulación GA — Período 5 Días</h1>
+              <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
+                Simulación — Período 5 Días
+                {/* LED que cambia de estado: apagado → rojo parpadeando → amarillo */}
+                <span 
+                  className={isStopped ? 'led-stopped' : sim.isRunning && sim.iteracion > 0 ? 'led-active' : 'led-off'} 
+                  style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }}
+                />
+                <style>{`
+                  /* LED apagado (inicial) */
+                  .led-off {
+                    background-color: rgba(107, 114, 128, 0.3);
+                    border: 1px solid rgba(107, 114, 128, 0.5);
+                    box-shadow: none;
+                  }
+                  
+                  /* LED activo - Rojo parpadeando */
+                  @keyframes led-blink {
+                    0%, 100% { 
+                      opacity: 1; 
+                      box-shadow: 0 0 6px rgba(239, 68, 68, 0.8); 
+                    }
+                    50% { 
+                      opacity: 0.4; 
+                      box-shadow: 0 0 2px rgba(239, 68, 68, 0.2); 
+                    }
+                  }
+                  .led-active {
+                    background-color: #ef4444;
+                    border: 1px solid #b91c1c;
+                    animation: led-blink 1.2s ease-in-out infinite;
+                  }
+                  
+                  /* LED detenido - Amarillo */
+                  @keyframes led-stopped-pulse {
+                    0%, 100% { 
+                      opacity: 1; 
+                      box-shadow: 0 0 6px rgba(245, 158, 11, 0.8); 
+                    }
+                    50% { 
+                      opacity: 0.6; 
+                      box-shadow: 0 0 3px rgba(245, 158, 11, 0.4); 
+                    }
+                  }
+                  .led-stopped {
+                    background-color: #f59e0b;
+                    border: 1px solid #d97706;
+                    animation: led-stopped-pulse 1.2s ease-in-out infinite;
+                  }
+                `}</style>
+              </h1>
               <div style={{ height: 20, width: 1, backgroundColor: 'var(--border-color)' }} />
 
               {/* Reloj simulado */}
@@ -561,13 +767,10 @@ export default function SimulacionPeriodo() {
           <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
             <div style={{ height: '100%', backgroundColor: '#10b981', width: `${(simMinutos / TOTAL_MINUTOS_SIM) * 100}%`, transition: 'width 0.4s ease' }} />
           </div>
-
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{simTimeLabel}</div>
-          {sim.isRunning && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>⏳ GA ejecutándose...</div>}
         </div>
 
         {/* Leyenda de colores */}
-        <div style={{ position: 'absolute', bottom: 80, left: 12, backgroundColor: 'rgba(255,255,255,0.92)', padding: '10px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', zIndex: 999997 }}>
+        <div style={{ position: 'absolute', bottom: 25, left: 12, backgroundColor: 'rgba(255,255,255,0.92)', padding: '10px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', zIndex: 999997 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 6, textTransform: 'uppercase' }}>Ocupación de Vuelos</div>
           {[
             { color: '#10b981', label: '< 50% — Bajo' },
@@ -580,6 +783,39 @@ export default function SimulacionPeriodo() {
             </div>
           ))}
         </div>
+
+        {/* Panel Configurando Algoritmo — Derecha Inferior */}
+        {sim.isRunning && sim.iteracion === 0 && (
+          <div style={{ position: 'absolute', bottom: 20, right: 20, width: 280, backgroundColor: 'rgba(255,255,255,0.95)', padding: 14, borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', pointerEvents: 'auto', zIndex: 999998 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="algo-spinner"></span> Configurando algoritmo...
+            </div>
+            <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>
+              Esperando resultados iniciales...
+            </div>
+            <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ height: '100%', backgroundColor: 'var(--accent-blue)', width: '100%', animation: 'algo-progress-indeterminate 1.5s infinite linear' }} />
+            </div>
+            <style>{`
+              @keyframes algo-progress-indeterminate {
+                0% { transform: translateX(-100%); }
+                100% { transform: translateX(100%); }
+              }
+              .algo-spinner {
+                display: inline-block;
+                width: 12px;
+                height: 12px;
+                border: 2px solid rgba(59, 130, 246, 0.3);
+                border-radius: 50%;
+                border-top-color: #3b82f6;
+                animation: algo-spin 1s linear infinite;
+              }
+              @keyframes algo-spin {
+                to { transform: rotate(360deg); }
+              }
+            `}</style>
+          </div>
+        )}
 
         {/* Botón scroll hacia estadísticas */}
         <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 999999 }}>
@@ -596,10 +832,10 @@ export default function SimulacionPeriodo() {
           <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 24, color: 'var(--text-primary)' }}>📊 Resultados en Tiempo Real</h2>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
-            <StatCard title="Total Planificados" value={sim.totalPlanificados} color="var(--accent-blue)" />
-            <StatCard title="Total Maletas" value={sim.totalMaletas} color="#22c55e" />
-            <StatCard title="Tramos Registrados" value={sim.allFlightEvents.length} color="#f97316" />
-            <StatCard title="Envíos en Espera" value={sim.stats?.enviosEnEspera ?? 0} color="#ef4444" />
+            <StatCard title="Vuelos operando" value={metricas.vuelosOperando} color="var(--accent-blue)" />
+            <StatCard title="Maletas en tránsito" value={metricas.maletasEnTransito} color="#22c55e" />
+            <StatCard title="Almacenes con carga" value={metricas.almacenesConCarga} color="#f97316" />
+            <StatCard title="Entregas exitosas" value={metricas.entregasExitosas} color="#10b981" />
           </div>
 
           {sim.resumen && (
@@ -630,12 +866,12 @@ export default function SimulacionPeriodo() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
             <div className="card">
-              <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>📋 Registro de Eventos (GA)</h3>
+              <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>📋 Registro de Eventos</h3>
               <div style={{ maxHeight: 350, overflowY: 'auto' }}>
                 {sim.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
                 {sim.logs.map((log, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 50 }}>{log.time}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 50 }}>{log.time || '-'}</span>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
                     <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{log.text}</span>
                   </div>
@@ -643,16 +879,16 @@ export default function SimulacionPeriodo() {
               </div>
             </div>
             <div className="card">
-              <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--accent-blue)' }}>ℹ️ Métricas por Iteración</h3>
-              {sim.stats ? (
+              <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--accent-blue)' }}>ℹ️ Métricas</h3>
+              {sim.isRunning && sim.iteracion > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <MetricBox label="Fitness Promedio" value={sim.stats.fitnessPromedio.toFixed(4)} />
-                  <MetricBox label="Planificados (últ.)" value={String(sim.stats.planificados)} />
-                  <MetricBox label="Sin Ruta (últ.)" value={String(sim.stats.sinRuta)} />
-                  <MetricBox label="Inalcanzables (últ.)" value={String(sim.stats.inalcanzables)} />
+                  <MetricBox label="Ocupación Almacenes" value={`${metricas.ocupacionPromedio.toFixed(1)}%`} />
+                  <MetricBox label="Tiempo Promedio" value={`${metricas.tiempoPromedio.toFixed(0)} min`} />
+                  <MetricBox label="Tasa Puntualidad" value="0%" />
+                  <MetricBox label="Entregas Retrasadas" value="0" />
                 </div>
               ) : (
-                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Esperando datos del GA...</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver métricas...</p>
               )}
             </div>
           </div>

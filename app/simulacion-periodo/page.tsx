@@ -94,7 +94,7 @@ export default function SimulacionPeriodo() {
   const logEventsRef = useRef<LogEvent[]>([]);
 
   // Ref estable a addLog (evita problemas de closure en el loop de animación)
-  const addLogRef = useRef<(text: string, color: string) => void>(() => {});
+  const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => {});
 
   // Tiempo real en que arrancó la animación del cronómetro
   const clockStartRef = useRef<number | null>(null);

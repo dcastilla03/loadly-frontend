@@ -99,32 +99,57 @@ interface BackendSimEvent {
   resumenFinal?: Resumen;
 }
 
-/** Convierte "HH:MM" a minutos del día */
+  /** Convierte "HH:MM" a minutos del día */
 function horaAMinutos(hora: string): number {
   const [h, m] = hora.split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
 }
 
+/** Extrae la fecha de una cadena formato "yyyy-MM-dd HH:mm" o "DD/MM/YYYY HH:MM" */
+function extraerFecha(fechaStr: string): Date {
+  if (fechaStr.includes('-')) {
+    // Formato "yyyy-MM-dd HH:mm"
+    const [datePart, timePart] = fechaStr.split(' ');
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hour, min] = timePart?.split(':').map(Number) || [0, 0];
+    return new Date(year, month - 1, day, hour, min, 0, 0);
+  } else {
+    // Formato "DD/MM/YYYY HH:MM"
+    const parts = fechaStr.split(' ');
+    const [day, month, year] = parts[0].split('/').map(Number);
+    const [hour, min] = parts[1]?.split(':').map(Number) || [0, 0];
+    return new Date(year, month - 1, day, hour, min, 0, 0);
+  }
+}
+
+/** Convierte "HH:MM:SS" o "HH:MM" a minutos del día */
+function horaConMinutosDelDia(horaStr: string): number {
+  const parts = horaStr.split(':').map(Number);
+  const h = parts[0] || 0;
+  const m = parts[1] || 0;
+  return h * 60 + m;
+}
+
 /** Convierte "YYYY-MM-DD HH:MM" a minutos desde el inicio de la simulación */
 function fechaHoraAMinutosDesdeInicio(fechaHoraStr: string, simStartDate: Date): number {
-  // formato esperado: "2026-01-01 03:20"
-  const [datePart, timePart] = fechaHoraStr.split(' ');
-  if (!datePart || !timePart) return 0;
-  const [year, month, day] = datePart.split('-').map(Number);
-  const [hour, min] = timePart.split(':').map(Number);
-  const fecha = new Date(year, month - 1, day, hour, min, 0, 0);
+  const fecha = extraerFecha(fechaHoraStr);
   return Math.round((fecha.getTime() - simStartDate.getTime()) / 60000);
 }
 
-/** Convierte "DD/MM/YYYY HH:MM" a minutos desde el inicio de la simulación */
-function fechaDisplayAMinutos(fechaStr: string, simStart: Date): number {
-  const parts = fechaStr.split(' ');
-  if (parts.length < 2) return 0;
-  const [day, month, year] = parts[0].split('/').map(Number);
-  const [hour, min] = parts[1].split(':').map(Number);
-  if (!year || isNaN(hour) || isNaN(min)) return 0;
-  const fecha = new Date(year, month - 1, day, hour, min, 0, 0);
-  return Math.round((fecha.getTime() - simStart.getTime()) / 60000);
+/** Convierte solo la hora (HH:MM:SS o HH:MM) con la fecha de limiteLectura a minutos desde el inicio */
+function horaEnFechaAMinutos(horaStr: string, limiteLecturaStr: string, simStartDate: Date): number {
+  const fechaLimite = extraerFecha(limiteLecturaStr);
+  const minutosDeLaHora = horaConMinutosDelDia(horaStr);
+  const horaEnMinutosDelDia = fechaLimite.getHours() * 60 + fechaLimite.getMinutes();
+  
+  // Si la hora es anterior a la hora actual del límite de lectura, es del día siguiente
+  let fecha = new Date(fechaLimite);
+  if (minutosDeLaHora < horaEnMinutosDelDia - 60) { // margen de 1 hora
+    fecha = new Date(fechaLimite.getTime() + 24 * 60 * 60 * 1000);
+  }
+  fecha.setHours(Math.floor(minutosDeLaHora / 60), minutosDeLaHora % 60, 0, 0);
+  
+  return Math.round((fecha.getTime() - simStartDate.getTime()) / 60000);
 }
 
 
@@ -146,8 +171,8 @@ function rutaAFlightEvents(
     const aDestino = aeropuertos.get(tramo.destino);
     if (!aOrigen || !aDestino) continue;
 
-    const minutosInicio = fechaDisplayAMinutos(tramo.sale, simStartDate);
-    const minutosFin = fechaDisplayAMinutos(tramo.llega, simStartDate);
+    const minutosInicio = horaEnFechaAMinutos(tramo.sale, limiteLectura, simStartDate);
+    const minutosFin = horaEnFechaAMinutos(tramo.llega, limiteLectura, simStartDate);
 
     const key = `${ruta.idEnvio}-${ruta.idCliente || 'x'}-iter${iteracionIdx}-tramo${tramo.orden}`;
 
@@ -191,12 +216,12 @@ function buildLogEvents(
 
   // ── Evento 1: Envío registrado (a la hora de fechaRegistro) ─────────────
   const minutosRegistro = ruta.fechaRegistro
-    ? fechaDisplayAMinutos(ruta.fechaRegistro, simStartDate)
+    ? fechaHoraAMinutosDesdeInicio(ruta.fechaRegistro, simStartDate)
     : 0;
   const esDirecto = totalTramos <= 1;
   
-  // Ahora tramo.sale viene como "dd/MM/yyyy HH:mm", extraemos solo la hora
-  const salidaTexto = totalTramos > 0 ? ` · Salida ${tramos[0].sale.split(' ')[1]}` : '';
+  // Extraer solo la hora de tramo.sale
+  const salidaTexto = totalTramos > 0 ? ` · Salida ${tramos[0].sale.split(':').slice(0, 2).join(':')}` : '';
   
   const textRegistro = esDirecto
     ? `📦 Envío ${ruta.idEnvio}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Directo${salidaTexto}`
@@ -212,8 +237,8 @@ function buildLogEvents(
 
   // ── Eventos 2 & 3: Salida y llegada por cada tramo ───────────────────────
   for (const tramo of tramos) {
-    const minutosInicio = fechaDisplayAMinutos(tramo.sale, simStartDate);
-    const minutosFin = fechaDisplayAMinutos(tramo.llega, simStartDate);
+    const minutosInicio = horaEnFechaAMinutos(tramo.sale, limiteLectura, simStartDate);
+    const minutosFin = horaEnFechaAMinutos(tramo.llega, limiteLectura, simStartDate);
     const textSalida = totalTramos > 1
       ? `✈️ Sale avión de ${tramo.origen} → ${tramo.destino} (Tramo ${tramo.orden}/${totalTramos})`
       : `✈️ Sale avión de ${tramo.origen} → ${tramo.destino}`;
@@ -223,7 +248,7 @@ function buildLogEvents(
 
   // ── Evento 4: Envío completado (a la hora de fechaRecojo) ───────────────
   if (ruta.fechaRecojo) {
-    const minutosRecojo = fechaDisplayAMinutos(ruta.fechaRecojo, simStartDate);
+    const minutosRecojo = fechaHoraAMinutosDesdeInicio(ruta.fechaRecojo, simStartDate);
     events.push({
       minutosDisparo: minutosRecojo,
       text: `✅ Envío ${ruta.idEnvio} completado satisfactoriamente · ${ruta.origen} → ${ruta.destino}`,
@@ -281,6 +306,35 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setIteracion(0); setLogs([]); setTotalPlanificados(0); setTotalMaletas(0);
     iteracionIdxRef.current = 0;
     realStartTimeRef.current = performance.now();
+
+    // Cargar aeropuertos si aún no están disponibles
+    if (aeropuertosRef.current.size === 0) {
+      (async () => {
+        try {
+          const res = await fetch(`${API}/api/simulacion/data/aeropuertos`);
+          if (res.ok) {
+            const data = await res.json();
+            const mapeados: AeropuertoSim[] = (Array.isArray(data) ? data : data.data || []).map((a: any) => ({
+              codigo: a.codigo,
+              ciudad: a.ciudad,
+              pais: a.pais,
+              latitud: a.latitud || a.lat || 0,
+              longitud: a.longitud || a.lng || 0,
+              continente: a.continente || '',
+              capacidad: a.capacidad || 500,
+            }));
+            setAeropuertos(mapeados);
+            aeropuertosRef.current = new Map(mapeados.map((a) => [a.codigo, a]));
+            addLog(`🌐 Aeropuertos cargados: ${mapeados.length}`, '#6366f1', null);
+          }
+        } catch (err) {
+          console.error('Error cargando aeropuertos:', err);
+        }
+      })();
+    } else {
+      addLog(`🌐 Aeropuertos cargados: ${aeropuertosRef.current.size}`, '#6366f1', null);
+    }
+
     addLog('✅ Simulación iniciada — Período 5 días', '#22c55e', null);
 
     // Calcular fechas de inicio y fin

@@ -155,22 +155,26 @@ export default function SimulacionPeriodo() {
     if ((mapRef.current as any)._leaflet_id) return;
 
     (async () => {
-      const L = (await import('leaflet')).default;
-      require('leaflet/dist/leaflet.css');
-      const map = L.map(mapRef.current!, {
-        maxBounds: [[-85, -180], [85, 180]],
-        maxBoundsViscosity: 1.0,
-        minZoom: 3,
-        maxZoom: 19,
-        worldCopyJump: false,
-      }).setView([20, 0], 2);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© CartoDB',
-        maxZoom: 19,
-        subdomains: 'abcd',
-        noWrap: true,
-      }).addTo(map);
-      mapInst.current = map;
+      try {
+        const L = require('leaflet');
+        require('leaflet/dist/leaflet.css');
+        const map = L.map(mapRef.current, {
+          maxBounds: [[-85, -180], [85, 180]],
+          maxBoundsViscosity: 1.0,
+          minZoom: 3,
+          maxZoom: 19,
+          worldCopyJump: false,
+        }).setView([20, 0], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+          attribution: '© CartoDB',
+          maxZoom: 19,
+          subdomains: 'abcd',
+          noWrap: true,
+        }).addTo(map);
+        mapInst.current = map;
+      } catch (error) {
+        console.error('Error inicializando mapa:', error);
+      }
     })();
 
     return () => {

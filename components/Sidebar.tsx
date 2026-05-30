@@ -72,7 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = () => {
 
   const navItems = [
     { href: '/', icon: '🏠', label: 'Inicio' },
-    { href: '/registro-maletas', icon: '📦', label: 'Registrar Maletas' },
+    { href: '/registro-maletas', icon: '📦', label: 'Registro de Envíos' },
   ];
 
   const navItemsAfterSimulations = [

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { useSimulacion, FlightEvent, LogEvent } from './useSimulacion';
+import { useSimulacion, FlightEvent, LogEvent, SIM_CONFIG } from './useSimulacion';
 
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
@@ -96,16 +96,18 @@ export default function SimulacionPeriodo() {
   // Ref estable a addLog (evita problemas de closure en el loop de animación)
   const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => {});
 
-  // Tiempo real en que arrancó la animación del cronómetro
-  const clockStartRef = useRef<number | null>(null);
+  // Refs para el nuevo control de tiempo
+  const currentMinSimRef = useRef<number>(0);
+  const clockStateRef = useRef<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
+  const lastFrameTimeRef = useRef<number>(0);
+  const lastIteracionRef = useRef<number>(0);
+
+  const [clockState, setClockState] = useState<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
+  const [configCountdown, setConfigCountdown] = useState(60);
 
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(0);
-  
-  // Estado para rastrear si la simulación fue detenida
-  const [isStopped, setIsStopped] = useState(false);
-  // Estado anterior de isRunning para detectar cuándo cambió
-  const prevIsRunningRef = useRef(false);
+  const clockEnabledRef = useRef(false);
 
   const isInitialized = useRef(false);
 
@@ -128,24 +130,44 @@ export default function SimulacionPeriodo() {
     }
   }, [startDate, sim.iniciar]);
 
-  // ── Detectar cambios en isRunning para rastrear detenido ──────────────────
-  useEffect(() => {
-    if (prevIsRunningRef.current && !sim.isRunning && sim.iteracion > 0) {
-      // Cambió de true a false: fue detenido
-      setIsStopped(true);
-    } else if (sim.isRunning && !prevIsRunningRef.current) {
-      // Cambió de false a true: reinició, resetear estado
-      setIsStopped(false);
-    }
-    prevIsRunningRef.current = sim.isRunning;
-  }, [sim.isRunning, sim.iteracion]);
-
-  // ── Iniciar cronómetro solo después de la primera iteración ───────────────
   useEffect(() => {
     if (sim.isRunning && sim.iteracion === 0) {
-      clockStartRef.current = null; // Reiniciar
-    } else if (sim.isRunning && sim.iteracion > 0 && clockStartRef.current === null) {
-      clockStartRef.current = performance.now(); // Arrancar reloj
+      clockEnabledRef.current = false;
+      currentMinSimRef.current = 0;
+      lastFrameTimeRef.current = 0;
+      clockStateRef.current = 'CALCULANDO';
+      setClockState('CALCULANDO');
+      setSimMinutos(0);
+    }
+
+    if (sim.iteracion > 0 && !clockEnabledRef.current) {
+      clockEnabledRef.current = true;
+      clockStateRef.current = 'VISUALIZANDO';
+      setClockState('VISUALIZANDO');
+      lastFrameTimeRef.current = performance.now();
+    }
+  }, [sim.isRunning, sim.iteracion]);
+
+  // ── Controlar estados del cronómetro por iteración ───────────────
+  useEffect(() => {
+    if (sim.isRunning && sim.iteracion === 0) {
+      lastIteracionRef.current = 0;
+
+      setConfigCountdown(60);
+      const interval = setInterval(() => {
+        setConfigCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    } else if (sim.isRunning && sim.iteracion === 1 && lastIteracionRef.current === 0) {
+      lastIteracionRef.current = 1;
+    } else if (sim.isRunning && sim.iteracion > lastIteracionRef.current) {
+      lastIteracionRef.current = sim.iteracion;
     }
   }, [sim.isRunning, sim.iteracion]);
 
@@ -456,17 +478,20 @@ export default function SimulacionPeriodo() {
         const map = mapInst.current;
         if (!map) { frameId = requestAnimationFrame(loop); return; }
 
-        const totalIter = sim.totalIter || 120;
-        const duracionRealMs = totalIter * SEGS_POR_ITER * 1000;
-        const clockStart = clockStartRef.current ?? performance.now();
-        const elapsedMs = performance.now() - clockStart;
+        const now = performance.now();
+        if (clockEnabledRef.current) {
+          const deltaMs = now - (lastFrameTimeRef.current || now);
+          lastFrameTimeRef.current = now;
 
-        // Minutos simulados actuales (avanza hasta TOTAL_MINUTOS_SIM)
-        const minSim = Math.min(
-          TOTAL_MINUTOS_SIM,
-          (elapsedMs / duracionRealMs) * TOTAL_MINUTOS_SIM
-        );
+          // Avanzar minutos simulados continuamente usando K sin parar
+          const deltaMinSim = (deltaMs / 1000) * (SIM_CONFIG.K / 60);
+          currentMinSimRef.current += deltaMinSim;
+        } else {
+          // Mantener lastFrameTime actualizado mientras esperamos la primera iteración
+          lastFrameTimeRef.current = now;
+        }
 
+        const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
         setSimMinutos(Math.floor(minSim));
 
         const events = flightEventsRef.current;
@@ -530,11 +555,7 @@ export default function SimulacionPeriodo() {
         const map = mapInst.current;
         if (!map) return;
         flightEventsRef.current.filter(fe => fe.active && !fe.done).forEach(fe => {
-          const totalIter = sim.totalIter || 120;
-          const duracionRealMs = totalIter * SEGS_POR_ITER * 1000;
-          const clockStart = clockStartRef.current ?? performance.now();
-          const elapsedMs = performance.now() - clockStart;
-          const minSim = Math.min(TOTAL_MINUTOS_SIM, (elapsedMs / duracionRealMs) * TOTAL_MINUTOS_SIM);
+          const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
           const duracion = fe.minutosFin - fe.minutosInicio;
           if (duracion > 0) {
             const progress = Math.min(1, (minSim - fe.minutosInicio) / duracion);
@@ -660,11 +681,7 @@ export default function SimulacionPeriodo() {
             <div className="card" style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center' }}>
               <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
                 Simulación — Período 5 Días
-                {/* LED que cambia de estado: apagado → rojo parpadeando → amarillo */}
-                <span 
-                  className={isStopped ? 'led-stopped' : sim.isRunning && sim.iteracion > 0 ? 'led-active' : 'led-off'} 
-                  style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }}
-                />
+                <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }} />
                 <style>{`
                   /* LED apagado (inicial) */
                   .led-off {
@@ -688,23 +705,6 @@ export default function SimulacionPeriodo() {
                     background-color: #ef4444;
                     border: 1px solid #b91c1c;
                     animation: led-blink 1.2s ease-in-out infinite;
-                  }
-                  
-                  /* LED detenido - Amarillo */
-                  @keyframes led-stopped-pulse {
-                    0%, 100% { 
-                      opacity: 1; 
-                      box-shadow: 0 0 6px rgba(245, 158, 11, 0.8); 
-                    }
-                    50% { 
-                      opacity: 0.6; 
-                      box-shadow: 0 0 3px rgba(245, 158, 11, 0.4); 
-                    }
-                  }
-                  .led-stopped {
-                    background-color: #f59e0b;
-                    border: 1px solid #d97706;
-                    animation: led-stopped-pulse 1.2s ease-in-out infinite;
                   }
                 `}</style>
               </h1>
@@ -791,8 +791,11 @@ export default function SimulacionPeriodo() {
         {/* Panel Configurando Algoritmo — Derecha Inferior */}
         {sim.isRunning && sim.iteracion === 0 && (
           <div style={{ position: 'absolute', bottom: 20, right: 20, width: 280, backgroundColor: 'rgba(255,255,255,0.95)', padding: 14, borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', pointerEvents: 'auto', zIndex: 999998 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span className="algo-spinner"></span> Configurando algoritmo...
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="algo-spinner"></span> Configurando algoritmo...
+              </div>
+              <span style={{ fontSize: 14, color: 'var(--accent-blue)' }}>{configCountdown}s</span>
             </div>
             <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>
               Esperando resultados iniciales...

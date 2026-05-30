@@ -1,13 +1,182 @@
 'use client';
 
+import { useState, useRef, useEffect } from 'react';
+
+interface MessageState {
+  type: 'error' | 'success' | 'info' | 'warning' | null;
+  text: string;
+}
+
 export default function RegistroMaletas() {
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadedTxtFiles, setUploadedTxtFiles] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<MessageState>({ type: null, text: '' });
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+
+  // Limpiar mensaje después de 5 segundos
+  useEffect(() => {
+    if (message.type) {
+      const timer = setTimeout(() => {
+        setMessage({ type: null, text: '' });
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [message]);
+
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    
+    const txtFiles = Array.from(files).filter(file => file.name.endsWith('.txt'));
+    const nonTxtFiles = Array.from(files).length - txtFiles.length;
+    
+    if (txtFiles.length === 0) {
+      setMessage({ type: 'error', text: 'Solo se aceptan archivos .txt' });
+      return;
+    }
+    
+    if (nonTxtFiles > 0) {
+      setMessage({ type: 'warning', text: `Se ignoraron ${nonTxtFiles} archivos que no son .txt` });
+    }
+    
+    setSelectedFiles(txtFiles);
+    setMessage({ type: 'info', text: `${txtFiles.length} archivo${txtFiles.length === 1 ? '' : 's'} seleccionado${txtFiles.length === 1 ? '' : 's'}` });
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFileSelect(e.dataTransfer.files);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleFileSelect(e.target.files);
+  };
+
+  const handleDropZoneClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleCancel = () => {
+    setSelectedFiles([]);
+    setMessage({ type: null, text: '' });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleUpload = async () => {
+    if (selectedFiles.length === 0) {
+      setMessage({ type: 'error', text: 'Por favor selecciona archivos o carpeta' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      selectedFiles.forEach((file) => {
+        formData.append('files', file);
+      });
+
+      console.log('[DEBUG] Iniciando carga de', selectedFiles.length, 'archivos');
+      console.log('[DEBUG] Tamaño total:', (selectedFiles.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024)).toFixed(2), 'MB');
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/envios/cargar-carpeta`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      console.log('[DEBUG] Status:', response.status, response.statusText);
+
+      const responseText = await response.text();
+      console.log('[DEBUG] Response body:', responseText);
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error(`No se pudo parsear respuesta JSON. Status: ${response.status} - ${responseText.substring(0, 200)}`);
+      }
+
+      if (response.ok && data.exito) {
+        setMessage({ type: 'success', text: data.mensaje || `${selectedFiles.length} archivo${selectedFiles.length === 1 ? '' : 's'} cargado${selectedFiles.length === 1 ? '' : 's'} exitosamente` });
+        setUploadedTxtFiles(prev => {
+          const next = [...prev];
+          selectedFiles.forEach(file => {
+            if (!next.includes(file.name)) {
+              next.push(file.name);
+            }
+          });
+          return next;
+        });
+        setSelectedFiles([]);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } else {
+        setMessage({ type: 'error', text: data.mensaje || `Error ${response.status}: ${responseText.substring(0, 100)}` });
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
+      console.error('[ERROR] Upload failed:', errorMsg);
+      setMessage({ type: 'error', text: `Error: ${errorMsg}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveUploadedTxtFile = (fileName: string) => {
+    setUploadedTxtFiles(prev => prev.filter(name => name !== fileName));
+  };
+
+  const getMessageColor = () => {
+    switch (message.type) {
+      case 'error':
+        return 'var(--danger-red)';
+      case 'success':
+        return 'var(--success-green)';
+      case 'warning':
+        return 'var(--warning-orange)';
+      case 'info':
+        return 'var(--accent-blue)';
+      default:
+        return 'var(--text-secondary)';
+    }
+  };
+
+  const getMessageBg = () => {
+    switch (message.type) {
+      case 'error':
+        return 'rgba(220, 38, 38, 0.1)';
+      case 'success':
+        return 'rgba(34, 197, 94, 0.1)';
+      case 'warning':
+        return 'rgba(234, 179, 8, 0.1)';
+      case 'info':
+        return 'rgba(59, 130, 246, 0.1)';
+      default:
+        return 'transparent';
+    }
+  };
+
   return (
     <div className="main-wrapper">
       <div className="container">
         {/* Título Principal */}
         <div>
           <h1 style={{ fontSize: '32px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '28px' }}>
-            📦 Registro de Maletas
+            📦 Registro de Envíos
           </h1>
         </div>
 
@@ -20,7 +189,7 @@ export default function RegistroMaletas() {
               📋 Formulario de Registro
             </h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px', lineHeight: '1.6' }}>
-              Completa el siguiente formulario para registrar nuevas maletas en el sistema.
+              Completa el siguiente formulario para registrar nuevos envíos en el sistema.
             </p>
 
             {/* Formulario de Registro */}
@@ -121,56 +290,170 @@ export default function RegistroMaletas() {
           {/* Carga Masiva de Maletas */}
           <div className="card fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
             <h2 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '12px' }}>
-              📤 Carga Masiva de Maletas
+              📤 Carga Masiva de Envíos
             </h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px', lineHeight: '1.6' }}>
-              Sube un archivo Excel o XLSX con múltiples registros de maletas para importarlos en lote.
+              Sube archivos .txt con múltiples registros de envíos para importarlos en lote desde la carpeta de envíos.
             </p>
 
-            <form id="formCargaMasivaMaletas" className="form-group">
+            <form id="formCargaMasivaMaletas" className="form-group" onSubmit={(e) => { e.preventDefault(); }}>
               {/* Área de drag & drop */}
-              <div id="dropZoneMaletas" style={{
-                border: '2px dashed var(--border-color)',
-                borderRadius: '8px',
-                padding: '40px 20px',
-                textAlign: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                backgroundColor: 'var(--bg-tertiary)',
-                marginBottom: '20px'
-              }} 
-              onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--accent-blue)'; e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'; }}
-              onMouseOut={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'; }}>
-                <div style={{ fontSize: '40px', marginBottom: '12px', display: 'block' }}>📁</div>
+              <div 
+                ref={dropZoneRef}
+                onClick={handleDropZoneClick}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                style={{
+                  border: `2px dashed ${dragOver ? 'var(--accent-blue)' : 'var(--border-color)'}`,
+                  borderRadius: '8px',
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backgroundColor: dragOver ? 'var(--bg-secondary)' : 'var(--bg-tertiary)',
+                  marginBottom: '20px'
+                }}>
+                <div style={{ fontSize: '40px', marginBottom: '12px', display: 'block' }}>
+                  {loading ? '⏳' : '📂'}
+                </div>
                 <div style={{ fontWeight: '700', color: 'var(--text-primary)', marginBottom: '8px', fontSize: '15px' }}>
-                  Arrastra tu archivo aquí
+                  {loading ? 'Cargando archivos...' : 'Arrastra carpeta o archivos aquí'}
                 </div>
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                  o haz clic para seleccionar
+                  {loading ? 'Por favor espera...' : 'o haz clic para seleccionar'}
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Formatos: .xls, .xlsx  |  Máximo: 5MB
+                  Formato: Carpeta o archivos .txt  |  Múltiples archivos
                 </div>
-                <input type="file" id="archivoMaletas" accept=".xls,.xlsx" style={{ display: 'none' }} />
+                <input 
+                  ref={fileInputRef}
+                  type="file" 
+                  id="archivoMaletas" 
+                  accept=".txt" 
+                  style={{ display: 'none' }}
+                  onChange={handleFileInputChange}
+                  disabled={loading}
+                  multiple
+                  {...({ webkitdirectory: true } as any)}
+                />
               </div>
 
-              <div id="infoArchivoMaletas" style={{ display: 'none', padding: '14px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', marginBottom: '16px', borderLeft: '3px solid var(--accent-blue)' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Archivo seleccionado:
+              {selectedFiles.length > 0 && (
+                <div style={{ padding: '14px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', marginBottom: '16px', borderLeft: '3px solid var(--accent-blue)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                    Archivos seleccionados: <strong>{selectedFiles.length}</strong>
+                  </div>
+                  <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                    {selectedFiles.map((file, idx) => (
+                      <div key={idx} style={{ fontSize: '12px', color: 'var(--text-primary)', paddingBottom: '6px', borderBottom: idx < selectedFiles.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                        • {file.name}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                    Total: {(selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(2)} KB
+                  </div>
                 </div>
-                <div id="nombreArchivoMaletas" style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}></div>
-              </div>
+              )}
+
+              {message.type && (
+                <div style={{ 
+                  padding: '12px 14px', 
+                  backgroundColor: getMessageBg(), 
+                  borderRadius: '8px', 
+                  marginBottom: '16px', 
+                  borderLeft: '3px solid ' + getMessageColor(),
+                  fontSize: '13px',
+                  color: getMessageColor()
+                }}>
+                  {message.text}
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '12px', marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: '600' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: '600' }}
+                  onClick={handleCancel}
+                  disabled={loading}
+                >
                   Cancelar
                 </button>
-                <button type="button" className="btn btn-primary" style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: '600' }}>
-                  ↑ Procesar Archivo
+                <button 
+                  type="button" 
+                  className="btn btn-primary" 
+                  style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: '600' }}
+                  onClick={handleUpload}
+                  disabled={loading || selectedFiles.length === 0}
+                >
+                  {loading ? '⏳ Procesando...' : `↑ Procesar ${selectedFiles.length} Archivo${selectedFiles.length === 1 ? '' : 's'}`}
                 </button>
               </div>
             </form>
           </div>
+        </div>
+
+        {/* TXT Subidos en Memoria */}
+        <div className="card fade-in" style={{ marginTop: '32px', animationDelay: '0.05s' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', marginBottom: '14px' }}>
+            <div>
+              <h2 style={{ margin: '0 0 6px 0', fontSize: '20px', color: 'var(--text-primary)' }}>Archivos de envío</h2>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
+                Archivos .txt cargados por la importación masiva en esta sesión.
+              </p>
+            </div>
+          </div>
+
+          {uploadedTxtFiles.length > 0 ? (
+            <div style={{ display: 'grid', gap: '8px', maxHeight: '210px', overflowY: 'auto', paddingRight: '4px' }}>
+              {uploadedTxtFiles.map((fileName, idx) => (
+                <div
+                  key={`${fileName}-${idx}`}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px'
+                  }}
+                >
+                  <img src="/txt.png" alt="TXT" style={{ width: 22, height: 22, objectFit: 'contain', flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fileName}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Archivo cargado por carga masiva</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveUploadedTxtFile(fileName)}
+                    aria-label={`Eliminar ${fileName}`}
+                    title="Eliminar de memoria"
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      padding: '2px',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      borderRadius: '6px',
+                      opacity: 0.35
+                    }}
+                  >
+                    <img src="/basura.png" alt="Eliminar" style={{ width: 16, height: 16, objectFit: 'contain' }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted)' }}>
+              Todavía no hay archivos cargados por la importación masiva.
+            </p>
+          )}
         </div>
 
         {/* Tabla Resumen */}
@@ -189,96 +472,7 @@ export default function RegistroMaletas() {
                   <th style={{ textAlign: 'center' }}>Acciones</th>
                 </tr>
               </thead>
-              <tbody id="maletasRegistrosTabla">
-                <tr>
-                  <td style={{ textAlign: 'center' }}>LATAM Airlines</td>
-                  <td style={{ textAlign: 'center' }}>Lima (JCH)</td>
-                  <td style={{ textAlign: 'center' }}>Tokio (NRT)</td>
-                  <td style={{ textAlign: 'center' }}>85</td>
-                  <td style={{ textAlign: 'center' }}>23-Abr-2026 14:32</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: 'center' }}>Aeromexico</td>
-                  <td style={{ textAlign: 'center' }}>Ciudad de México (MEX)</td>
-                  <td style={{ textAlign: 'center' }}>Frankfurt (FRA)</td>
-                  <td style={{ textAlign: 'center' }}>120</td>
-                  <td style={{ textAlign: 'center' }}>23-Abr-2026 12:15</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: 'center' }}>United Airlines</td>
-                  <td style={{ textAlign: 'center' }}>Nueva York (JFK)</td>
-                  <td style={{ textAlign: 'center' }}>Miami (MIA)</td>
-                  <td style={{ textAlign: 'center' }}>95</td>
-                  <td style={{ textAlign: 'center' }}>23-Abr-2026 11:45</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: 'center' }}>Lufthansa</td>
-                  <td style={{ textAlign: 'center' }}>Madrid (MAD)</td>
-                  <td style={{ textAlign: 'center' }}>Dubái (DXB)</td>
-                  <td style={{ textAlign: 'center' }}>110</td>
-                  <td style={{ textAlign: 'center' }}>23-Abr-2026 10:20</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: 'center' }}>Singapore Airlines</td>
-                  <td style={{ textAlign: 'center' }}>Singapur (SIN)</td>
-                  <td style={{ textAlign: 'center' }}>Bangkok (BKK)</td>
-                  <td style={{ textAlign: 'center' }}>75</td>
-                  <td style={{ textAlign: 'center' }}>23-Abr-2026 09:30</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: 'center' }}>Emirates</td>
-                  <td style={{ textAlign: 'center' }}>Dubái (DXB)</td>
-                  <td style={{ textAlign: 'center' }}>Londres (LHR)</td>
-                  <td style={{ textAlign: 'center' }}>130</td>
-                  <td style={{ textAlign: 'center' }}>22-Abr-2026 16:45</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: 'center' }}>Air France</td>
-                  <td style={{ textAlign: 'center' }}>París (CDG)</td>
-                  <td style={{ textAlign: 'center' }}>Ámsterdam (AMS)</td>
-                  <td style={{ textAlign: 'center' }}>65</td>
-                  <td style={{ textAlign: 'center' }}>22-Abr-2026 14:10</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: 'center' }}>British Airways</td>
-                  <td style={{ textAlign: 'center' }}>Londres (LHR)</td>
-                  <td style={{ textAlign: 'center' }}>Hong Kong (HKG)</td>
-                  <td style={{ textAlign: 'center' }}>150</td>
-                  <td style={{ textAlign: 'center' }}>22-Abr-2026 13:25</td>
-                  <td style={{ textAlign: 'center', display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Editar"><img src="/editar.png" alt="Editar" style={{ width: '20px', height: '20px', filter: 'invert(40%) sepia(96%) saturate(1214%) hue-rotate(181deg) brightness(105%)' }} /></button>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Eliminar"><img src="/basura.png" alt="Eliminar" style={{ width: '20px', height: '20px', filter: 'invert(30%) sepia(80%) saturate(2000%) hue-rotate(350deg)' }} /></button>
-                  </td>
-                </tr>
-              </tbody>
+              <tbody id="maletasRegistrosTabla" />
             </table>
           </div>
 
@@ -311,10 +505,10 @@ export default function RegistroMaletas() {
               </ul>
             </div>
             <div>
-              <strong style={{ color: 'var(--text-primary)' }}>Límite de Capacidad:</strong>
+              <strong style={{ color: 'var(--text-primary)' }}>Carga Masiva:</strong>
               <ul style={{ marginTop: '8px', marginLeft: '16px' }}>
-                <li>✓ Min/Max por vuelo: 150-250 (continente)</li>
-                <li>✓ Min/Max por vuelo: 150-400 (mundial)</li>
+                <li>✓ Formato: Archivos .txt</li>
+                <li>✓ Ubicación: /Data/envios/</li>
               </ul>
             </div>
             <div>

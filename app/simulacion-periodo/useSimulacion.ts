@@ -136,27 +136,9 @@ function fechaHoraAMinutosDesdeInicio(fechaHoraStr: string, simStartDate: Date):
   return Math.round((fecha.getTime() - simStartDate.getTime()) / 60000);
 }
 
-/** Convierte solo la hora (HH:MM:SS o HH:MM) con la fecha de limiteLectura a minutos desde el inicio */
-function horaEnFechaAMinutos(horaStr: string, limiteLecturaStr: string, simStartDate: Date): number {
-  const fechaLimite = extraerFecha(limiteLecturaStr);
-  const minutosDeLaHora = horaConMinutosDelDia(horaStr);
-  const horaEnMinutosDelDia = fechaLimite.getHours() * 60 + fechaLimite.getMinutes();
-  
-  // Si la hora es anterior a la hora actual del límite de lectura, es del día siguiente
-  let fecha = new Date(fechaLimite);
-  if (minutosDeLaHora < horaEnMinutosDelDia - 60) { // margen de 1 hora
-    fecha = new Date(fechaLimite.getTime() + 24 * 60 * 60 * 1000);
-  }
-  fecha.setHours(Math.floor(minutosDeLaHora / 60), minutosDeLaHora % 60, 0, 0);
-  
-  return Math.round((fecha.getTime() - simStartDate.getTime()) / 60000);
-}
 
 
-/**
- * Convierte una ruta del backend a un array de FlightEvents (uno por tramo).
- * Retorna [] si faltan aeropuertos en el mapa.
- */
+
 function rutaAFlightEvents(
   ruta: BackendRutaPlanificada,
   limiteLectura: string,
@@ -166,13 +148,31 @@ function rutaAFlightEvents(
 ): FlightEvent[] {
   const events: FlightEvent[] = [];
 
+  let cursorDate = extraerFecha(ruta.fechaRegistro);
+
   for (const tramo of ruta.tramos ?? []) {
     const aOrigen = aeropuertos.get(tramo.origen);
     const aDestino = aeropuertos.get(tramo.destino);
     if (!aOrigen || !aDestino) continue;
 
-    const minutosInicio = horaEnFechaAMinutos(tramo.sale, limiteLectura, simStartDate);
-    const minutosFin = horaEnFechaAMinutos(tramo.llega, limiteLectura, simStartDate);
+    const saleParts = tramo.sale.split(':').map(Number);
+    let saleDate = new Date(cursorDate);
+    saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
+    if (saleDate.getTime() < cursorDate.getTime()) {
+      saleDate.setDate(saleDate.getDate() + 1);
+    }
+
+    const llegaParts = tramo.llega.split(':').map(Number);
+    let llegaDate = new Date(saleDate);
+    llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
+    if (llegaDate.getTime() < saleDate.getTime()) {
+      llegaDate.setDate(llegaDate.getDate() + 1);
+    }
+
+    const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
+    const minutosFin = Math.round((llegaDate.getTime() - simStartDate.getTime()) / 60000);
+    
+    cursorDate = llegaDate;
 
     const key = `${ruta.idEnvio}-${ruta.idCliente || 'x'}-iter${iteracionIdx}-tramo${tramo.orden}`;
 
@@ -236,9 +236,28 @@ function buildLogEvents(
   });
 
   // ── Eventos 2 & 3: Salida y llegada por cada tramo ───────────────────────
+  let cursorDate = extraerFecha(ruta.fechaRegistro);
+  
   for (const tramo of tramos) {
-    const minutosInicio = horaEnFechaAMinutos(tramo.sale, limiteLectura, simStartDate);
-    const minutosFin = horaEnFechaAMinutos(tramo.llega, limiteLectura, simStartDate);
+    const saleParts = tramo.sale.split(':').map(Number);
+    let saleDate = new Date(cursorDate);
+    saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
+    if (saleDate.getTime() < cursorDate.getTime()) {
+      saleDate.setDate(saleDate.getDate() + 1);
+    }
+
+    const llegaParts = tramo.llega.split(':').map(Number);
+    let llegaDate = new Date(saleDate);
+    llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
+    if (llegaDate.getTime() < saleDate.getTime()) {
+      llegaDate.setDate(llegaDate.getDate() + 1);
+    }
+
+    const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
+    const minutosFin = Math.round((llegaDate.getTime() - simStartDate.getTime()) / 60000);
+    
+    cursorDate = llegaDate;
+
     const textSalida = totalTramos > 1
       ? `✈️ Sale avión de ${tramo.origen} → ${tramo.destino} (Tramo ${tramo.orden}/${totalTramos})`
       : `✈️ Sale avión de ${tramo.origen} → ${tramo.destino}`;
@@ -258,6 +277,12 @@ function buildLogEvents(
 
   return events;
 }
+
+export const SIM_CONFIG = {
+  Sa: 3, // Minutos
+  Ta: 60, // Segundos
+  K: 120, // Aceleración
+};
 
 export function useSimulacion(startDate?: string, startTime?: string) {
   const [isRunning, setIsRunning] = useState(false);
@@ -311,24 +336,28 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     if (aeropuertosRef.current.size === 0) {
       (async () => {
         try {
-          const res = await fetch(`${API}/api/simulacion/data/aeropuertos`);
+          const res = await fetch(`${API}/api/aeropuertos`);
           if (res.ok) {
-            const data = await res.json();
-            const mapeados: AeropuertoSim[] = (Array.isArray(data) ? data : data.data || []).map((a: any) => ({
+            const response = await res.json();
+            const data = response.datos || [];
+            const mapeados: AeropuertoSim[] = (Array.isArray(data) ? data : []).map((a: any) => ({
               codigo: a.codigo,
               ciudad: a.ciudad,
               pais: a.pais,
-              latitud: a.latitud || a.lat || 0,
-              longitud: a.longitud || a.lng || 0,
+              latitud: a.latitud,
+              longitud: a.longitud,
               continente: a.continente || '',
               capacidad: a.capacidad || 500,
             }));
             setAeropuertos(mapeados);
             aeropuertosRef.current = new Map(mapeados.map((a) => [a.codigo, a]));
             addLog(`🌐 Aeropuertos cargados: ${mapeados.length}`, '#6366f1', null);
+          } else {
+            addLog(`❌ Error cargando aeropuertos (Status ${res.status})`, '#ef4444', null);
           }
         } catch (err) {
           console.error('Error cargando aeropuertos:', err);
+          addLog(`❌ Error cargando aeropuertos`, '#ef4444', null);
         }
       })();
     } else {
@@ -368,7 +397,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
     simStartDateRef.current = simStart;
 
-    const url = `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=30&sa=10&k=6&tamano=10`;
+    const url = `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${SIM_CONFIG.K}&tamano=10`;
     const es = new EventSource(url);
     esRef.current = es;
 

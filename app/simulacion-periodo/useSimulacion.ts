@@ -15,6 +15,8 @@ export interface FlightEvent {
   tramoOrden: number;
   origenCode: string;
   destinoCode: string;
+  planVueloRuta: string[];
+  planVueloTipo: 'Directo' | 'Por escalas';
   latOrigen: number;
   lngOrigen: number;
   latDestino: number;
@@ -149,6 +151,8 @@ function rutaAFlightEvents(
   const events: FlightEvent[] = [];
 
   let cursorDate = extraerFecha(ruta.fechaRegistro);
+  const rutaCompleta = [ruta.origen, ...(ruta.tramos ?? []).map(tramo => tramo.destino)].filter((codigo, index, lista) => index === 0 || codigo !== lista[index - 1]);
+  const planVueloTipo: 'Directo' | 'Por escalas' = (ruta.tramos?.length ?? 0) <= 1 ? 'Directo' : 'Por escalas';
 
   for (const tramo of ruta.tramos ?? []) {
     const aOrigen = aeropuertos.get(tramo.origen);
@@ -181,6 +185,8 @@ function rutaAFlightEvents(
       tramoOrden: tramo.orden,
       origenCode: tramo.origen,
       destinoCode: tramo.destino,
+      planVueloRuta: rutaCompleta,
+      planVueloTipo,
       latOrigen: aOrigen.latitud,
       lngOrigen: aOrigen.longitud,
       latDestino: aDestino.latitud,
@@ -293,7 +299,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [colapso, setColapso] = useState<Colapso | null>(null);
   const [iteracion, setIteracion] = useState(0);
-  const [totalIter, setTotalIter] = useState(120);
+  const [totalIter, setTotalIter] = useState(20);
   const [reloj, setReloj] = useState('');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [totalPlanificados, setTotalPlanificados] = useState(0);
@@ -509,7 +515,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setIsRunning(false); addLog('Simulación detenida manualmente', '#f97316');
   }, [addLog]);
 
-  const totalIterSeguro = Number.isFinite(totalIter) && totalIter > 0 ? totalIter : 120;
+  const totalIterSeguro = Number.isFinite(totalIter) && totalIter > 0 ? totalIter : 20;
   const progreso = totalIterSeguro > 0 ? (iteracion / totalIterSeguro) * 100 : 0;
   const diaActual = Math.min(5, Math.floor(iteracion / (totalIterSeguro / 5)) + 1);
 

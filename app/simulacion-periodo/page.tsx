@@ -89,6 +89,7 @@ export default function SimulacionPeriodo() {
 
   // Lista viva de FlightEvent (con svgElement adjunto cuando están activos)
   const flightEventsRef = useRef<FlightEvent[]>([]);
+  const panelFlightKeyRef = useRef<string | null>(null);
 
   // Lista viva de LogEvent temporizados (se disparan al compas del cronómetro)
   const logEventsRef = useRef<LogEvent[]>([]);
@@ -416,6 +417,10 @@ export default function SimulacionPeriodo() {
       fe.active = false;
       fe.done = true;
 
+      if (panelFlightKeyRef.current === fe.key) {
+        cerrarPanelDetalles(fe.key);
+      }
+
       // Actualizar almacén de destino al llegar
       airportStateRef.current.set(fe.destinoCode, {
         ocupacion: fe.ocupacionAlmacenDestino,
@@ -583,13 +588,20 @@ export default function SimulacionPeriodo() {
   }, []);
 
   // ── Panel de detalles del avión ───────────────────────────────────────────
+  function cerrarPanelDetalles(feKey?: string) {
+    if (feKey && panelFlightKeyRef.current !== feKey) return;
+    const panel = document.getElementById('airplaneDetailsPanel');
+    if (panel) panel.remove();
+    panelFlightKeyRef.current = null;
+  }
+
   function mostrarPanelDetalles(fe: FlightEvent) {
     let panel = document.getElementById('airplaneDetailsPanel');
     if (!panel) {
       panel = document.createElement('div');
       panel.id = 'airplaneDetailsPanel';
       panel.style.cssText = `
-        position:absolute;right:12px;top:170px;width:300px;
+        position:absolute;right:12px;top:170px;width:340px;
         background:white;border-radius:12px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
         padding:18px;z-index:10000;
@@ -599,30 +611,62 @@ export default function SimulacionPeriodo() {
       document.body.appendChild(panel);
     }
 
+    panelFlightKeyRef.current = fe.key;
+
     const ocupPct = fe.capacidadVuelo > 0
       ? Math.min(100, (fe.maletasVuelo / fe.capacidadVuelo) * 100)
       : 0;
     const colorOcup = ocupPct < 50 ? '#10b981' : ocupPct < 80 ? '#f97316' : '#ef4444';
-
-    const ocupOrigen = fe.capacidadAlmacenOrigen > 0
-      ? Math.min(100, (fe.ocupacionAlmacenOrigen / fe.capacidadAlmacenOrigen) * 100)
-      : 0;
-    const ocupDestino = fe.capacidadAlmacenDestino > 0
-      ? Math.min(100, (fe.ocupacionAlmacenDestino / fe.capacidadAlmacenDestino) * 100)
-      : 0;
-    const colorOrigen = ocupOrigen < 50 ? '#10b981' : ocupOrigen < 80 ? '#f97316' : '#ef4444';
-    const colorDestino = ocupDestino < 50 ? '#10b981' : ocupDestino < 80 ? '#f97316' : '#ef4444';
+    const planVueloRuta = fe.planVueloRuta.length > 0 ? fe.planVueloRuta.join(' → ') : `${fe.origenCode} → ${fe.destinoCode}`;
+    const escalas = fe.planVueloRuta.length > 2 ? fe.planVueloRuta.slice(1, -1).join(' · ') : '';
+    const totalTramos = Math.max(1, fe.planVueloRuta.length - 1);
+    const tramoActual = fe.planVueloTipo === 'Por escalas' && fe.planVueloRuta.length > fe.tramoOrden
+      ? `${fe.planVueloRuta[fe.tramoOrden - 1]} → ${fe.planVueloRuta[fe.tramoOrden]}`
+      : `${fe.origenCode} → ${fe.destinoCode}`;
+    const rutaVisual = fe.planVueloRuta.map((codigo, index) => {
+      const isInicio = index === 0;
+      const isFinal = index === fe.planVueloRuta.length - 1;
+      const isTramoOrigen = fe.planVueloTipo === 'Por escalas' && index === fe.tramoOrden - 1;
+      const isTramoDestino = fe.planVueloTipo === 'Por escalas' && index === fe.tramoOrden;
+      const background = isTramoOrigen
+        ? '#dbeafe'
+        : isTramoDestino
+          ? '#dcfce7'
+          : isInicio
+            ? '#eef2ff'
+            : isFinal
+              ? '#fef3c7'
+              : '#f3f4f6';
+      const color = isTramoOrigen || isTramoDestino || isInicio || isFinal ? '#111827' : '#374151';
+      const label = isInicio
+        ? 'Origen'
+        : isFinal
+          ? 'Destino'
+          : 'Escala';
+      return `
+        <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
+          <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">${label}</span>
+          <span style="display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:${background};color:${color};font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">${codigo}</span>
+        </span>
+        ${index < fe.planVueloRuta.length - 1 ? '<span style="color:#9ca3af;font-size:18px;font-weight:800;margin-top:18px;">→</span>' : ''}
+      `;
+    }).join('');
 
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del Tramo</h3>
+        <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del vuelo</h3>
         <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
       </div>
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">TRAMO</div>
-        <div style="font-size:14px;font-weight:700;color:#1f2937;">${fe.origenCode} → ${fe.destinoCode}</div>
-        <div style="font-size:10px;color:#9ca3af;margin-top:3px;">Tramo ${fe.tramoOrden}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+          <div style="font-size:11px;color:#6b7280;">PLAN DE VUELO</div>
+          <div style="font-size:10px;font-weight:700;color:#1f2937;background:#e5e7eb;padding:4px 8px;border-radius:999px;">${fe.planVueloTipo}</div>
+        </div>
+        <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:8px;">${rutaVisual}</div>
+        ${fe.planVueloTipo === 'Por escalas'
+          ? `<div style="font-size:10px;color:#6b7280;margin-top:4px;">Actualmente en ${tramoActual} · Tramo ${fe.tramoOrden} de ${totalTramos}</div>`
+          : `<div style="font-size:10px;color:#6b7280;margin-top:4px;">Directo · Un solo tramo entre origen y destino</div>`}
       </div>
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
@@ -632,37 +676,10 @@ export default function SimulacionPeriodo() {
         </div>
         <div style="font-size:11px;color:#374151;font-weight:600;">${fe.maletasVuelo} / ${fe.capacidadVuelo} maletas (${Math.round(ocupPct)}%)</div>
       </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
-        <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
-          <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">ALMACÉN ORIGEN</div>
-          <div style="font-size:11px;font-weight:600;color:#1f2937;">${fe.origenCode}</div>
-          <div style="height:4px;background:#d1d5db;border-radius:2px;overflow:hidden;margin:5px 0;">
-            <div style="height:100%;background:${colorOrigen};width:${ocupOrigen}%;"></div>
-          </div>
-          <div style="font-size:10px;color:#6b7280;">${fe.ocupacionAlmacenOrigen}/${fe.capacidadAlmacenOrigen} (${Math.round(ocupOrigen)}%)</div>
-        </div>
-        <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
-          <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">ALMACÉN DESTINO</div>
-          <div style="font-size:11px;font-weight:600;color:#1f2937;">${fe.destinoCode}</div>
-          <div style="height:4px;background:#d1d5db;border-radius:2px;overflow:hidden;margin:5px 0;">
-            <div style="height:100%;background:${colorDestino};width:${ocupDestino}%;"></div>
-          </div>
-          <div style="font-size:10px;color:#6b7280;">${fe.ocupacionAlmacenDestino}/${fe.capacidadAlmacenDestino} (${Math.round(ocupDestino)}%)</div>
-        </div>
-      </div>
-
-      <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">VENTANA HORARIA</div>
-        <div style="font-size:11px;color:#374151;">
-          Sale: ${formatSimTime(fe.minutosInicio, startDate, startTime)}<br/>
-          Llega: ${formatSimTime(fe.minutosFin, startDate, startTime)}
-        </div>
-      </div>
     `;
 
     document.getElementById('closeFEPanel')?.addEventListener('click', () => {
-      panel?.remove();
+      cerrarPanelDetalles(fe.key);
     });
   }
 

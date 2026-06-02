@@ -883,24 +883,12 @@ export default function SimulacionPeriodo() {
     // Generate tracking code: last 7 digits of shipment code + last 5 digits of customer code
     const codigoRastreo = (codigoEnvio.slice(-7) + (rutaCompleta?.idCliente || '').slice(-5)).padStart(12, '0');
 
-    // Determine shipment status
-    const totalTramos = rutaCompleta?.tramos?.length || 0;
-    let estadoEnvio = 'Programado';
-    let estadoColor = '#6b7280'; // gray
-    if (fe.active && fe.tramoOrden > 0 && fe.tramoOrden <= totalTramos) {
-      estadoEnvio = 'En progreso';
-      estadoColor = '#3b82f6'; // blue
-    } else if (fe.tramoOrden > totalTramos) {
-      estadoEnvio = 'Finalizado';
-      estadoColor = '#10b981'; // green
-    }
-
     if (!rutaCompleta) {
       panel.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <div>
-            <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del envío</h3>
-            <div style="font-size:11px;color:#6b7280;margin-top:2px;">COD. RASTREO: ${codigoRastreo}</div>
+            <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Plan de viaje</h3>
+            <div style="font-size:11px;color:#6b7280;margin-top:2px;">Código único de envío: ${codigoRastreo}</div>
           </div>
           <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
         </div>
@@ -920,29 +908,73 @@ export default function SimulacionPeriodo() {
     const ubicacionOrigen = aeropuertoOrigen ? `${aeropuertoOrigen.ciudad}, ${aeropuertoOrigen.pais}` : rutaCompleta.origen;
     const ubicacionDestino = aeropuertoDestino ? `${aeropuertoDestino.ciudad}, ${aeropuertoDestino.pais}` : rutaCompleta.destino;
 
-    // Build tramos visualization with dates and times
+    // Build tramos visualization with dates and times (static, no current tramo highlighting)
     const tramosVisual = rutaCompleta.tramos?.map((tramo, index) => {
       const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
       const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
       const ubicacionOrigenTramo = aOrigen ? `${aOrigen.ciudad}, ${aOrigen.pais}` : tramo.origen;
       const ubicacionDestinoTramo = aDestino ? `${aDestino.ciudad}, ${aDestino.pais}` : tramo.destino;
       const isLast = index === (rutaCompleta.tramos?.length ?? 0) - 1;
-      const isCurrent = tramo.orden === fe.tramoOrden;
 
-      // Dynamic styling based on tramo status
-      const bgColor = isCurrent ? '#dbeafe' : index === 0 ? '#eef2ff' : isLast ? '#fef3c7' : '#f9fafb';
-      const borderColor = isCurrent ? '#3b82f6' : 'transparent';
-      const borderWidth = isCurrent ? '2px' : '0px';
-      const statusBadge = isCurrent ? '<span style="background:#3b82f6;color:white;font-size:8px;font-weight:700;padding:2px 6px;border-radius:999px;">ACTUAL</span>' : '';
-      const statusColor = isCurrent ? '#1e40af' : '#6b7280';
+      // Helper function to parse date string (handles both formats)
+      const parseDateStr = (dateStr: string): Date => {
+        if (!dateStr) return new Date();
+        if (dateStr.includes('-')) {
+          // Format: "YYYY-MM-DD HH:MM"
+          const [datePart, timePart] = dateStr.split(' ');
+          const [year, month, day] = datePart.split('-').map(Number);
+          const [hour, min] = timePart?.split(':').map(Number) || [0, 0];
+          return new Date(year, month - 1, day, hour, min, 0, 0);
+        } else {
+          // Format: "DD/MM/YYYY HH:MM"
+          const parts = dateStr.split(' ');
+          const [day, month, year] = parts[0].split('/').map(Number);
+          const [hour, min] = parts[1]?.split(':').map(Number) || [0, 0];
+          return new Date(year, month - 1, day, hour, min, 0, 0);
+        }
+      };
+
+      // Calculate actual dates for sale and llega based on simulation start date
+      const simStart = new Date(startDate || '2027-01-02');
+      const startTimeParts = (startTime || '00:00').split(':').map(Number);
+      simStart.setHours(startTimeParts[0], startTimeParts[1], 0, 0);
+
+      // Parse registration date to use as cursor
+      let cursorDate = rutaCompleta.fechaRegistro ? parseDateStr(rutaCompleta.fechaRegistro) : simStart;
+
+      // Calculate sale date
+      const saleParts = tramo.sale.split(':').map(Number);
+      let saleDate = new Date(cursorDate);
+      saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
+      if (saleDate.getTime() < cursorDate.getTime()) {
+        saleDate.setDate(saleDate.getDate() + 1);
+      }
+
+      // Calculate llega date
+      const llegaParts = tramo.llega.split(':').map(Number);
+      let llegaDate = new Date(saleDate);
+      llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
+      if (llegaDate.getTime() < saleDate.getTime()) {
+        llegaDate.setDate(llegaDate.getDate() + 1);
+      }
+
+      // Format dates as DD/MM/YYYY HH:MM
+      const formatDate = (date: Date) => {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${day}/${month}/${year} ${hours}:${minutes}`;
+      };
+
+      const saleDisplay = formatDate(saleDate);
+      const llegaDisplay = formatDate(llegaDate);
 
       return `
-        <div style="background:${bgColor};border:${borderWidth} solid ${borderColor};padding:12px;border-radius:10px;margin-bottom:${isLast ? '0' : '12px'};position:relative;">
+        <div style="background:#f9fafb;padding:12px;border-radius:10px;margin-bottom:${isLast ? '0' : '12px'};position:relative;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span style="font-size:11px;font-weight:700;color:${statusColor};text-transform:uppercase;">Tramo ${tramo.orden}</span>
-              ${statusBadge}
-            </div>
+            <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
           </div>
           
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -964,11 +996,11 @@ export default function SimulacionPeriodo() {
           <div style="display:flex;justify-content:space-between;gap:12px;">
             <div style="flex:1;background:white;padding:8px;border-radius:6px;">
               <div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Sale</div>
-              <div style="font-size:12px;color:#1f2937;font-weight:700;">${tramo.sale}</div>
+              <div style="font-size:12px;color:#1f2937;font-weight:700;">${saleDisplay}</div>
             </div>
             <div style="flex:1;background:white;padding:8px;border-radius:6px;">
               <div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Llega</div>
-              <div style="font-size:12px;color:#1f2937;font-weight:700;">${tramo.llega}</div>
+              <div style="font-size:12px;color:#1f2937;font-weight:700;">${llegaDisplay}</div>
             </div>
           </div>
           
@@ -985,13 +1017,10 @@ export default function SimulacionPeriodo() {
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div>
-          <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del envío</h3>
-          <div style="font-size:11px;color:#6b7280;margin-top:2px;">COD. RASTREO: ${codigoRastreo}</div>
+          <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Plan de viaje</h3>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px;">Código único de envío: ${codigoRastreo}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="background:${estadoColor};color:white;font-size:10px;font-weight:700;padding:4px 10px;border-radius:999px;text-transform:uppercase;">${estadoEnvio}</span>
-          <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
-        </div>
+        <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
       </div>
 
       <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">

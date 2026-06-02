@@ -115,6 +115,9 @@ export default function SimulacionPeriodo() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadMessage, setUploadMessage] = useState<{ type: 'error' | 'success' | 'info' | 'warning' | null; text: string }>({ type: null, text: '' });
   const [uploading, setUploading] = useState(false);
+  
+  // Simulation stopped overlay state
+  const [showStoppedOverlay, setShowStoppedOverlay] = useState(false);
 
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(0);
@@ -693,6 +696,43 @@ export default function SimulacionPeriodo() {
     
     // Mostrar panel de detalles del envío (solo desde búsqueda)
     mostrarPanelEnvio(flightEvent);
+  }
+
+  function handleDetener() {
+    sim.detener();
+    setShowStoppedOverlay(true);
+  }
+
+  function handleNuevaSimulacion() {
+    setShowStoppedOverlay(false);
+    setShowConfigOverlay(true);
+    setConfigWizardStep(1);
+    setConfigStartDate('');
+    setConfigStartTime('00:00');
+    setSelectedFiles([]);
+    setUploadMessage({ type: null, text: '' });
+    isInitialized.current = false;
+    
+    // Reset clock state
+    clockEnabledRef.current = false;
+    currentMinSimRef.current = 0;
+    lastFrameTimeRef.current = 0;
+    clockStateRef.current = 'CALCULANDO';
+    setClockState('CALCULANDO');
+    setSimMinutos(0);
+    
+    // Remove all airplanes from the map
+    flightEventsRef.current.forEach(fe => {
+      if (fe.svgElement) {
+        try { fe.svgElement.remove(); } catch (_) {}
+        fe.svgElement = undefined;
+        fe.airplaneGroup = undefined;
+        fe.airplaneImage = undefined;
+      }
+    });
+    
+    // Reset flight events ref
+    flightEventsRef.current = [];
   }
 
   function mostrarNotificacion(mensaje: string, color: string) {
@@ -1491,6 +1531,72 @@ export default function SimulacionPeriodo() {
           </div>
         )}
 
+        {/* Simulation Stopped Overlay */}
+        {showStoppedOverlay && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            zIndex: 9999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              maxWidth: '400px',
+              width: '90%',
+              padding: '32px',
+              textAlign: 'center',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+            }}>
+              <div style={{ fontSize: '24px', marginBottom: '16px' }}>⏹️</div>
+              <h2 style={{ margin: '0 0 12px 0', fontSize: '20px', color: '#1f2937', fontWeight: 700 }}>
+                La simulación fue detenida
+              </h2>
+              <p style={{ margin: '0 0 24px 0', fontSize: '14px', color: '#6b7280' }}>
+                La simulación se ha detenido correctamente. Puedes iniciar una nueva simulación o reanudar la actual (próximamente).
+              </p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                <button
+                  disabled
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    backgroundColor: '#d1d5db',
+                    color: '#6b7280',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'not-allowed'
+                  }}
+                >
+                  Reanudar
+                </button>
+                <button
+                  onClick={handleNuevaSimulacion}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    backgroundColor: 'var(--accent-blue)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Nueva Simulación
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Panel de Control — Centro Superior */}
         <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
           <div style={{ pointerEvents: 'auto', padding: '8px 12px' }}>
@@ -1557,17 +1663,13 @@ export default function SimulacionPeriodo() {
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={sim.iniciar} disabled={sim.isRunning}
-                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: sim.isRunning ? 'var(--border-color)' : 'var(--accent-blue)', border: 'none', borderRadius: 6, cursor: sim.isRunning ? 'default' : 'pointer', color: 'white', opacity: sim.isRunning ? 0.6 : 1, fontWeight: 600 }}>
-                  ▶️ Iniciar
-                </button>
-                <button onClick={sim.detener} disabled={!sim.isRunning}
+                <button onClick={handleDetener} disabled={!sim.isRunning}
                   style={{ padding: '7px 12px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', opacity: !sim.isRunning ? 0.6 : 1, fontWeight: 600 }}>
                   ⏹️ Detener
                 </button>
                 <button onClick={mostrarPanelBusqueda}
                   style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
-                  🔍 Buscar
+                  🔍 Buscar envío
                 </button>
               </div>
             </div>
@@ -1694,7 +1796,11 @@ export default function SimulacionPeriodo() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
             <div className="card">
               <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>📋 Registro de Eventos</h3>
-              <div style={{ maxHeight: 350, overflowY: 'auto' }}>
+              <div 
+                style={{ maxHeight: 350, overflowY: 'auto' }}
+                onWheel={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+              >
                 {sim.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
                 {sim.logs.map((log, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>

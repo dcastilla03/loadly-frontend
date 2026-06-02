@@ -1308,10 +1308,18 @@ export default function SimulacionPeriodo() {
                         }
                         setUploading(true);
                         try {
+                          // 1. Agregamos los 30 archivos de texto
                           const formData = new FormData();
                           selectedFiles.forEach((file) => {
                             formData.append('files', file);
                           });
+                          // 2. Rompemos el string de la hora "14:30" en [ "14", "30" ]
+                          const [horaStr, minutoStr] = (configStartTime || "00:00").split(':');
+
+                          // 3. Inyectamos los parámetros que tu Spring Boot ahora espera de forma obligatoria
+                          formData.append('fechaInicio', configStartDate);
+                          formData.append('horaInicio', horaStr);
+                          formData.append('minutoInicio', minutoStr);
 
                           const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/envios/cargar-carpeta`, {
                             method: 'POST',

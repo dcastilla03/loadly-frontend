@@ -26,7 +26,7 @@ export default function Almacenes() {
   const [aeropuertos, setAeropuertos] = useState<Aeropuerto[]>([]);
   const [cargandoAeropuertos, setCargandoAeropuertos] = useState(true);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   // Cargar aeropuertos al montar el componente
   useEffect(() => {

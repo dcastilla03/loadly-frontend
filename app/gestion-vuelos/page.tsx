@@ -29,7 +29,7 @@ export default function GestionVuelos() {
   const [tipoMensaje, setTipoMensaje] = useState<'success' | 'error'>('success');
   const [cargando, setCargando] = useState(false);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   // Cargar planes de vuelo y aeropuertos al montar
   useEffect(() => {

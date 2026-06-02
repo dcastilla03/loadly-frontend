@@ -229,9 +229,10 @@ function buildLogEvents(
   // Extraer solo la hora de tramo.sale
   const salidaTexto = totalTramos > 0 ? ` · Salida ${tramos[0].sale.split(':').slice(0, 2).join(':')}` : '';
   
+  const codigoRastreo = (ruta.idEnvio.slice(-7) + (ruta.idCliente || '').slice(-5)).padStart(12, '0');
   const textRegistro = esDirecto
-    ? `📦 Envío ${ruta.idEnvio}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Directo${salidaTexto}`
-    : `📦 Envío ${ruta.idEnvio}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Escalas: ${tramos.slice(0, -1).map(t => t.destino).join(', ')}${salidaTexto}`;
+    ? `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Directo${salidaTexto}`
+    : `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Escalas: ${tramos.slice(0, -1).map(t => t.destino).join(', ')}${salidaTexto}`;
   events.push({ 
     minutosDisparo: minutosRegistro, 
     text: textRegistro, 
@@ -274,9 +275,10 @@ function buildLogEvents(
   // ── Evento 4: Envío completado (a la hora de fechaRecojo) ───────────────
   if (ruta.fechaRecojo) {
     const minutosRecojo = fechaHoraAMinutosDesdeInicio(ruta.fechaRecojo, simStartDate);
+    const codigoRastreo = (ruta.idEnvio.slice(-7) + (ruta.idCliente || '').slice(-5)).padStart(12, '0');
     events.push({
       minutosDisparo: minutosRecojo,
-      text: `✅ Envío ${ruta.idEnvio} completado satisfactoriamente · ${ruta.origen} → ${ruta.destino}`,
+      text: `✅ Envío ${codigoRastreo} completado satisfactoriamente · ${ruta.origen} → ${ruta.destino}`,
       color: '#f59e0b',
     });
   }
@@ -310,6 +312,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const esRef = useRef<EventSource | null>(null);
   const aeropuertosRef = useRef<Map<string, AeropuertoSim>>(new Map());
   const iteracionIdxRef = useRef(0);
+  const rutasPlanificadasRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
@@ -326,6 +329,24 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       t = `Día ${dia} ${hh}:${mm}`;
     }
     setLogs(prev => [{ time: t, text, color }, ...prev].slice(0, 100));
+  }, []);
+
+  const addLogBatch = useCallback((entries: Array<{ text: string; color: string; minutosDisparo: number }>) => {
+    setLogs(prev => {
+      let updated = [...prev];
+      for (const entry of entries) {
+        let t: string | null = null;
+        if (typeof entry.minutosDisparo === 'number') {
+          const dia = Math.floor(entry.minutosDisparo / (24 * 60)) + 1;
+          const minDelDia = entry.minutosDisparo % (24 * 60);
+          const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
+          const mm = String(minDelDia % 60).padStart(2, '0');
+          t = `Día ${dia} ${hh}:${mm}`;
+        }
+        updated = [{ time: t, text: entry.text, color: entry.color }, ...updated];
+      }
+      return updated.slice(0, 100);
+    });
   }, []);
 
   const iniciar = useCallback(() => {
@@ -454,6 +475,8 @@ export function useSimulacion(startDate?: string, startTime?: string) {
           const nuevosLogEvents: LogEvent[] = [];
 
           d.rutasPlanificadas.forEach(ruta => {
+            // Store complete route data for panel display
+            rutasPlanificadasRef.current.set(ruta.idEnvio, ruta);
             nuevosFlightEvents.push(...rutaAFlightEvents(ruta, limLectura, aeropuertosRef.current, simStart, iterIdx));
             nuevosLogEvents.push(...buildLogEvents(ruta, limLectura, simStart));
           });
@@ -523,8 +546,9 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     isRunning, aeropuertos, allFlightEvents, allLogEvents, stats, resumen, colapso,
     iteracion, totalIter: totalIterSeguro, reloj, logs,
     totalPlanificados, totalMaletas, progreso, diaActual,
-    iniciar, detener, addLog,
+    iniciar, detener, addLog, addLogBatch,
     realStartTimeRef,
     simStartDateRef,
+    rutasPlanificadasRef,
   };
 }

@@ -105,6 +105,16 @@ export default function SimulacionPeriodo() {
 
   const [clockState, setClockState] = useState<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
   const [configCountdown, setConfigCountdown] = useState(60);
+  const [searchPanelOpen, setSearchPanelOpen] = useState(false);
+  
+  // Configuration wizard state
+  const [showConfigOverlay, setShowConfigOverlay] = useState(true);
+  const [configWizardStep, setConfigWizardStep] = useState(1);
+  const [configStartDate, setConfigStartDate] = useState('');
+  const [configStartTime, setConfigStartTime] = useState('00:00');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadMessage, setUploadMessage] = useState<{ type: 'error' | 'success' | 'info' | 'warning' | null; text: string }>({ type: null, text: '' });
+  const [uploading, setUploading] = useState(false);
 
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(0);
@@ -116,20 +126,27 @@ export default function SimulacionPeriodo() {
   useEffect(() => {
     const dateParam = new URLSearchParams(window.location.search).get('startDate');
     const timeParam = new URLSearchParams(window.location.search).get('startTime');
-    if (dateParam) setStartDate(dateParam);
-    if (timeParam) setStartTime(timeParam);
+    if (dateParam) {
+      setStartDate(dateParam);
+      setConfigStartDate(dateParam);
+    }
+    if (timeParam) {
+      setStartTime(timeParam);
+      setConfigStartTime(timeParam);
+    }
   }, []);
 
   const sim = useSimulacion(startDate || undefined, startTime || undefined);
+  const rutasPlanificadasRef = sim.rutasPlanificadasRef;
 
-  // Iniciar simulación automáticamente cuando tenemos la fecha
+  // Iniciar simulación automáticamente cuando tenemos la fecha y la configuración está completa
   useEffect(() => {
-    if (startDate && !isInitialized.current) {
+    if (startDate && !showConfigOverlay && !isInitialized.current) {
       sim.iniciar();
       isInitialized.current = true;
       // El reloj se iniciará cuando iteracion > 0
     }
-  }, [startDate, sim.iniciar]);
+  }, [startDate, showConfigOverlay, sim.iniciar]);
 
   useEffect(() => {
     if (sim.isRunning && sim.iteracion === 0) {
@@ -390,10 +407,10 @@ export default function SimulacionPeriodo() {
       fe.airplaneImage = img;
       fe.active = true;
 
-      // Click → panel de detalles
+      // Click → panel de detalle del avión (tramo de vuelo)
       img.addEventListener('click', (ev: any) => {
         ev.stopPropagation();
-        mostrarPanelDetalles(fe);
+        mostrarPanelAvion(fe);
       });
 
       // Actualizar almacén de origen al salir
@@ -418,7 +435,7 @@ export default function SimulacionPeriodo() {
       fe.done = true;
 
       if (panelFlightKeyRef.current === fe.key) {
-        cerrarPanelDetalles(fe.key);
+        cerrarPanelAvion(fe.key);
       }
 
       // Actualizar almacén de destino al llegar
@@ -545,11 +562,9 @@ export default function SimulacionPeriodo() {
             }
           }
         }
+        // ✅ OPTIMIZACIÓN: Batch todos los logs en una sola llamada en lugar de múltiples setState
         if (pendingLogs.length > 0) {
-          // Ordenados cronológicamente (minutosDisparo asc) → el más reciente va primero en el log
-          for (const entry of pendingLogs) {
-            addLogRef.current(entry.text, entry.color, entry.minutosDisparo);
-          }
+          sim.addLogBatch(pendingLogs);
         }
 
         frameId = requestAnimationFrame(loop);
@@ -587,15 +602,263 @@ export default function SimulacionPeriodo() {
     };
   }, []);
 
-  // ── Panel de detalles del avión ───────────────────────────────────────────
-  function cerrarPanelDetalles(feKey?: string) {
+  // ── Panel de búsqueda de envíos ───────────────────────────────────────────
+  function cerrarPanelBusqueda() {
+    const panel = document.getElementById('shipmentSearchPanel');
+    if (panel) panel.remove();
+    setSearchPanelOpen(false);
+  }
+
+  function mostrarPanelBusqueda() {
+    if (searchPanelOpen) {
+      cerrarPanelBusqueda();
+      return;
+    }
+
+    let panel = document.getElementById('shipmentSearchPanel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'shipmentSearchPanel';
+      panel.style.cssText = `
+        position:absolute;left:12px;bottom:130px;width:280px;
+        background:white;border-radius:10px;
+        box-shadow:0 4px 20px rgba(0,0,0,0.18);
+        padding:12px;z-index:999996;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        pointer-events:auto;
+      `;
+      // Append to map container instead of body
+      const mapContainer = mapRef.current;
+      if (mapContainer) {
+        mapContainer.appendChild(panel);
+      } else {
+        document.body.appendChild(panel);
+      }
+    }
+
+    setSearchPanelOpen(true);
+
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h3 style="margin:0;font-size:14px;color:#1f2937;">🔍 Buscar envío</h3>
+        <button id="closeSearchPanel" style="background:none;border:none;font-size:18px;cursor:pointer;color:#6b7280;">×</button>
+      </div>
+      <div style="margin-bottom:8px;">
+        <input 
+          type="text" 
+          id="shipmentSearchInput"
+          placeholder="Código de rastreo"
+          style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;"
+          onkeypress="if(event.key === 'Enter') document.getElementById('searchShipmentBtn').click()"
+        />
+      </div>
+      <button 
+        id="searchShipmentBtn"
+        style="width:100%;padding:8px;background:var(--accent-blue);color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;"
+      >
+        Buscar
+      </button>
+    `;
+
+    document.getElementById('closeSearchPanel')?.addEventListener('click', cerrarPanelBusqueda);
+    document.getElementById('searchShipmentBtn')?.addEventListener('click', buscarEnvio);
+  }
+
+  function buscarEnvio() {
+    const input = document.getElementById('shipmentSearchInput') as HTMLInputElement;
+    const codigoBusqueda = input?.value.trim();
+    
+    if (!codigoBusqueda) {
+      mostrarNotificacion('Por favor ingrese un código de rastreo', '#f97316');
+      return;
+    }
+
+    // Buscar por código de rastreo (últimos 7 dígitos de envío + últimos 5 dígitos de cliente)
+    let flightEvent: FlightEvent | undefined;
+    for (const [idEnvio, ruta] of rutasPlanificadasRef.current.entries()) {
+      const codigoRastreo = (idEnvio.slice(-7) + (ruta.idCliente || '').slice(-5)).padStart(12, '0');
+      if (codigoRastreo === codigoBusqueda) {
+        flightEvent = flightEventsRef.current.find(fe => fe.key.startsWith(idEnvio));
+        if (flightEvent) break;
+      }
+    }
+    
+    if (!flightEvent) {
+      mostrarNotificacion('El envío no está registrado actualmente', '#ef4444');
+      return;
+    }
+
+    // Cerrar panel de búsqueda
+    cerrarPanelBusqueda();
+    
+    // Mostrar panel de detalles del envío (solo desde búsqueda)
+    mostrarPanelEnvio(flightEvent);
+  }
+
+  function mostrarNotificacion(mensaje: string, color: string) {
+    const notif = document.createElement('div');
+    notif.style.cssText = `
+      position:fixed;top:80px;left:50%;transform:translateX(-50%);
+      background:${color};color:white;padding:12px 24px;border-radius:8px;
+      font-size:14px;font-weight:600;z-index:100001;
+      box-shadow:0 4px 12px rgba(0,0,0,0.15);
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      animation:slideIn 0.3s ease-out;
+    `;
+    notif.textContent = mensaje;
+    document.body.appendChild(notif);
+
+    setTimeout(() => {
+      notif.style.animation = 'slideOut 0.3s ease-in forwards';
+      setTimeout(() => notif.remove(), 300);
+    }, 3000);
+
+    // Add animations if not already present
+    if (!document.getElementById('notifAnimations')) {
+      const style = document.createElement('style');
+      style.id = 'notifAnimations';
+      style.textContent = `
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        @keyframes slideOut {
+          from { opacity: 1; transform: translateX(-50%) translateY(0); }
+          to { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }
+
+  // ── Panel de Detalle del Avión (tramo de vuelo — se abre al hacer clic en el mapa) ──
+  function cerrarPanelAvion(feKey?: string) {
     if (feKey && panelFlightKeyRef.current !== feKey) return;
-    const panel = document.getElementById('airplaneDetailsPanel');
+    const panel = document.getElementById('airplaneFlightPanel');
     if (panel) panel.remove();
     panelFlightKeyRef.current = null;
   }
 
-  function mostrarPanelDetalles(fe: FlightEvent) {
+  function mostrarPanelAvion(fe: FlightEvent) {
+    // Cerrar panel de envío si estuviera abierto
+    const panelEnvio = document.getElementById('airplaneDetailsPanel');
+    if (panelEnvio) panelEnvio.remove();
+
+    let panel = document.getElementById('airplaneFlightPanel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'airplaneFlightPanel';
+      panel.style.cssText = `
+        position:absolute;right:12px;top:170px;width:340px;
+        background:white;border-radius:12px;
+        box-shadow:0 4px 20px rgba(0,0,0,0.18);
+        padding:18px;z-index:10001;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        max-height:60vh;overflow-y:auto;pointer-events:auto;
+      `;
+      document.body.appendChild(panel);
+    }
+
+    panelFlightKeyRef.current = fe.key;
+
+    // Resolución de aeropuertos
+    const aeropuertoOrigen = sim.aeropuertos.find(a => a.codigo === fe.origenCode);
+    const aeropuertoDestino = sim.aeropuertos.find(a => a.codigo === fe.destinoCode);
+    const ciudadOrigen = aeropuertoOrigen
+      ? `${aeropuertoOrigen.ciudad}, ${aeropuertoOrigen.pais}`
+      : fe.origenCode;
+    const ciudadDestino = aeropuertoDestino
+      ? `${aeropuertoDestino.ciudad}, ${aeropuertoDestino.pais}`
+      : fe.destinoCode;
+
+    // Calcular horarios
+    const simStartDate = sim.simStartDateRef.current;
+    let startDateStr = startDate;
+    let startTimeStr = startTime;
+    if (simStartDate) {
+      startDateStr = `${simStartDate.getFullYear()}-${String(simStartDate.getMonth() + 1).padStart(2, '0')}-${String(simStartDate.getDate()).padStart(2, '0')}`;
+      startTimeStr = `${String(simStartDate.getHours()).padStart(2, '0')}:${String(simStartDate.getMinutes()).padStart(2, '0')}`;
+    }
+    if (!startDateStr) {
+      const now = new Date();
+      startDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      startTimeStr = startTimeStr || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    }
+    const horaSalida = formatSimTime(fe.minutosInicio, startDateStr, startTimeStr);
+    const horaLlegada = formatSimTime(fe.minutosFin, startDateStr, startTimeStr);
+
+    // Calcular duración en horas y minutos
+    const duracionMin = fe.minutosFin - fe.minutosInicio;
+    const durH = Math.floor(duracionMin / 60);
+    const durM = duracionMin % 60;
+    const duracionLabel = durH > 0 ? `${durH}h ${durM}m` : `${durM}m`;
+
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div>
+          <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del viaje</h3>
+          
+        </div>
+        <button id="closeAvionPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+      </div>
+
+      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+          <div style="font-size:11px;color:#6b7280;">TRAMO</div>
+        </div>
+        <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:8px;">
+          <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
+            <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Origen</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">${ciudadOrigen}</span>
+          </span>
+          <span style="color:#9ca3af;font-size:18px;font-weight:800;margin-top:18px;">→</span>
+          <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
+            <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Destino</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#fef3c7;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">${ciudadDestino}</span>
+          </span>
+        </div>
+      </div>
+
+      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">HORARIOS</div>
+        <div style="display:flex;justify-content:space-between;gap:12px;">
+          <div style="flex:1;">
+            <div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:2px;">Hora de salida</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${horaSalida}</div>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:2px;">Hora de llegada</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${horaLlegada}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">MALETAS</div>
+        <div style="font-size:12px;color:#1f2937;font-weight:700;">${fe.maletasVuelo} / ${fe.capacidadVuelo} maletas</div>
+      </div>
+
+      <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">DURACIÓN DEL TRAMO</div>
+        <div style="font-size:14px;color:#1f2937;font-weight:700;">${duracionLabel}</div>
+      </div>
+    `;
+
+    document.getElementById('closeAvionPanel')?.addEventListener('click', () => {
+      cerrarPanelAvion(fe.key);
+    });
+  }
+
+  // ── Panel de Detalle del Envío (se abre SOLO desde la búsqueda) ───────────
+  function cerrarPanelEnvio() {
+    const panel = document.getElementById('airplaneDetailsPanel');
+    if (panel) panel.remove();
+  }
+
+  function mostrarPanelEnvio(fe: FlightEvent) {
+    // Cerrar panel de avión si estuviera abierto
+    cerrarPanelAvion();
+
     let panel = document.getElementById('airplaneDetailsPanel');
     if (!panel) {
       panel = document.createElement('div');
@@ -611,75 +874,174 @@ export default function SimulacionPeriodo() {
       document.body.appendChild(panel);
     }
 
-    panelFlightKeyRef.current = fe.key;
+    // Extract shipment ID from the key (format: idEnvio-idCliente-iterX-tramoY)
+    const codigoEnvio = fe.key.split('-')[0];
 
-    const ocupPct = fe.capacidadVuelo > 0
-      ? Math.min(100, (fe.maletasVuelo / fe.capacidadVuelo) * 100)
-      : 0;
-    const colorOcup = ocupPct < 50 ? '#10b981' : ocupPct < 80 ? '#f97316' : '#ef4444';
-    const planVueloRuta = fe.planVueloRuta.length > 0 ? fe.planVueloRuta.join(' → ') : `${fe.origenCode} → ${fe.destinoCode}`;
-    const escalas = fe.planVueloRuta.length > 2 ? fe.planVueloRuta.slice(1, -1).join(' · ') : '';
-    const totalTramos = Math.max(1, fe.planVueloRuta.length - 1);
-    const tramoActual = fe.planVueloTipo === 'Por escalas' && fe.planVueloRuta.length > fe.tramoOrden
-      ? `${fe.planVueloRuta[fe.tramoOrden - 1]} → ${fe.planVueloRuta[fe.tramoOrden]}`
-      : `${fe.origenCode} → ${fe.destinoCode}`;
-    const rutaVisual = fe.planVueloRuta.map((codigo, index) => {
-      const isInicio = index === 0;
-      const isFinal = index === fe.planVueloRuta.length - 1;
-      const isTramoOrigen = fe.planVueloTipo === 'Por escalas' && index === fe.tramoOrden - 1;
-      const isTramoDestino = fe.planVueloTipo === 'Por escalas' && index === fe.tramoOrden;
-      const background = isTramoOrigen
-        ? '#dbeafe'
-        : isTramoDestino
-          ? '#dcfce7'
-          : isInicio
-            ? '#eef2ff'
-            : isFinal
-              ? '#fef3c7'
-              : '#f3f4f6';
-      const color = isTramoOrigen || isTramoDestino || isInicio || isFinal ? '#111827' : '#374151';
-      const label = isInicio
-        ? 'Origen'
-        : isFinal
-          ? 'Destino'
-          : 'Escala';
-      return `
-        <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
-          <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">${label}</span>
-          <span style="display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:${background};color:${color};font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">${codigo}</span>
-        </span>
-        ${index < fe.planVueloRuta.length - 1 ? '<span style="color:#9ca3af;font-size:18px;font-weight:800;margin-top:18px;">→</span>' : ''}
+    // Get complete route data from the ref
+    const rutaCompleta = rutasPlanificadasRef.current.get(codigoEnvio);
+
+    // Generate tracking code: last 7 digits of shipment code + last 5 digits of customer code
+    const codigoRastreo = (codigoEnvio.slice(-7) + (rutaCompleta?.idCliente || '').slice(-5)).padStart(12, '0');
+
+    // Determine shipment status
+    const totalTramos = rutaCompleta?.tramos?.length || 0;
+    let estadoEnvio = 'Programado';
+    let estadoColor = '#6b7280'; // gray
+    if (fe.active && fe.tramoOrden > 0 && fe.tramoOrden <= totalTramos) {
+      estadoEnvio = 'En progreso';
+      estadoColor = '#3b82f6'; // blue
+    } else if (fe.tramoOrden > totalTramos) {
+      estadoEnvio = 'Finalizado';
+      estadoColor = '#10b981'; // green
+    }
+
+    if (!rutaCompleta) {
+      panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div>
+            <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del envío</h3>
+            <div style="font-size:11px;color:#6b7280;margin-top:2px;">COD. RASTREO: ${codigoRastreo}</div>
+          </div>
+          <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+        </div>
+        <div style="background:#fef3c7;padding:12px;border-radius:8px;color:#92400e;font-size:13px;">
+          Información de ruta no disponible
+        </div>
       `;
-    }).join('');
+      document.getElementById('closeFEPanel')?.addEventListener('click', () => {
+        cerrarPanelEnvio();
+      });
+      return;
+    }
+
+    // Get airport information for location names
+    const aeropuertoOrigen = sim.aeropuertos.find(a => a.codigo === rutaCompleta.origen);
+    const aeropuertoDestino = sim.aeropuertos.find(a => a.codigo === rutaCompleta.destino);
+    const ubicacionOrigen = aeropuertoOrigen ? `${aeropuertoOrigen.ciudad}, ${aeropuertoOrigen.pais}` : rutaCompleta.origen;
+    const ubicacionDestino = aeropuertoDestino ? `${aeropuertoDestino.ciudad}, ${aeropuertoDestino.pais}` : rutaCompleta.destino;
+
+    // Build tramos visualization with dates and times
+    const tramosVisual = rutaCompleta.tramos?.map((tramo, index) => {
+      const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
+      const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
+      const ubicacionOrigenTramo = aOrigen ? `${aOrigen.ciudad}, ${aOrigen.pais}` : tramo.origen;
+      const ubicacionDestinoTramo = aDestino ? `${aDestino.ciudad}, ${aDestino.pais}` : tramo.destino;
+      const isLast = index === (rutaCompleta.tramos?.length ?? 0) - 1;
+      const isCurrent = tramo.orden === fe.tramoOrden;
+
+      // Dynamic styling based on tramo status
+      const bgColor = isCurrent ? '#dbeafe' : index === 0 ? '#eef2ff' : isLast ? '#fef3c7' : '#f9fafb';
+      const borderColor = isCurrent ? '#3b82f6' : 'transparent';
+      const borderWidth = isCurrent ? '2px' : '0px';
+      const statusBadge = isCurrent ? '<span style="background:#3b82f6;color:white;font-size:8px;font-weight:700;padding:2px 6px;border-radius:999px;">ACTUAL</span>' : '';
+      const statusColor = isCurrent ? '#1e40af' : '#6b7280';
+
+      return `
+        <div style="background:${bgColor};border:${borderWidth} solid ${borderColor};padding:12px;border-radius:10px;margin-bottom:${isLast ? '0' : '12px'};position:relative;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:11px;font-weight:700;color:${statusColor};text-transform:uppercase;">Tramo ${tramo.orden}</span>
+              ${statusBadge}
+            </div>
+          </div>
+          
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <div style="flex:1;">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Origen</div>
+              <div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionOrigenTramo}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <div style="width:24px;height:2px;background:#d1d5db;border-radius:1px;"></div>
+              <span style="color:#9ca3af;font-size:16px;font-weight:800;">✈</span>
+              <div style="width:24px;height:2px;background:#d1d5db;border-radius:1px;"></div>
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Destino</div>
+              <div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionDestinoTramo}</div>
+            </div>
+          </div>
+          
+          <div style="display:flex;justify-content:space-between;gap:12px;">
+            <div style="flex:1;background:white;padding:8px;border-radius:6px;">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Sale</div>
+              <div style="font-size:12px;color:#1f2937;font-weight:700;">${tramo.sale}</div>
+            </div>
+            <div style="flex:1;background:white;padding:8px;border-radius:6px;">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Llega</div>
+              <div style="font-size:12px;color:#1f2937;font-weight:700;">${tramo.llega}</div>
+            </div>
+          </div>
+          
+          ${!isLast ? `
+            <div style="position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);z-index:1;">
+              <div style="width:2px;height:12px;background:#d1d5db;margin:0 auto;"></div>
+              <div style="width:8px;height:8px;background:#d1d5db;border-radius:50%;margin:-6px auto 0;"></div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('') || '';
 
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del vuelo</h3>
-        <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+        <div>
+          <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del envío</h3>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px;">COD. RASTREO: ${codigoRastreo}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="background:${estadoColor};color:white;font-size:10px;font-weight:700;padding:4px 10px;border-radius:999px;text-transform:uppercase;">${estadoEnvio}</span>
+          <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+        </div>
       </div>
 
-      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
-          <div style="font-size:11px;color:#6b7280;">PLAN DE VUELO</div>
-          <div style="font-size:10px;font-weight:700;color:#1f2937;background:#e5e7eb;padding:4px 8px;border-radius:999px;">${fe.planVueloTipo}</div>
+      <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">PLAN DE VIAJE</div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div>
+            <div style="font-size:11px;color:#1f2937;font-weight:700;">${rutaCompleta.fechaRegistro || '-'}</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div>
+            <div style="font-size:11px;color:#1f2937;font-weight:700;">${rutaCompleta.fechaRecojo || '-'}</div>
+          </div>
         </div>
-        <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:8px;">${rutaVisual}</div>
-        ${fe.planVueloTipo === 'Por escalas'
-          ? `<div style="font-size:10px;color:#6b7280;margin-top:4px;">Actualmente en ${tramoActual} · Tramo ${fe.tramoOrden} de ${totalTramos}</div>`
-          : `<div style="font-size:10px;color:#6b7280;margin-top:4px;">Directo · Un solo tramo entre origen y destino</div>`}
+
+        <div style="margin-bottom:8px;">
+          <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Ruta</div>
+          <div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionOrigen} → ${ubicacionDestino}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div>
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo</div>
+            <div style="font-size:11px;color:#1f2937;font-weight:700;">${rutaCompleta.duracion || '-'}</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">SLA</div>
+            <div style="font-size:11px;color:#1f2937;font-weight:700;">${rutaCompleta.sla || '-'}</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">� Cliente</div>
+            <div style="font-size:11px;color:#1f2937;font-weight:700;">${rutaCompleta.idCliente || '-'}</div>
+          </div>
+        </div>
+
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
+          <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Maletas</div>
+          <div style="font-size:12px;color:#1f2937;font-weight:700;">${rutaCompleta.maletas}</div>
+        </div>
       </div>
 
-      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">OCUPACIÓN DEL VUELO</div>
-        <div style="height:6px;background:#d1d5db;border-radius:3px;overflow:hidden;margin-bottom:5px;">
-          <div style="height:100%;background:${colorOcup};width:${ocupPct}%;"></div>
-        </div>
-        <div style="font-size:11px;color:#374151;font-weight:600;">${fe.maletasVuelo} / ${fe.capacidadVuelo} maletas (${Math.round(ocupPct)}%)</div>
+      <div style="background:#f3f4f6;padding:12px;border-radius:8px;">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">TRAMOS</div>
+        ${tramosVisual}
       </div>
     `;
 
     document.getElementById('closeFEPanel')?.addEventListener('click', () => {
-      cerrarPanelDetalles(fe.key);
+      cerrarPanelEnvio();
     });
   }
 
@@ -691,6 +1053,406 @@ export default function SimulacionPeriodo() {
     <div className="main-wrapper">
       <div className="card map-card" style={{ padding: 0, overflow: 'visible', minHeight: '100vh', display: 'flex', flexDirection: 'column', width: '100%', margin: 0, borderRadius: 0, position: 'relative' }}>
         <div ref={mapRef} style={{ width: '100%', height: '100%', minHeight: '100vh' }} />
+
+        {/* Configuration Overlay */}
+        {showConfigOverlay && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            zIndex: 9999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              maxWidth: '700px',
+              width: '90%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+              padding: '24px'
+            }}>
+              {/* Modal Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  ⚙️ Configurar Simulación
+                </h2>
+              </div>
+
+              {/* Wizard Steps */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    backgroundColor: configWizardStep === 1 ? 'var(--accent-blue)' : configWizardStep > 1 ? '#10b981' : 'var(--bg-tertiary)',
+                    color: configWizardStep === 1 ? 'white' : configWizardStep > 1 ? 'white' : 'var(--text-secondary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    marginBottom: '4px'
+                  }}>1</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Fecha de Inicio</div>
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    backgroundColor: configWizardStep === 2 ? 'var(--accent-blue)' : configWizardStep > 2 ? '#10b981' : 'var(--bg-tertiary)',
+                    color: configWizardStep === 2 ? 'white' : configWizardStep > 2 ? 'white' : 'var(--text-secondary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    marginBottom: '4px'
+                  }}>2</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Carga de Envíos</div>
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    backgroundColor: configWizardStep === 3 ? 'var(--accent-blue)' : configWizardStep > 3 ? '#10b981' : 'var(--bg-tertiary)',
+                    color: configWizardStep === 3 ? 'white' : configWizardStep > 3 ? 'white' : 'var(--text-secondary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    marginBottom: '4px'
+                  }}>3</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Confirmación</div>
+                </div>
+              </div>
+
+              {/* Step 1: Fecha de Inicio */}
+              {configWizardStep === 1 && (
+                <div>
+                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
+                    Fecha y Hora de Inicio (Período de 5 Días)
+                  </h3>
+                  <div style={{ display: 'grid', gap: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: 600 }}>
+                        Selecciona la fecha de inicio:
+                      </label>
+                      <input
+                        type="date"
+                        value={configStartDate}
+                        onChange={(e) => setConfigStartDate(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-secondary)',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: 600 }}>
+                        Selecciona la hora de inicio:
+                      </label>
+                      <input
+                        type="time"
+                        value={configStartTime}
+                        onChange={(e) => setConfigStartTime(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-secondary)',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid var(--accent-blue)', borderRadius: '8px' }}>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>
+                        📅 La simulación durará <strong>5 días</strong> a partir de la fecha y hora seleccionadas.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Carga de Envíos */}
+              {configWizardStep === 2 && (
+                <div>
+                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px', fontSize: '16px' }}>
+                    📤 Carga Masiva de Envíos
+                  </h3>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px', lineHeight: '1.6' }}>
+                    Sube archivos .txt con múltiples registros de envíos para importarlos en lote desde la carpeta de envíos.
+                  </p>
+
+                  <div
+                    onClick={() => document.getElementById('configFileInput')?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.txt'));
+                      setSelectedFiles(files);
+                    }}
+                    style={{
+                      border: '2px dashed var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '40px 20px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      marginBottom: '20px'
+                    }}
+                  >
+                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>
+                      {uploading ? '⏳' : '📂'}
+                    </div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px', fontSize: '15px' }}>
+                      {uploading ? 'Cargando archivos...' : 'Arrastra carpeta o archivos aquí'}
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                      {uploading ? 'Por favor espera...' : 'o haz clic para seleccionar'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      Formato: Carpeta o archivos .txt | Múltiples archivos
+                    </div>
+                    <input
+                      id="configFileInput"
+                      type="file"
+                      accept=".txt"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []).filter(f => f.name.endsWith('.txt'));
+                        setSelectedFiles(files);
+                      }}
+                      disabled={uploading}
+                      multiple
+                      {...({ webkitdirectory: true } as any)}
+                    />
+                  </div>
+
+                  {selectedFiles.length > 0 && (
+                    <div style={{ padding: '14px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', marginBottom: '16px', borderLeft: '3px solid var(--accent-blue)' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                        Archivos seleccionados: <strong>{selectedFiles.length}</strong>
+                      </div>
+                      <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                        {selectedFiles.map((file, idx) => (
+                          <div key={idx} style={{ fontSize: '12px', color: 'var(--text-primary)', paddingBottom: '6px', borderBottom: idx < selectedFiles.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                            • {file.name}
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                        Total: {(selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(2)} KB
+                      </div>
+                    </div>
+                  )}
+
+                  {uploadMessage.type && (
+                    <div style={{
+                      padding: '12px 14px',
+                      backgroundColor: uploadMessage.type === 'error' ? 'rgba(220, 38, 38, 0.1)' : uploadMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                      borderRadius: '8px',
+                      marginBottom: '16px',
+                      borderLeft: '3px solid ' + (uploadMessage.type === 'error' ? 'var(--danger-red)' : uploadMessage.type === 'success' ? 'var(--success-green)' : 'var(--accent-blue)'),
+                      fontSize: '13px',
+                      color: uploadMessage.type === 'error' ? 'var(--danger-red)' : uploadMessage.type === 'success' ? 'var(--success-green)' : 'var(--accent-blue)'
+                    }}>
+                      {uploadMessage.text}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFiles([])}
+                      disabled={uploading}
+                      style={{
+                        flex: 1,
+                        padding: '12px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        backgroundColor: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        cursor: uploading ? 'default' : 'pointer'
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (selectedFiles.length === 0) {
+                          setUploadMessage({ type: 'error', text: 'Por favor selecciona archivos o carpeta' });
+                          return;
+                        }
+                        setUploading(true);
+                        try {
+                          const formData = new FormData();
+                          selectedFiles.forEach((file) => {
+                            formData.append('files', file);
+                          });
+
+                          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/envios/cargar-carpeta`, {
+                            method: 'POST',
+                            body: formData,
+                          });
+
+                          const data = await response.json();
+
+                          if (response.ok && data.exito) {
+                            setUploadMessage({ type: 'success', text: data.mensaje || `${selectedFiles.length} archivo${selectedFiles.length === 1 ? '' : 's'} cargado${selectedFiles.length === 1 ? '' : 's'} exitosamente` });
+                            setSelectedFiles([]);
+                          } else {
+                            setUploadMessage({ type: 'error', text: data.mensaje || `Error ${response.status}` });
+                          }
+                        } catch (error) {
+                          setUploadMessage({ type: 'error', text: `Error: ${error instanceof Error ? error.message : 'Error desconocido'}` });
+                        } finally {
+                          setUploading(false);
+                        }
+                      }}
+                      disabled={uploading || selectedFiles.length === 0}
+                      style={{
+                        flex: 1,
+                        padding: '12px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        backgroundColor: uploading || selectedFiles.length === 0 ? 'var(--border-color)' : 'var(--accent-blue)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: uploading || selectedFiles.length === 0 ? 'default' : 'pointer'
+                      }}
+                    >
+                      {uploading ? '⏳ Procesando...' : `↑ Procesar ${selectedFiles.length} Archivo${selectedFiles.length === 1 ? '' : 's'}`}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Confirmación */}
+              {configWizardStep === 3 && (
+                <div>
+                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
+                    ✓ Resumen de Configuración
+                  </h3>
+
+                  <div style={{ display: 'grid', gap: '12px' }}>
+                    <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                      <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tipo de Simulación</small>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
+                        📅 Simulación de Período
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                      <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fecha y Hora de Inicio</small>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
+                        {configStartDate ? (() => {
+                          const date = new Date(configStartDate + 'T00:00:00');
+                          const day = String(date.getDate()).padStart(2, '0');
+                          const month = String(date.getMonth() + 1).padStart(2, '0');
+                          const year = date.getFullYear();
+                          const time = configStartTime || '00:00';
+                          return `${day}/${month}/${year} ${time}`;
+                        })() : '-'}
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                      <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Duración</small>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
+                        5 días (fijo)
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '24px', padding: '16px', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid var(--success-green)', borderRadius: '8px' }}>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>
+                      ✓ La configuración está lista. Haz clic en <strong>"Iniciar Simulación"</strong> para comenzar el proceso.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Footer */}
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                <button
+                  onClick={() => setConfigWizardStep(configWizardStep - 1)}
+                  disabled={configWizardStep === 1}
+                  style={{
+                    padding: '10px 16px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    backgroundColor: configWizardStep === 1 ? 'var(--border-color)' : 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    cursor: configWizardStep === 1 ? 'default' : 'pointer',
+                    display: configWizardStep === 1 ? 'none' : 'block'
+                  }}
+                >
+                  ← Anterior
+                </button>
+                <button
+                  onClick={() => {
+                    if (configWizardStep === 1) {
+                      if (!configStartDate) {
+                        alert('Por favor selecciona una fecha de inicio.');
+                        return;
+                      }
+                      setConfigWizardStep(2);
+                    } else if (configWizardStep === 2) {
+                      setConfigWizardStep(3);
+                    } else if (configWizardStep === 3) {
+                      setStartDate(configStartDate);
+                      setStartTime(configStartTime);
+                      setShowConfigOverlay(false);
+                    }
+                  }}
+                  disabled={
+                    (configWizardStep === 1 && !configStartDate) ||
+                    (configWizardStep === 2 && uploading)
+                  }
+                  style={{
+                    flex: 1,
+                    padding: '10px 16px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    backgroundColor: (configWizardStep === 1 && !configStartDate) || (configWizardStep === 2 && uploading) ? 'var(--border-color)' : 'var(--accent-blue)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: (configWizardStep === 1 && !configStartDate) || (configWizardStep === 2 && uploading) ? 'default' : 'pointer'
+                  }}
+                >
+                  {configWizardStep === 3 ? 'Iniciar Simulación' : 'Siguiente →'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Panel de Control — Centro Superior */}
         <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
@@ -765,6 +1527,10 @@ export default function SimulacionPeriodo() {
                 <button onClick={sim.detener} disabled={!sim.isRunning}
                   style={{ padding: '7px 12px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', opacity: !sim.isRunning ? 0.6 : 1, fontWeight: 600 }}>
                   ⏹️ Detener
+                </button>
+                <button onClick={mostrarPanelBusqueda}
+                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                  🔍 Buscar
                 </button>
               </div>
             </div>

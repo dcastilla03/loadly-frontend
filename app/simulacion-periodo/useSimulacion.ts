@@ -287,7 +287,7 @@ function buildLogEvents(
 }
 
 export const SIM_CONFIG = {
-  Sa: 3, // Minutos
+  Sa: 2, // Minutos
   Ta: 60, // Segundos
   K: 120, // Aceleración
 };

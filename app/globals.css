@@ -1279,6 +1279,11 @@ body {
   width: calc(100% - 100px);
 }
 
+.map-container.flight-panel-open .map-card {
+  flex: 1;
+  transition: flex 0.35s ease;
+}
+
 /* Panel de control responsivo */
 .panel-control {
   left: var(--sidebar-width) !important;

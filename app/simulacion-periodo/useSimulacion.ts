@@ -101,7 +101,7 @@ interface BackendSimEvent {
   resumenFinal?: Resumen;
 }
 
-  /** Convierte "HH:MM" a minutos del día */
+/** Convierte "HH:MM" a minutos del día */
 function horaAMinutos(hora: string): number {
   const [h, m] = hora.split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
@@ -175,7 +175,7 @@ function rutaAFlightEvents(
 
     const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
     const minutosFin = Math.round((llegaDate.getTime() - simStartDate.getTime()) / 60000);
-    
+
     cursorDate = llegaDate;
 
     const key = `${ruta.idEnvio}-${ruta.idCliente || 'x'}-iter${iteracionIdx}-tramo${tramo.orden}`;
@@ -225,17 +225,17 @@ function buildLogEvents(
     ? fechaHoraAMinutosDesdeInicio(ruta.fechaRegistro, simStartDate)
     : 0;
   const esDirecto = totalTramos <= 1;
-  
+
   // Extraer solo la hora de tramo.sale
   const salidaTexto = totalTramos > 0 ? ` · Salida ${tramos[0].sale.split(':').slice(0, 2).join(':')}` : '';
-  
-  const codigoRastreo = (ruta.idEnvio.slice(-7) + (ruta.idCliente || '').slice(-5)).padStart(12, '0');
+
+  const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen.charAt(0)}${ruta.destino.charAt(0)}`;
   const textRegistro = esDirecto
     ? `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Directo${salidaTexto}`
     : `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Escalas: ${tramos.slice(0, -1).map(t => t.destino).join(', ')}${salidaTexto}`;
-  events.push({ 
-    minutosDisparo: minutosRegistro, 
-    text: textRegistro, 
+  events.push({
+    minutosDisparo: minutosRegistro,
+    text: textRegistro,
     color: '#22c55e',
     updatePopupCode: ruta.origen,
     updatePopupOcupacion: ruta.ocupacionAlmacenRegistro,
@@ -244,7 +244,7 @@ function buildLogEvents(
 
   // ── Eventos 2 & 3: Salida y llegada por cada tramo ───────────────────────
   let cursorDate = extraerFecha(ruta.fechaRegistro);
-  
+
   for (const tramo of tramos) {
     const saleParts = tramo.sale.split(':').map(Number);
     let saleDate = new Date(cursorDate);
@@ -262,20 +262,20 @@ function buildLogEvents(
 
     const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
     const minutosFin = Math.round((llegaDate.getTime() - simStartDate.getTime()) / 60000);
-    
+
     cursorDate = llegaDate;
 
     const textSalida = totalTramos > 1
       ? `✈️ Sale avión de ${tramo.origen} → ${tramo.destino} (Tramo ${tramo.orden}/${totalTramos})`
       : `✈️ Sale avión de ${tramo.origen} → ${tramo.destino}`;
     events.push({ minutosDisparo: minutosInicio, text: textSalida, color: '#3b82f6' });
-    events.push({ minutosDisparo: minutosFin,    text: `🛬 Llega avión a ${tramo.destino} (desde ${tramo.origen})`, color: '#8b5cf6' });
+    events.push({ minutosDisparo: minutosFin, text: `🛬 Llega avión a ${tramo.destino} (desde ${tramo.origen})`, color: '#8b5cf6' });
   }
 
   // ── Evento 4: Envío completado (a la hora de fechaRecojo) ───────────────
   if (ruta.fechaRecojo) {
     const minutosRecojo = fechaHoraAMinutosDesdeInicio(ruta.fechaRecojo, simStartDate);
-    const codigoRastreo = (ruta.idEnvio.slice(-7) + (ruta.idCliente || '').slice(-5)).padStart(12, '0');
+    const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen.charAt(0)}${ruta.destino.charAt(0)}`;
     events.push({
       minutosDisparo: minutosRecojo,
       text: `✅ Envío ${codigoRastreo} completado satisfactoriamente · ${ruta.origen} → ${ruta.destino}`,
@@ -296,12 +296,12 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const [isRunning, setIsRunning] = useState(false);
   const [aeropuertos, setAeropuertos] = useState<AeropuertoSim[]>([]);
   const [allFlightEvents, setAllFlightEvents] = useState<FlightEvent[]>([]);
-  const [allLogEvents,    setAllLogEvents]    = useState<LogEvent[]>([]);
+  const [allLogEvents, setAllLogEvents] = useState<LogEvent[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [colapso, setColapso] = useState<Colapso | null>(null);
   const [iteracion, setIteracion] = useState(0);
-  const [totalIter, setTotalIter] = useState(20);
+  const [totalIter, setTotalIter] = useState(30);
   const [reloj, setReloj] = useState('');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [totalPlanificados, setTotalPlanificados] = useState(0);
@@ -422,7 +422,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
     if (startDate) {
       const [year, month, day] = startDate.split('-');
-      
+
       // Parse startTime (formato HH:MM)
       let hour = 0, minute = 0;
       if (startTime) {
@@ -430,7 +430,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
         hour = h || 0;
         minute = m || 0;
       }
-      
+
       const startFormatted = `${year}${month}${day}-${String(hour).padStart(2, '0')}-${String(minute).padStart(2, '0')}`;
       const startDateObj = new Date(Number(year), Number(month) - 1, Number(day), hour, minute, 0, 0);
       simStart = startDateObj;
@@ -565,7 +565,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setIsRunning(false); addLog('Simulación detenida manualmente', '#f97316');
   }, [addLog]);
 
-  const totalIterSeguro = Number.isFinite(totalIter) && totalIter > 0 ? totalIter : 20;
+  const totalIterSeguro = Number.isFinite(totalIter) && totalIter > 0 ? totalIter : 30;
   const progreso = totalIterSeguro > 0 ? (iteracion / totalIterSeguro) * 100 : 0;
   const diaActual = Math.min(5, Math.floor(iteracion / (totalIterSeguro / 5)) + 1);
 

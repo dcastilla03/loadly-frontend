@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { useSimulacion, FlightEvent, LogEvent, SIM_CONFIG } from './useSimulacion';
+import { useSimulacion, FlightEvent, LogEvent, SIM_CONFIG, LogEntry } from './useSimulacion';
 
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
@@ -40,11 +40,11 @@ function bezierCurve(
 /** Formatea minutos desde el inicio de la simulación como "DD/MM/AAAA HH:MM" */
 function formatSimTime(minutos: number, startDate: string | null, startTime: string | null): string {
   if (!startDate) return 'DD/MM/AAAA HH:MM';
-  
+
   try {
     // Parse startDate format "YYYY-MM-DD"
     const [year, month, day] = startDate.split('-').map(Number);
-    
+
     // Parse startTime format "HH:MM"
     let hour = 0, minute = 0;
     if (startTime) {
@@ -52,12 +52,12 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
       hour = h || 0;
       minute = m || 0;
     }
-    
+
     const date = new Date(year, month - 1, day, hour, minute);
-    
+
     // Add simulated minutes
     date.setMinutes(date.getMinutes() + minutos);
-    
+
     // Format as DD/MM/AAAA HH:MM
     const dd = String(date.getDate()).padStart(2, '0');
     const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -95,7 +95,7 @@ export default function SimulacionPeriodo() {
   const logEventsRef = useRef<LogEvent[]>([]);
 
   // Ref estable a addLog (evita problemas de closure en el loop de animación)
-  const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => {});
+  const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => { });
 
   // Refs para el nuevo control de tiempo
   const currentMinSimRef = useRef<number>(0);
@@ -106,7 +106,10 @@ export default function SimulacionPeriodo() {
   const [clockState, setClockState] = useState<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
   const [configCountdown, setConfigCountdown] = useState(60);
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
-  
+  const [flightPanelOpen, setFlightPanelOpen] = useState(false);
+  const [vuelosGA, setVuelosGA] = useState<any[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   // Configuration wizard state
   const [showConfigOverlay, setShowConfigOverlay] = useState(true);
   const [configWizardStep, setConfigWizardStep] = useState(1);
@@ -115,13 +118,15 @@ export default function SimulacionPeriodo() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadMessage, setUploadMessage] = useState<{ type: 'error' | 'success' | 'info' | 'warning' | null; text: string }>({ type: null, text: '' });
   const [uploading, setUploading] = useState(false);
-  
+
   // Simulation stopped overlay state
   const [showStoppedOverlay, setShowStoppedOverlay] = useState(false);
 
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(0);
   const clockEnabledRef = useRef(false);
+
+
 
   const isInitialized = useRef(false);
 
@@ -140,7 +145,98 @@ export default function SimulacionPeriodo() {
   }, []);
 
   const sim = useSimulacion(startDate || undefined, startTime || undefined);
+
+  // Detectar estado del sidebar desde localStorage
+  useEffect(() => {
+    const checkSidebarState = () => {
+      const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+      setSidebarCollapsed(isCollapsed);
+    };
+
+    checkSidebarState();
+
+    const interval = setInterval(checkSidebarState, 500);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Actualizar clase CSS del map-container para el panel de vuelos
+  useEffect(() => {
+    const mapContainer = document.querySelector('.map-container') as HTMLElement;
+    if (mapContainer) {
+      if (flightPanelOpen) {
+        mapContainer.classList.add('flight-panel-open');
+      } else {
+        mapContainer.classList.remove('flight-panel-open');
+      }
+    }
+  }, [flightPanelOpen]);
   const rutasPlanificadasRef = sim.rutasPlanificadasRef;
+
+  // States for flight filters
+  const [filterCodigo, setFilterCodigo] = useState('');
+  const [filterOrigen, setFilterOrigen] = useState('');
+  const [filterDestino, setFilterDestino] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filterPosition, setFilterPosition] = useState({ top: 0, left: 0 });
+  const filterButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Unique origins and destinations from the current flight list
+  const origenesUnicos = useMemo(() => {
+    const set = new Set<string>();
+    vuelosGA.forEach(v => set.add(v.origen));
+    return Array.from(set).sort();
+  }, [vuelosGA]);
+
+  const destinosUnicos = useMemo(() => {
+    const set = new Set<string>();
+    vuelosGA.forEach(v => set.add(v.destino));
+    return Array.from(set).sort();
+  }, [vuelosGA]);
+
+  // Airport code → city name lookup
+  const aeropuertoMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (sim.aeropuertos || []).forEach(a => map.set(a.codigo, a.ciudad));
+    return map;
+  }, [sim.aeropuertos]);
+
+  // Calculate filter popup position
+  useEffect(() => {
+    if (filtersOpen && filterButtonRef.current) {
+      const rect = filterButtonRef.current.getBoundingClientRect();
+      setFilterPosition({
+        top: rect.bottom + 8,
+        left: rect.left
+      });
+    }
+  }, [filtersOpen]);
+
+  // States for pausing logs
+  const [isLogsPaused, setIsLogsPaused] = useState(false);
+  const [pausedLogs, setPausedLogs] = useState<LogEntry[]>([]);
+  const [logsPage, setLogsPage] = useState(1);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
+  const LOGS_PER_PAGE = 50;
+
+  // Paginación: solo se calcula al estar pausado. En vivo se muestran los últimos 50 directamente.
+  const logsPaginados = useMemo(() => {
+    if (!isLogsPaused) {
+      // Modo vivo: solo los últimos 50, sin cálculo de páginas
+      return { pageLogs: sim.logs.slice(-LOGS_PER_PAGE), totalPages: 1, currentPage: 1, totalCount: sim.logs.length };
+    }
+    const totalPages = Math.max(1, Math.ceil(pausedLogs.length / LOGS_PER_PAGE));
+    const currentPage = Math.min(logsPage, totalPages);
+    const startIdx = (currentPage - 1) * LOGS_PER_PAGE;
+    return {
+      pageLogs: pausedLogs.slice(startIdx, startIdx + LOGS_PER_PAGE),
+      totalPages,
+      currentPage,
+      totalCount: pausedLogs.length,
+    };
+  }, [isLogsPaused, sim.logs, pausedLogs, logsPage]);
 
   // Iniciar simulación automáticamente cuando tenemos la fecha y la configuración está completa
   useEffect(() => {
@@ -327,6 +423,7 @@ export default function SimulacionPeriodo() {
         ocupacionPromedio: 0,
         tiempoPromedio: 0,
         entregasExitosas: 0,
+        ocupacionAviones: 0,
       };
     }
 
@@ -344,8 +441,13 @@ export default function SimulacionPeriodo() {
     const almacenesConCarga = almacenes.filter(a => a.ocupacion > 0).length;
 
     // Ocupación promedio de almacenes
-    const ocupacionPromedio = almacenes.length > 0 
+    const ocupacionPromedio = almacenes.length > 0
       ? almacenes.reduce((sum, a) => sum + (a.capacidad > 0 ? (a.ocupacion / a.capacidad) * 100 : 0), 0) / almacenes.length
+      : 0;
+
+    // Ocupación promedio de aviones
+    const ocupacionAviones = activeFlights.length > 0
+      ? activeFlights.reduce((sum, fe) => sum + (fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0), 0) / activeFlights.length
       : 0;
 
     // Entregas exitosas
@@ -361,6 +463,7 @@ export default function SimulacionPeriodo() {
       maletasEnTransito,
       almacenesConCarga,
       ocupacionPromedio,
+      ocupacionAviones,
       tiempoPromedio,
       entregasExitosas,
     };
@@ -429,7 +532,7 @@ export default function SimulacionPeriodo() {
 
     function removeAvion(fe: FlightEvent) {
       if (fe.svgElement) {
-        try { fe.svgElement.remove(); } catch (_) {}
+        try { fe.svgElement.remove(); } catch (_) { }
         fe.svgElement = undefined;
         fe.airplaneGroup = undefined;
         fe.airplaneImage = undefined;
@@ -551,17 +654,17 @@ export default function SimulacionPeriodo() {
           if (!le.fired && minSim >= le.minutosDisparo) {
             le.fired = true;
             pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
-            
+
             if (le.updatePopupCode !== undefined) {
-               const estado = airportStateRef.current.get(le.updatePopupCode);
-               if (estado) {
-                  estado.ocupacion = le.updatePopupOcupacion!;
-                  estado.capacidad = le.updatePopupCapacidad!;
-                  const marker = markersRef.current.find(m => m.airportCode === le.updatePopupCode);
-                  if (marker && marker.isPopupOpen()) {
-                     marker.setPopupContent(marker.generarPopupHTML());
-                  }
-               }
+              const estado = airportStateRef.current.get(le.updatePopupCode);
+              if (estado) {
+                estado.ocupacion = le.updatePopupOcupacion!;
+                estado.capacidad = le.updatePopupCapacidad!;
+                const marker = markersRef.current.find(m => m.airportCode === le.updatePopupCode);
+                if (marker && marker.isPopupOpen()) {
+                  marker.setPopupContent(marker.generarPopupHTML());
+                }
+              }
             }
           }
         }
@@ -623,7 +726,7 @@ export default function SimulacionPeriodo() {
       panel = document.createElement('div');
       panel.id = 'shipmentSearchPanel';
       panel.style.cssText = `
-        position:absolute;left:12px;bottom:130px;width:280px;
+        position:absolute;left:12px;bottom:238px;width:280px;
         background:white;border-radius:10px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
         padding:12px;z-index:999996;
@@ -670,7 +773,7 @@ export default function SimulacionPeriodo() {
   function buscarEnvio() {
     const input = document.getElementById('shipmentSearchInput') as HTMLInputElement;
     const codigoBusqueda = input?.value.trim();
-    
+
     if (!codigoBusqueda) {
       mostrarNotificacion('Por favor ingrese un código de rastreo', '#f97316');
       return;
@@ -679,13 +782,13 @@ export default function SimulacionPeriodo() {
     // Buscar por código de rastreo (últimos 7 dígitos de envío + últimos 5 dígitos de cliente)
     let flightEvent: FlightEvent | undefined;
     for (const [idEnvio, ruta] of rutasPlanificadasRef.current.entries()) {
-      const codigoRastreo = (idEnvio.slice(-7) + (ruta.idCliente || '').slice(-5)).padStart(12, '0');
+      const codigoRastreo = `${idEnvio}${ruta.idCliente || ''}${ruta.origen.charAt(0)}${ruta.destino.charAt(0)}`;
       if (codigoRastreo === codigoBusqueda) {
         flightEvent = flightEventsRef.current.find(fe => fe.key.startsWith(idEnvio));
         if (flightEvent) break;
       }
     }
-    
+
     if (!flightEvent) {
       mostrarNotificacion('El envío no está registrado actualmente', '#ef4444');
       return;
@@ -693,7 +796,7 @@ export default function SimulacionPeriodo() {
 
     // Cerrar panel de búsqueda
     cerrarPanelBusqueda();
-    
+
     // Mostrar panel de detalles del envío (solo desde búsqueda)
     mostrarPanelEnvio(flightEvent);
   }
@@ -712,7 +815,7 @@ export default function SimulacionPeriodo() {
     setSelectedFiles([]);
     setUploadMessage({ type: null, text: '' });
     isInitialized.current = false;
-    
+
     // Reset clock state
     clockEnabledRef.current = false;
     currentMinSimRef.current = 0;
@@ -720,17 +823,17 @@ export default function SimulacionPeriodo() {
     clockStateRef.current = 'CALCULANDO';
     setClockState('CALCULANDO');
     setSimMinutos(0);
-    
+
     // Remove all airplanes from the map
     flightEventsRef.current.forEach(fe => {
       if (fe.svgElement) {
-        try { fe.svgElement.remove(); } catch (_) {}
+        try { fe.svgElement.remove(); } catch (_) { }
         fe.svgElement = undefined;
         fe.airplaneGroup = undefined;
         fe.airplaneImage = undefined;
       }
     });
-    
+
     // Reset flight events ref
     flightEventsRef.current = [];
   }
@@ -771,6 +874,31 @@ export default function SimulacionPeriodo() {
     }
   }
 
+  // Generar código de vuelo: IATA origen + IATA destino + HH:NN
+  const generarCodigoVuelo = (origenCodigo: string, destinoCodigo: string, horaSalida: string): string => {
+    const hora = horaSalida.replace(':', '').substring(0, 4);
+    return `${origenCodigo}${destinoCodigo}${hora}`;
+  };
+
+  // Extraer vuelos únicos de los FlightEvents (que ya están en el mapa)
+  useEffect(() => {
+    const vuelosUnicos = new Map<string, any>();
+    sim.allFlightEvents.forEach((fe) => {
+      const key = `${fe.origenCode}-${fe.destinoCode}-${fe.minutosInicio}`;
+      if (!vuelosUnicos.has(key)) {
+        vuelosUnicos.set(key, {
+          origen: fe.origenCode,
+          destino: fe.destinoCode,
+          salida: `${String(Math.floor(fe.minutosInicio / 60)).padStart(2, '0')}:${String(fe.minutosInicio % 60).padStart(2, '0')}`,
+          llegada: `${String(Math.floor(fe.minutosFin / 60)).padStart(2, '0')}:${String(fe.minutosFin % 60).padStart(2, '0')}`,
+          capacidad: fe.capacidadVuelo,
+          cancelado: false
+        });
+      }
+    });
+    setVuelosGA(Array.from(vuelosUnicos.values()));
+  }, [sim.allFlightEvents]);
+
   // ── Panel de Detalle del Avión (tramo de vuelo — se abre al hacer clic en el mapa) ──
   function cerrarPanelAvion(feKey?: string) {
     if (feKey && panelFlightKeyRef.current !== feKey) return;
@@ -796,7 +924,7 @@ export default function SimulacionPeriodo() {
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         max-height:60vh;overflow-y:auto;pointer-events:auto;
       `;
-      document.body.appendChild(panel);
+      if (mapRef.current) mapRef.current.appendChild(panel); else document.body.appendChild(panel);
     }
 
     panelFlightKeyRef.current = fe.key;
@@ -911,7 +1039,7 @@ export default function SimulacionPeriodo() {
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         max-height:60vh;overflow-y:auto;pointer-events:auto;
       `;
-      document.body.appendChild(panel);
+      if (mapRef.current) mapRef.current.appendChild(panel); else document.body.appendChild(panel);
     }
 
     // Extract shipment ID from the key (format: idEnvio-idCliente-iterX-tramoY)
@@ -921,7 +1049,7 @@ export default function SimulacionPeriodo() {
     const rutaCompleta = rutasPlanificadasRef.current.get(codigoEnvio);
 
     // Generate tracking code: last 7 digits of shipment code + last 5 digits of customer code
-    const codigoRastreo = (codigoEnvio.slice(-7) + (rutaCompleta?.idCliente || '').slice(-5)).padStart(12, '0');
+    const codigoRastreo = `${codigoEnvio}${rutaCompleta?.idCliente || ''}${rutaCompleta?.origen?.charAt(0) || ''}${rutaCompleta?.destino?.charAt(0) || ''}`;
 
     if (!rutaCompleta) {
       panel.innerHTML = `
@@ -1092,7 +1220,7 @@ export default function SimulacionPeriodo() {
             <div style="font-size:11px;color:#1f2937;font-weight:700;">${rutaCompleta.sla || '-'}</div>
           </div>
           <div>
-            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">� Cliente</div>
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">👥 Cliente</div>
             <div style="font-size:11px;color:#1f2937;font-weight:700;">${rutaCompleta.idCliente || '-'}</div>
           </div>
         </div>
@@ -1120,8 +1248,9 @@ export default function SimulacionPeriodo() {
 
   return (
     <div className="main-wrapper">
-      <div className="card map-card" style={{ padding: 0, overflow: 'visible', minHeight: '100vh', display: 'flex', flexDirection: 'column', width: '100%', margin: 0, borderRadius: 0, position: 'relative' }}>
-        <div ref={mapRef} style={{ width: '100%', height: '100%', minHeight: '100vh' }} />
+      <div className="map-container" style={{ display: 'flex', width: '100%', height: '100vh' }}>
+        <div className="card map-card" style={{ padding: 0, overflow: 'visible', height: '100vh', display: 'flex', flexDirection: 'column', flex: 1, margin: 0, borderRadius: 0, position: 'relative', transition: 'flex 0.35s ease' }}>
+          <div ref={mapRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
 
         {/* Configuration Overlay */}
         {showConfigOverlay && (
@@ -1671,23 +1800,27 @@ export default function SimulacionPeriodo() {
                   style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
                   🔍 Buscar envío
                 </button>
+                <button onClick={() => setFlightPanelOpen(!flightPanelOpen)}
+                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                  ✈️ Vuelos
+                </button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Barra de Progreso — Derecha Superior */}
-        <div style={{ position: 'absolute', top: 12, right: 12, width: 'auto', maxWidth: 300, backgroundColor: 'rgba(255,255,255,0.95)', padding: 14, borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', pointerEvents: 'auto', zIndex: 999998 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, textTransform: 'uppercase' }}>Progreso de Simulación</div>
+        {/* Barra de Progreso — Izquierda Superior */}
+        <div style={{ position: 'absolute', top: 710, left:12, width: 'auto', maxWidth: 140, backgroundColor: 'rgba(255,255,255,0.92)', padding: '8px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', pointerEvents: 'auto', zIndex: 999998 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 4, textTransform: 'uppercase' }}>Progreso de Simulación</div>
 
           {/* Barra GA (iteraciones) */}
-          <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 3 }}>GA — {pct}% ({sim.iteracion}/{sim.totalIter} iter.)</div>
-          <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
+          <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 2 }}>GA — {pct}% ({sim.iteracion}/{sim.totalIter} iter.)</div>
+          <div style={{ width: '100%', height: 5, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden', marginBottom: 5 }}>
             <div style={{ height: '100%', backgroundColor: 'var(--accent-blue)', width: `${pct}%`, transition: 'width 0.4s ease' }} />
           </div>
 
           {/* Barra reloj simulado */}
-          <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 3 }}>
+          <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 2 }}>
             Cronómetro — {Math.round((simMinutos / TOTAL_MINUTOS_SIM) * 100)}%
           </div>
           <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
@@ -1712,7 +1845,7 @@ export default function SimulacionPeriodo() {
 
         {/* Panel Configurando Algoritmo — Derecha Inferior */}
         {sim.isRunning && sim.iteracion === 0 && (
-          <div style={{ position: 'absolute', bottom: 20, right: 20, width: 280, backgroundColor: 'rgba(255,255,255,0.95)', padding: 14, borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', pointerEvents: 'auto', zIndex: 999998 }}>
+          <div style={{ position: 'absolute', bottom: 25, right: 20, width: 280, backgroundColor: 'rgba(255,255,255,0.95)', padding: 14, borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', pointerEvents: 'auto', zIndex: 999998 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span className="algo-spinner"></span> Configurando algoritmo...
@@ -1752,6 +1885,266 @@ export default function SimulacionPeriodo() {
             style={{ background: 'var(--accent-blue)', border: 'none', color: 'white', width: 50, height: 50, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: '0 4px 12px rgba(37,100,235,0.3)' }}>
             <img src="/down.svg" alt="↓" style={{ width: 28, height: 28 }} />
           </button>
+        </div>
+        </div>
+
+        {/* Panel Lateral de Vuelos — Derecha (Fuera del map-card, dentro del contenedor) */}
+        <div style={{
+          width: flightPanelOpen ? '280px' : '0',
+          flexShrink: 0,
+          backgroundColor: 'rgba(255,255,255,0.98)',
+          boxShadow: flightPanelOpen ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          zIndex: 999997,
+          transition: 'width 0.35s ease',
+          height: '100%'
+        }}>
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                Vuelos Disponibles
+              </h3>
+              <button
+                onClick={() => setFlightPanelOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              Total: {vuelosGA.length} vuelos
+            </div>
+            <button
+              ref={filterButtonRef}
+              onClick={() => setFiltersOpen(!filtersOpen)}
+              style={{
+                marginTop: '12px',
+                padding: '8px 12px',
+                fontSize: '12px',
+                backgroundColor: 'var(--accent-blue)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
+              }}
+            >
+              🔽 Filtrar
+            </button>
+            {filtersOpen && (
+              <div style={{
+                position: 'fixed',
+                top: filterPosition.top,
+                left: filterPosition.left,
+                backgroundColor: 'white',
+                padding: '8px',
+                borderRadius: '6px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+                zIndex: 999999,
+                minWidth: '200px',
+                animation: 'fadeIn 0.2s ease-out'
+              }}>
+                <style>{`
+                  @keyframes fadeIn {
+                    from {
+                      opacity: 0;
+                      transform: translateY(-10px);
+                    }
+                    to {
+                      opacity: 1;
+                      transform: translateY(0);
+                    }
+                  }
+                `}</style>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Filtros
+                  </h3>
+                  <button
+                    onClick={() => setFiltersOpen(false)}
+                    style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>
+                      Código
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="LAX-JFK"
+                      value={filterCodigo}
+                      onChange={(e) => setFilterCodigo(e.target.value)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '3px',
+                        outline: 'none',
+                        backgroundColor: 'var(--bg-primary)',
+                        color: 'var(--text-primary)',
+                        width: '100%',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>
+                      Origen
+                    </label>
+                    <select
+                      value={filterOrigen}
+                      onChange={(e) => setFilterOrigen(e.target.value)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '3px',
+                        outline: 'none',
+                        backgroundColor: 'var(--bg-primary)',
+                        color: 'var(--text-primary)',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="">Todos</option>
+                      {origenesUnicos.map(og => (
+                        <option key={og} value={og}>{og}{aeropuertoMap.has(og) ? ` - ${aeropuertoMap.get(og)}` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>
+                      Destino
+                    </label>
+                    <select
+                      value={filterDestino}
+                      onChange={(e) => setFilterDestino(e.target.value)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '3px',
+                        outline: 'none',
+                        backgroundColor: 'var(--bg-primary)',
+                        color: 'var(--text-primary)',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="">Todos</option>
+                      {destinosUnicos.map(dest => (
+                        <option key={dest} value={dest}>{dest}{aeropuertoMap.has(dest) ? ` - ${aeropuertoMap.get(dest)}` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px', position: 'relative' }}>
+            {vuelosGA.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
+                ⏳ Esperando planificación del GA...
+              </div>
+            ) : (
+              <>
+                <div style={{ paddingBottom: '20px' }}>
+                  {vuelosGA
+                    .filter((vuelo) => {
+                      const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, vuelo.salida);
+                      const matchCodigo = filterCodigo === '' || codigoVuelo.toLowerCase().includes(filterCodigo.toLowerCase());
+                      const matchOrigen = filterOrigen === '' || vuelo.origen.toLowerCase().includes(filterOrigen.toLowerCase());
+                      const matchDestino = filterDestino === '' || vuelo.destino.toLowerCase().includes(filterDestino.toLowerCase());
+                      return matchCodigo && matchOrigen && matchDestino;
+                    })
+                    .map((vuelo, idx) => {
+                      const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, vuelo.salida);
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            backgroundColor: 'var(--bg-tertiary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            padding: '8px',
+                            marginBottom: '6px'
+                          }}
+                        >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-blue)' }}>
+                        {codigoVuelo}
+                      </div>
+                      <span style={{
+                        fontSize: '10px',
+                        padding: '2px 5px',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                        color: 'var(--success-green)'
+                      }}>
+                        ✓
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 500 }}>
+                      {vuelo.origen} → {vuelo.destino}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '4px' }}>
+                      <div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Salida</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{vuelo.salida}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Llegada</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{vuelo.llegada}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Capacidad</div>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>{vuelo.capacidad}</div>
+                      </div>
+                      <button
+                        onClick={() => {}}
+                        style={{
+                          padding: '3px 8px',
+                          fontSize: '10px',
+                          backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                          color: 'var(--danger-red)',
+                          border: '1px solid rgba(220, 53, 69, 0.3)',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 600
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+                </div>
+                <div style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: '40px',
+                  background: 'linear-gradient(to bottom, transparent, rgba(255,255,255,0.95))',
+                  pointerEvents: 'none'
+                }} />
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1794,15 +2187,22 @@ export default function SimulacionPeriodo() {
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-            <div className="card">
-              <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>📋 Registro de Eventos</h3>
+            <div className="card" style={{ position: 'relative' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>📋 Registro de Eventos</h3>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+                  {logsPaginados.totalCount} registros
+                </span>
+              </div>
+
               <div 
+                ref={logsContainerRef}
                 style={{ maxHeight: 350, overflowY: 'auto' }}
-                onWheel={(e) => e.stopPropagation()}
-                onTouchMove={(e) => e.stopPropagation()}
+                onWheel={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setLogsPage(Math.max(1, Math.ceil(sim.logs.length / LOGS_PER_PAGE))); setIsLogsPaused(true); } }}
+                onTouchMove={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setLogsPage(Math.max(1, Math.ceil(sim.logs.length / LOGS_PER_PAGE))); setIsLogsPaused(true); } }}
               >
-                {sim.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
-                {sim.logs.map((log, i) => (
+                {logsPaginados.pageLogs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
+                {logsPaginados.pageLogs.map((log, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
                     <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 50 }}>{log.time || '-'}</span>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
@@ -1810,6 +2210,42 @@ export default function SimulacionPeriodo() {
                   </div>
                 ))}
               </div>
+
+              {/* Paginación — solo visible al pausar */}
+              {isLogsPaused && logsPaginados.totalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
+                  <button onClick={() => { setLogsPage(1); if (logsContainerRef.current) logsContainerRef.current.scrollTop = 0; }} disabled={logsPaginados.currentPage === 1} style={{ padding: '4px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 4, cursor: logsPaginados.currentPage === 1 ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: logsPaginados.currentPage === 1 ? 0.4 : 1 }}>«</button>
+                  <button onClick={() => { setLogsPage(p => Math.max(1, p - 1)); if (logsContainerRef.current) logsContainerRef.current.scrollTop = 0; }} disabled={logsPaginados.currentPage === 1} style={{ padding: '4px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 4, cursor: logsPaginados.currentPage === 1 ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: logsPaginados.currentPage === 1 ? 0.4 : 1 }}>‹</button>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', minWidth: 80, textAlign: 'center' }}>Pág. {logsPaginados.currentPage} / {logsPaginados.totalPages}</span>
+                  <button onClick={() => { setLogsPage(p => Math.min(logsPaginados.totalPages, p + 1)); if (logsContainerRef.current) logsContainerRef.current.scrollTop = 0; }} disabled={logsPaginados.currentPage === logsPaginados.totalPages} style={{ padding: '4px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 4, cursor: logsPaginados.currentPage === logsPaginados.totalPages ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: logsPaginados.currentPage === logsPaginados.totalPages ? 0.4 : 1 }}>›</button>
+                  <button onClick={() => { setLogsPage(logsPaginados.totalPages); if (logsContainerRef.current) logsContainerRef.current.scrollTop = 0; }} disabled={logsPaginados.currentPage === logsPaginados.totalPages} style={{ padding: '4px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 4, cursor: logsPaginados.currentPage === logsPaginados.totalPages ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: logsPaginados.currentPage === logsPaginados.totalPages ? 0.4 : 1 }}>»</button>
+                </div>
+              )}
+
+              {/* Botón Reanudar */}
+              {isLogsPaused && (
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+                  <button
+                    onClick={() => setIsLogsPaused(false)}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: 12,
+                      backgroundColor: 'var(--accent-blue)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 20,
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    ▶ Reanudar flujo en vivo
+                  </button>
+                </div>
+              )}
             </div>
             <div className="card">
               <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--accent-blue)' }}>ℹ️ Métricas</h3>
@@ -1817,7 +2253,7 @@ export default function SimulacionPeriodo() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <MetricBox label="Ocupación Almacenes" value={`${metricas.ocupacionPromedio.toFixed(1)}%`} />
                   <MetricBox label="Tiempo Promedio" value={`${metricas.tiempoPromedio.toFixed(0)} min`} />
-                  <MetricBox label="Tasa Puntualidad" value="0%" />
+                  <MetricBox label="Ocupación de Aviones" value={`${metricas.ocupacionAviones.toFixed(1)}%`} />
                   <MetricBox label="Entregas Retrasadas" value="0" />
                 </div>
               ) : (

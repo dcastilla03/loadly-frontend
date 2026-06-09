@@ -497,12 +497,38 @@ export default function SimulacionPeriodo() {
       const fe = flightEventsRef.current.find(e => {
         if (e.origenCode !== orig || e.destinoCode !== dest || e.active) return false;
         const depDate = new Date(simStart.getTime() + e.minutosInicio * 60000);
-        const depMinutosDelDia = depDate.getHours() * 60 + depDate.getMinutes();
-        return depMinutosDelDia === keyMinutosDelDia;
+        const apt = sim.aeropuertosRef.current.get(e.origenCode);
+        const offset = apt?.gmt ?? 0;
+        const gmtHour = depDate.getHours();
+        const gmtMin = depDate.getMinutes();
+        const localMinutosDelDia = ((gmtHour + offset) % 24 + 24) % 24 * 60 + gmtMin;
+        return localMinutosDelDia === keyMinutosDelDia;
       });
       if (fe) fe.done = true;
     });
   }, [sim.cancelledFlights]);
+
+  // ── Suprimir FlightEvents y LogEvents de envíos afectados por cancelación ──
+  const suppressedTramosRef = useRef<Map<string, { minTramoOrden: number; iteracionIdx: number }>>(new Map());
+  useEffect(() => {
+    suppressedTramosRef.current = sim.suppressedTramos;
+    if (sim.suppressedTramos.size === 0) return;
+    sim.suppressedTramos.forEach((info, idEnvio) => {
+      for (const fe of flightEventsRef.current) {
+        const feIdEnvio = fe.key.split('-')[0];
+        if (feIdEnvio !== idEnvio || fe.tramoOrden < info.minTramoOrden || fe.active) continue;
+        const m = fe.key.match(/iter(\d+)/);
+        if (m && parseInt(m[1]) === info.iteracionIdx) {
+          fe.done = true;
+        }
+      }
+      for (const le of logEventsRef.current) {
+        if (le.idEnvio === idEnvio && le.tramoOrden !== undefined && le.tramoOrden >= info.minTramoOrden) {
+          le.fired = true;
+        }
+      }
+    });
+  }, [sim.suppressedTramos]);
 
   // ── Mantener addLogRef siempre apuntando a la función actual ──────────────
   useEffect(() => {
@@ -724,19 +750,29 @@ export default function SimulacionPeriodo() {
           if (fe.done) continue;
 
           if (!fe.active && minSim >= fe.minutosInicio) {
-            // No despegar si fue cancelado (comparar por hora local del origen)
+            // No despegar si fue cancelado: calcular cancelKey desde minutosInicio del FlightEvent
+            // (no desde la ruta, porque puede haber sido sobreescrita por una ITERACION posterior)
             const idEnvio = fe.key.split('-')[0];
-            const rutaCancel = sim.rutasPlanificadasRef.current.get(idEnvio);
-            const tramoCancel = rutaCancel?.tramos?.find(t => t.orden === fe.tramoOrden);
-            const saleGmt = tramoCancel?.sale || '00:00';
-            const [gmtHour, gmtMin] = saleGmt.split(':').map(Number);
+            const simStart = sim.simStartDateRef.current;
+            const depDate = simStart ? new Date(simStart.getTime() + fe.minutosInicio * 60000) : new Date();
             const apt = sim.aeropuertosRef.current.get(fe.origenCode);
             const offset = apt?.gmt ?? 0;
+            const gmtHour = depDate.getHours();
+            const gmtMin = depDate.getMinutes();
             const localHour = ((gmtHour + offset) % 24 + 24) % 24;
             const hh = String(localHour).padStart(2, '0');
             const mm = String(gmtMin).padStart(2, '0');
             const cancelKey = `${fe.origenCode}-${fe.destinoCode}-${hh}:${mm}`;
-            if (cancelKey && cancelledFlightsRef.current.has(cancelKey)) {
+            let suprimido = cancelKey && cancelledFlightsRef.current.has(cancelKey);
+            // También verificar suppressedTramosRef (cubre tramos posteriores al cancelado)
+            if (!suprimido) {
+              const supInfo = suppressedTramosRef.current.get(idEnvio);
+              if (supInfo && fe.tramoOrden >= supInfo.minTramoOrden) {
+                const m = fe.key.match(/iter(\d+)/);
+                suprimido = !!(m && parseInt(m[1]) === supInfo.iteracionIdx);
+              }
+            }
+            if (suprimido) {
               fe.done = true;
             } else {
               spawnAvion(fe, map);
@@ -763,6 +799,14 @@ export default function SimulacionPeriodo() {
         const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
         for (const le of logEventsRef.current) {
           if (!le.fired && minSim >= le.minutosDisparo) {
+            // Saltar LogEvents de tramos suprimidos por cancelación
+            if (le.idEnvio && le.tramoOrden !== undefined) {
+              const info = suppressedTramosRef.current.get(le.idEnvio);
+              if (info && le.tramoOrden >= info.minTramoOrden) {
+                le.fired = true;
+                continue;
+              }
+            }
             le.fired = true;
             pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
 

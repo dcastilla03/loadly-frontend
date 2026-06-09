@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
@@ -47,6 +47,7 @@ export interface LogEvent {
   updatePopupOcupacion?: number;
   updatePopupCapacidad?: number;
   idEnvio?: string;        // id del envío asociado (para eventos de registro)
+  tramoOrden?: number;     // orden del tramo (para filtrar eventos de vuelos cancelados)
 }
 
 interface BackendAeropuerto {
@@ -274,8 +275,8 @@ function buildLogEvents(
     const textSalida = totalTramos > 1
       ? `✈️ Sale avión de ${tramo.origen} → ${tramo.destino} (Tramo ${tramo.orden}/${totalTramos})`
       : `✈️ Sale avión de ${tramo.origen} → ${tramo.destino}`;
-    events.push({ minutosDisparo: minutosInicio, text: textSalida, color: '#3b82f6' });
-    events.push({ minutosDisparo: minutosFin, text: `🛬 Llega avión a ${tramo.destino} (desde ${tramo.origen})`, color: '#8b5cf6' });
+    events.push({ minutosDisparo: minutosInicio, text: textSalida, color: '#3b82f6', idEnvio: ruta.idEnvio, tramoOrden: tramo.orden });
+    events.push({ minutosDisparo: minutosFin, text: `🛬 Llega avión a ${tramo.destino} (desde ${tramo.origen})`, color: '#8b5cf6', idEnvio: ruta.idEnvio, tramoOrden: tramo.orden });
   }
 
   // ── Evento 4: Envío completado (a la hora de fechaRecojo) ───────────────
@@ -313,6 +314,10 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const [totalPlanificados, setTotalPlanificados] = useState(0);
   const [totalMaletas, setTotalMaletas] = useState(0);
   const [cancelledFlights, setCancelledFlights] = useState<Set<string>>(new Set());
+  const [suppressedTramos, setSuppressedTramos] = useState<Map<string, { minTramoOrden: number; iteracionIdx: number }>>(new Map());
+
+  // Mantener ref al día para evitar closures obsoletas en el handler SSE
+  useEffect(() => { allFlightEventsRef.current = allFlightEvents; }, [allFlightEvents]);
 
   // Fecha de inicio de la simulación (para calcular minutos relativos)
   const simStartDateRef = useRef<Date | null>(null);
@@ -321,6 +326,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const iteracionIdxRef = useRef(0);
   const rutasPlanificadasRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
   const rutasPorCodigoUnicoRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
+  const allFlightEventsRef = useRef<FlightEvent[]>([]);
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
@@ -536,6 +542,46 @@ export function useSimulacion(startDate?: string, startTime?: string) {
         if (d.vueloCancelado) {
           setCancelledFlights(prev => new Set(prev).add(d.vueloCancelado!));
           addLog(`✈️ Vuelo cancelado: ${d.vueloCancelado}`, '#ef4444');
+
+          // Calcular qué tramos suprimir por cada envío afectado
+          if (d.enviosAfectadosCancelacion) {
+            const [cancelledOrig, cancelledDest, cancelledTime] = d.vueloCancelado.split('-');
+            const [localH, localM] = cancelledTime.split(':').map(Number);
+            const nuevosSuppressed = new Map<string, { minTramoOrden: number; iteracionIdx: number }>();
+            const simStart = simStartDateRef.current;
+
+            for (const ae of d.enviosAfectadosCancelacion) {
+              if (!simStart) continue;
+              // Buscar el tramo cancelado en FlightEvents (NO en rutasPlanificadasRef,
+              // porque puede haber sido overwriteado por una ITERACION posterior)
+              for (const fe of allFlightEventsRef.current) {
+                if (!fe.key.startsWith(ae.idEnvio + '-')) continue;
+                if (fe.origenCode !== cancelledOrig || fe.destinoCode !== cancelledDest) continue;
+                // Convertir minutosInicio a hora local del aeropuerto origen
+                const depDate = new Date(simStart.getTime() + fe.minutosInicio * 60000);
+                const apt = aeropuertosRef.current.get(fe.origenCode);
+                const offset = apt?.gmt ?? 0;
+                const gmtHour = depDate.getHours();
+                const gmtMin = depDate.getMinutes();
+                const depLocalH = ((gmtHour + offset) % 24 + 24) % 24;
+                const depLocalM = gmtMin;
+                if (depLocalH === localH && depLocalM === localM) {
+                  const m = fe.key.match(/iter(\d+)/);
+                  const iterIdx = m ? parseInt(m[1]) : -1;
+                  nuevosSuppressed.set(ae.idEnvio, { minTramoOrden: fe.tramoOrden, iteracionIdx: iterIdx });
+                  break;
+                }
+              }
+            }
+
+            if (nuevosSuppressed.size > 0) {
+              setSuppressedTramos(prev => {
+                const merged = new Map(prev);
+                nuevosSuppressed.forEach((v, k) => merged.set(k, v));
+                return merged;
+              });
+            }
+          }
         }
 
       } else if (tipo === 'RESUMEN_FINAL') {
@@ -603,5 +649,6 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     rutasPlanificadasRef,
     rutasPorCodigoUnicoRef,
     cancelledFlights,
+    suppressedTramos,
   };
 }

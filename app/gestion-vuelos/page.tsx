@@ -28,6 +28,8 @@ export default function GestionVuelos() {
   const [mensajeCarga, setMensajeCarga] = useState('');
   const [tipoMensaje, setTipoMensaje] = useState<'success' | 'error'>('success');
   const [cargando, setCargando] = useState(false);
+  const [paginaActual, setPaginaActual] = useState(1);
+  const ITEMS_POR_PAGINA = 20;
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -70,6 +72,11 @@ export default function GestionVuelos() {
       setCargandoPlanesVuelo(false);
     }
   };
+
+  // Resetear paginación cuando cambian los datos
+  useEffect(() => {
+    setPaginaActual(1);
+  }, [planesVuelo]);
 
   const handleArchivoSeleccionado = (e: React.ChangeEvent<HTMLInputElement>) => {
     const archivo = e.target.files?.[0];
@@ -140,6 +147,11 @@ export default function GestionVuelos() {
   const obtenerCodigoAeropuerto = (idAeropuerto: number) => {
     return aeropuertos.get(idAeropuerto)?.codigo || '???';
   };
+
+  const totalPaginas = Math.max(1, Math.ceil(planesVuelo.length / ITEMS_POR_PAGINA));
+  const paginaSegura = Math.min(paginaActual, totalPaginas);
+  const inicio = (paginaSegura - 1) * ITEMS_POR_PAGINA;
+  const planesPagina = planesVuelo.slice(inicio, inicio + ITEMS_POR_PAGINA);
 
   const estadisticas = {
     total: planesVuelo.length,
@@ -220,7 +232,7 @@ export default function GestionVuelos() {
                     </td>
                   </tr>
                 ) : (
-                  planesVuelo.map((plan, idx) => (
+                  planesPagina.map((plan, idx) => (
                     <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
                       <td style={{ padding: '12px' }}>{plan.idPlanVuelo}</td>
                       <td style={{ padding: '12px' }}>{obtenerCodigoAeropuerto(plan.idAeropuertoOrigen)}</td>
@@ -245,6 +257,15 @@ export default function GestionVuelos() {
               </tbody>
             </table>
           </div>
+          {planesVuelo.length > ITEMS_POR_PAGINA && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-color)' }}>
+              <button onClick={() => setPaginaActual(1)} disabled={paginaSegura === 1} style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border-color)', borderRadius: 4, cursor: paginaSegura === 1 ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: paginaSegura === 1 ? 0.4 : 1 }}>«</button>
+              <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaSegura === 1} style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border-color)', borderRadius: 4, cursor: paginaSegura === 1 ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: paginaSegura === 1 ? 0.4 : 1 }}>‹</button>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 100, textAlign: 'center' }}>Pág. {paginaSegura} de {totalPaginas}</span>
+              <button onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))} disabled={paginaSegura === totalPaginas} style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border-color)', borderRadius: 4, cursor: paginaSegura === totalPaginas ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: paginaSegura === totalPaginas ? 0.4 : 1 }}>›</button>
+              <button onClick={() => setPaginaActual(totalPaginas)} disabled={paginaSegura === totalPaginas} style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border-color)', borderRadius: 4, cursor: paginaSegura === totalPaginas ? 'default' : 'pointer', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', opacity: paginaSegura === totalPaginas ? 0.4 : 1 }}>»</button>
+            </div>
+          )}
         </div>
       </div>
 

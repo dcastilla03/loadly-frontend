@@ -3,7 +3,7 @@ import { useState, useRef, useCallback } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
-export interface AeropuertoSim { codigo: string; ciudad: string; pais: string; latitud: number; longitud: number; continente: string; capacidad: number; }
+export interface AeropuertoSim { codigo: string; ciudad: string; pais: string; latitud: number; longitud: number; continente: string; capacidad: number; gmt: number; }
 export interface Stats { enviosProcesados: number; planificados: number; sinRuta: number; inalcanzables: number; enviosEnEspera: number; fitnessPromedio: number; totalMaletasPlanificadas: number; }
 export interface Colapso { tipoError: string; idEnvioCausante: string; rutaCausante: string; maletasCausantes: number; detalle: string; }
 export interface Resumen { totalEnviosPlanificados: number; totalMaletasPlanificadas: number; consumoPromedioSLA: number; ocupacionPromedioVuelos: number; ocupacionPromedioAlmacenes: number; funcionObjetivo: number; tiempoEjecucionRealSegundos: number; colapsoDetectado: boolean; }
@@ -46,6 +46,7 @@ export interface LogEvent {
   updatePopupCode?: string;
   updatePopupOcupacion?: number;
   updatePopupCapacidad?: number;
+  idEnvio?: string;        // id del envío asociado (para eventos de registro)
 }
 
 interface BackendAeropuerto {
@@ -56,6 +57,7 @@ interface BackendAeropuerto {
   longitud: number;
   continente: string;
   capacidad: number;
+  gmt: number;
 }
 
 interface BackendVueloPlanificado {
@@ -99,6 +101,9 @@ interface BackendSimEvent {
   rutasPlanificadas?: BackendRutaPlanificada[];
   colapso?: Colapso;
   resumenFinal?: Resumen;
+  // Para CANCELACION
+  vueloCancelado?: string;
+  enviosAfectadosCancelacion?: { idEnvio: string; idCliente: string; origen: string; destino: string }[];
 }
 
 /** Convierte "HH:MM" a minutos del día */
@@ -108,7 +113,7 @@ function horaAMinutos(hora: string): number {
 }
 
 /** Extrae la fecha de una cadena formato "yyyy-MM-dd HH:mm" o "DD/MM/YYYY HH:MM" */
-function extraerFecha(fechaStr: string): Date {
+export function extraerFecha(fechaStr: string): Date {
   if (fechaStr.includes('-')) {
     // Formato "yyyy-MM-dd HH:mm"
     const [datePart, timePart] = fechaStr.split(' ');
@@ -125,7 +130,7 @@ function extraerFecha(fechaStr: string): Date {
 }
 
 /** Convierte "HH:MM:SS" o "HH:MM" a minutos del día */
-function horaConMinutosDelDia(horaStr: string): number {
+export function horaConMinutosDelDia(horaStr: string): number {
   const parts = horaStr.split(':').map(Number);
   const h = parts[0] || 0;
   const m = parts[1] || 0;
@@ -133,7 +138,7 @@ function horaConMinutosDelDia(horaStr: string): number {
 }
 
 /** Convierte "YYYY-MM-DD HH:MM" a minutos desde el inicio de la simulación */
-function fechaHoraAMinutosDesdeInicio(fechaHoraStr: string, simStartDate: Date): number {
+export function fechaHoraAMinutosDesdeInicio(fechaHoraStr: string, simStartDate: Date): number {
   const fecha = extraerFecha(fechaHoraStr);
   return Math.round((fecha.getTime() - simStartDate.getTime()) / 60000);
 }
@@ -229,7 +234,7 @@ function buildLogEvents(
   // Extraer solo la hora de tramo.sale
   const salidaTexto = totalTramos > 0 ? ` · Salida ${tramos[0].sale.split(':').slice(0, 2).join(':')}` : '';
 
-  const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen.charAt(0)}${ruta.destino.charAt(0)}`;
+  const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
   const textRegistro = esDirecto
     ? `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Directo${salidaTexto}`
     : `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Escalas: ${tramos.slice(0, -1).map(t => t.destino).join(', ')}${salidaTexto}`;
@@ -239,7 +244,8 @@ function buildLogEvents(
     color: '#22c55e',
     updatePopupCode: ruta.origen,
     updatePopupOcupacion: ruta.ocupacionAlmacenRegistro,
-    updatePopupCapacidad: ruta.capacidadAlmacenRegistro
+    updatePopupCapacidad: ruta.capacidadAlmacenRegistro,
+    idEnvio: ruta.idEnvio
   });
 
   // ── Eventos 2 & 3: Salida y llegada por cada tramo ───────────────────────
@@ -275,7 +281,7 @@ function buildLogEvents(
   // ── Evento 4: Envío completado (a la hora de fechaRecojo) ───────────────
   if (ruta.fechaRecojo) {
     const minutosRecojo = fechaHoraAMinutosDesdeInicio(ruta.fechaRecojo, simStartDate);
-    const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen.charAt(0)}${ruta.destino.charAt(0)}`;
+    const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
     events.push({
       minutosDisparo: minutosRecojo,
       text: `✅ Envío ${codigoRastreo} completado satisfactoriamente · ${ruta.origen} → ${ruta.destino}`,
@@ -306,6 +312,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [totalPlanificados, setTotalPlanificados] = useState(0);
   const [totalMaletas, setTotalMaletas] = useState(0);
+  const [cancelledFlights, setCancelledFlights] = useState<Set<string>>(new Set());
 
   // Fecha de inicio de la simulación (para calcular minutos relativos)
   const simStartDateRef = useRef<Date | null>(null);
@@ -313,6 +320,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const aeropuertosRef = useRef<Map<string, AeropuertoSim>>(new Map());
   const iteracionIdxRef = useRef(0);
   const rutasPlanificadasRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
+  const rutasPorCodigoUnicoRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
@@ -380,6 +388,8 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setIteracion(0); setLogs([]); setTotalPlanificados(0); setTotalMaletas(0);
     iteracionIdxRef.current = 0;
     realStartTimeRef.current = performance.now();
+    rutasPlanificadasRef.current.clear();
+    rutasPorCodigoUnicoRef.current.clear();
 
     // Cargar aeropuertos si aún no están disponibles
     if (aeropuertosRef.current.size === 0) {
@@ -397,6 +407,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
               longitud: a.longitud,
               continente: a.continente || '',
               capacidad: a.capacidad || 500,
+              gmt: a.gmt ?? 0,
             }));
             setAeropuertos(mapeados);
             aeropuertosRef.current = new Map(mapeados.map((a) => [a.codigo, a]));
@@ -463,6 +474,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
             codigo: a.codigo, ciudad: a.ciudad, pais: a.pais,
             latitud: a.latitud, longitud: a.longitud,
             continente: a.continente, capacidad: a.capacidad,
+            gmt: a.gmt ?? 0,
           }));
           setAeropuertos(mapeados);
           aeropuertosRef.current = new Map(mapeados.map((a) => [a.codigo, a]));
@@ -497,8 +509,13 @@ export function useSimulacion(startDate?: string, startTime?: string) {
           const nuevosLogEvents: LogEvent[] = [];
 
           d.rutasPlanificadas.forEach(ruta => {
-            // Store complete route data for panel display
+            // Store complete route data for panel display (by idEnvio)
             rutasPlanificadasRef.current.set(ruta.idEnvio, ruta);
+
+            // Store complete route data by unique code for search
+            const codigoUnico = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+            rutasPorCodigoUnicoRef.current.set(codigoUnico, ruta);
+
             nuevosFlightEvents.push(...rutaAFlightEvents(ruta, limLectura, aeropuertosRef.current, simStart, iterIdx));
             nuevosLogEvents.push(...buildLogEvents(ruta, limLectura, simStart));
           });
@@ -514,6 +531,12 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
       } else if (tipo === 'COLAPSO') {
         if (d.colapso) { setColapso(d.colapso); addLog(`⚠️ COLAPSO: ${d.colapso.tipoError}`, '#ef4444'); }
+
+      } else if (tipo === 'CANCELACION') {
+        if (d.vueloCancelado) {
+          setCancelledFlights(prev => new Set(prev).add(d.vueloCancelado!));
+          addLog(`✈️ Vuelo cancelado: ${d.vueloCancelado}`, '#ef4444');
+        }
 
       } else if (tipo === 'RESUMEN_FINAL') {
         if (d.resumenFinal) setResumen(d.resumenFinal);
@@ -535,7 +558,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
     // También intentar escuchar los tipos nombrados por si el backend los usa
     // (no hace daño tenerlos como fallback)
-    ['INICIO', 'ITERACION', 'COLAPSO', 'RESUMEN_FINAL'].forEach(tipo => {
+    ['INICIO', 'ITERACION', 'COLAPSO', 'CANCELACION', 'RESUMEN_FINAL'].forEach(tipo => {
       es.addEventListener(tipo, (e: MessageEvent) => {
         try {
           const d: BackendSimEvent = JSON.parse(e.data);
@@ -576,6 +599,9 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     iniciar, detener, addLog, addLogBatch,
     realStartTimeRef,
     simStartDateRef,
+    aeropuertosRef,
     rutasPlanificadasRef,
+    rutasPorCodigoUnicoRef,
+    cancelledFlights,
   };
 }

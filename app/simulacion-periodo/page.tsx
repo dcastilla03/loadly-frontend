@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useSimulacion, FlightEvent, LogEvent, SIM_CONFIG, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha } from './useSimulacion';
 
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
@@ -146,18 +146,6 @@ export default function SimulacionPeriodo() {
 
   const sim = useSimulacion(startDate || undefined, startTime || undefined);
 
-  // Deriva los envíos registrados: un envío se considera registrado cuando
-  // el cronómetro simulado alcanzó o superó su minutosDisparo de registro
-  const registeredEnvios = useMemo(() => {
-    const set = new Set<string>();
-    sim.allLogEvents.forEach(le => {
-      if (le.idEnvio && le.minutosDisparo <= simMinutos) {
-        set.add(le.idEnvio);
-      }
-    });
-    return set;
-  }, [sim.allLogEvents, simMinutos]);
-
   // Detectar estado del sidebar desde localStorage
   useEffect(() => {
     const checkSidebarState = () => {
@@ -187,7 +175,7 @@ export default function SimulacionPeriodo() {
   }, [flightPanelOpen]);
   const rutasPlanificadasRef = sim.rutasPlanificadasRef;
 
-  // States for flight filters
+  // States for flight filters and virtual scroll
   const [filterCodigo, setFilterCodigo] = useState('');
   const [filterOrigen, setFilterOrigen] = useState('');
   const [filterDestino, setFilterDestino] = useState('');
@@ -195,93 +183,80 @@ export default function SimulacionPeriodo() {
   const [filterPosition, setFilterPosition] = useState({ top: 0, left: 0 });
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const [cancellingFlights, setCancellingFlights] = useState<Set<string>>(new Set());
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(600);
 
-  // Deriva vuelos únicos desde FlightEvents, filtra completados, asigna estado
-  const vuelosGA = useMemo(() => {
-    // Obtener códigos de rastreo de envíos registrados desde allLogEvents (no depende de logs visibles)
-    const codigosRastreoRegistrados = new Set<string>();
-    sim.allLogEvents.forEach(le => {
-      if (le.text.startsWith('📦 Envío') && le.minutosDisparo <= simMinutos && le.idEnvio) {
-        // Extraer código de rastreo completo del texto del log usando regex
-        const match = le.text.match(/📦 Envío ([^:]+):/);
-        if (match) {
-          const codigoRastreo = match[1];
-          codigosRastreoRegistrados.add(codigoRastreo);
-        }
+  // ── API: todos los vuelos de la base de datos (planes-vuelo + aeropuertos) ──
+  const [apiFlights, setApiFlights] = useState<any[] | null>(null);
+  const aeropuertoInfoRef = useRef<Map<number, { codigo: string; gmt: number }>>(new Map());
+
+  useEffect(() => {
+    const API = process.env.NEXT_PUBLIC_API_URL;
+    if (!API) return;
+    Promise.all([
+      fetch(`${API}/api/planes-vuelo`).then(r => r.json()),
+      fetch(`${API}/api/aeropuertos`).then(r => r.json()),
+    ]).then(([planesRes, aeroRes]) => {
+      if (aeroRes.exito && Array.isArray(aeroRes.datos)) {
+        const map = new Map<number, { codigo: string; gmt: number }>();
+        aeroRes.datos.forEach((a: any) => map.set(a.idAeropuerto, { codigo: a.codigo, gmt: a.gmt ?? 0 }));
+        aeropuertoInfoRef.current = map;
+      }
+      if (planesRes.exito && Array.isArray(planesRes.datos)) {
+        setApiFlights(planesRes.datos);
+      }
+    }).catch(e => console.error('[apiFlights]', e));
+  }, []);
+
+  // ResizeObserver para detectar altura del contenedor de scroll virtual
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerHeight(entry.contentRect.height);
       }
     });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
-    const vuelosUnicos = new Map<string, any>();
-    // Usar rutasPorCodigoUnicoRef para obtener los vuelos específicos de cada envío registrado
-    codigosRastreoRegistrados.forEach(codigoRastreo => {
-      const ruta = sim.rutasPorCodigoUnicoRef.current.get(codigoRastreo);
-      if (ruta && ruta.tramos && startDate) {
-        // Usar la misma lógica que rutaAFlightEvents para calcular las fechas
-        let cursorDate = ruta.fechaRegistro ? extraerFecha(ruta.fechaRegistro) : new Date(startDate);
-
-        ruta.tramos.forEach(tramo => {
-          const key = `${tramo.origen}-${tramo.destino}-${tramo.sale}`;
-          if (!vuelosUnicos.has(key)) {
-            // Calcular saleDate usando la misma lógica que rutaAFlightEvents
-            const saleParts = tramo.sale.split(':').map(Number);
-            let saleDate = new Date(cursorDate);
-            saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
-            if (saleDate.getTime() < cursorDate.getTime()) {
-              saleDate.setDate(saleDate.getDate() + 1);
-            }
-
-            // Calcular llegaDate usando la misma lógica que rutaAFlightEvents
-            const llegaParts = tramo.llega.split(':').map(Number);
-            let llegaDate = new Date(saleDate);
-            llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
-            if (llegaDate.getTime() < saleDate.getTime()) {
-              llegaDate.setDate(llegaDate.getDate() + 1);
-            }
-
-            // Calcular minutos desde el inicio de la simulación
-            const minutosInicio = Math.round((saleDate.getTime() - new Date(startDate).getTime()) / 60000);
-            const minutosFin = Math.round((llegaDate.getTime() - new Date(startDate).getTime()) / 60000);
-
-            // Usar directamente las fechas del backend para visualización
-            const salidaFormateada = `${String(saleDate.getDate()).padStart(2, '0')}/${String(saleDate.getMonth() + 1).padStart(2, '0')}/${saleDate.getFullYear()} ${tramo.sale}`;
-            const llegadaFormateada = `${String(llegaDate.getDate()).padStart(2, '0')}/${String(llegaDate.getMonth() + 1).padStart(2, '0')}/${llegaDate.getFullYear()} ${tramo.llega}`;
-
-            vuelosUnicos.set(key, {
-              origen: tramo.origen,
-              destino: tramo.destino,
-              minutosInicio: minutosInicio,
-              minutosFin: minutosFin,
-              salida: salidaFormateada,
-              llegada: llegadaFormateada,
-              capacidad: tramo.capacidadVuelo,
-              cancelado: false,
-              idEnvio: ruta.idEnvio
-            });
-
-            cursorDate = llegaDate;
-          }
-        });
-      }
+  // Listado global de vuelos: todos los vuelos desde la API (BD),
+  // sin dependencia temporal ni deduplicación.
+  // Convierte horaSalida (local) → GMT para compatibilidad con getClaveVuelo.
+  const vuelosGlobales = useMemo(() => {
+    if (!apiFlights) return [];
+    return apiFlights.map((v: any) => {
+      const info = aeropuertoInfoRef.current.get(v.idAeropuertoOrigen);
+      const origen = info?.codigo || `ID${v.idAeropuertoOrigen}`;
+      const destino = aeropuertoInfoRef.current.get(v.idAeropuertoDestino)?.codigo || `ID${v.idAeropuertoDestino}`;
+      const gmtOffset = info?.gmt ?? 0;
+      // horaSalida de la API es hora LOCAL → convertir a GMT para getClaveVuelo
+      const [lh, lm] = (v.horaSalida || '00:00').split(':').map(Number);
+      const gmtHour = ((lh - gmtOffset) % 24 + 24) % 24;
+      const salidaGMT = `${String(gmtHour).padStart(2, '0')}:${String(lm).padStart(2, '0')}`;
+      return {
+        origen,
+        destino,
+        salida: salidaGMT,
+        llegada: v.horaLlegada || '00:00',
+      };
     });
+  }, [apiFlights]);
 
-    const vuelosFiltrados = Array.from(vuelosUnicos.values()).filter(
-      (v: any) => simMinutos < v.minutosFin
-    );
-    return vuelosFiltrados;
-  }, [sim.allFlightEvents, simMinutos, sim.allLogEvents]);
-
-  // Unique origins and destinations from the current flight list
+  // Unique origins and destinations from the global flight list
   const origenesUnicos = useMemo(() => {
     const set = new Set<string>();
-    vuelosGA.forEach(v => set.add(v.origen));
+    vuelosGlobales.forEach(v => set.add(v.origen));
     return Array.from(set).sort();
-  }, [vuelosGA]);
+  }, [vuelosGlobales]);
 
   const destinosUnicos = useMemo(() => {
     const set = new Set<string>();
-    vuelosGA.forEach(v => set.add(v.destino));
+    vuelosGlobales.forEach(v => set.add(v.destino));
     return Array.from(set).sort();
-  }, [vuelosGA]);
+  }, [vuelosGlobales]);
 
   // Airport code → city name lookup
   const aeropuertoMap = useMemo(() => {
@@ -1004,9 +979,13 @@ export default function SimulacionPeriodo() {
       }
     });
 
-    // Reset flight events ref
-    flightEventsRef.current = [];
-  }
+      // Reset flight events ref
+      flightEventsRef.current = [];
+
+      // Reset cancellation data refs
+      cancelledFlightsRef.current = new Set();
+      suppressedTramosRef.current = new Map();
+    }
 
   function mostrarNotificacion(mensaje: string, color: string) {
     const notif = document.createElement('div');
@@ -1051,19 +1030,17 @@ export default function SimulacionPeriodo() {
     return `${origenCodigo}${destinoCodigo}${hh}${mm}`;
   };
 
-  // Busca un FlightEvent que coincida con un vuelo de la lista (por idEnvio, origen y destino)
-  const findFlightEvent = (vuelo: any): FlightEvent | undefined => {
-    return sim.allFlightEvents.find(fe =>
-      fe.key.startsWith(vuelo.idEnvio) &&
-      fe.origenCode === vuelo.origen &&
-      fe.destinoCode === vuelo.destino
-    );
+  // Extrae solo HH:mm de cualquier formato ("HH:mm" o "DD/MM/AAAA HH:MM")
+  const extraerHHMM = (timeStr: string): string => {
+    if (!timeStr) return '00:00';
+    const parts = timeStr.split(' ');
+    const timePart = parts[parts.length - 1] || '00:00';
+    return timePart.substring(0, 5);
   };
 
   // Obtiene la clave de vuelo en el formato que espera el backend (ORIGEN-DESTINO-HH:MM hora local)
   const getClaveVuelo = (vuelo: any): string => {
-    // Extraer tramo.sale (GMT HH:MM) del formato "DD/MM/YYYY HH:MM"
-    const [gmtHour, gmtMin] = (vuelo.salida?.split(' ')[1] || '00:00').split(':').map(Number);
+    const [gmtHour, gmtMin] = extraerHHMM(vuelo.salida).split(':').map(Number);
     const apt = sim.aeropuertosRef.current.get(vuelo.origen);
     const offset = apt?.gmt ?? 0;
     const localHour = ((gmtHour + offset) % 24 + 24) % 24;
@@ -1240,10 +1217,10 @@ export default function SimulacionPeriodo() {
   }
 
   // ── Panel de Detalle del Envío (se abre SOLO desde la búsqueda) ───────────
-  function cerrarPanelEnvio() {
-    const panel = document.getElementById('airplaneDetailsPanel');
-    if (panel) panel.remove();
-  }
+    function cerrarPanelEnvio() {
+      const panel = document.getElementById('airplaneDetailsPanel');
+      if (panel) panel.remove();
+    }
 
   function mostrarPanelEnvio(fe: FlightEvent, codigoUnicoForzado?: string) {
     cerrarPanelAvion();
@@ -1269,6 +1246,14 @@ export default function SimulacionPeriodo() {
     const rutaCompleta = codigoUnicoForzado
       ? sim.rutasPorCodigoUnicoRef.current.get(codigoUnicoForzado)
       : rutasPlanificadasRef.current.get(codigoEnvio);
+
+    // ── Estado para refresh dinámico del Monitoreo ──
+    let refreshInterval: number | null = null;
+    let currentView: 'plan' | 'monitoreo' = 'plan';
+    const getLatestFe = () => {
+      const envios = flightEventsRef.current.filter(f => f.key.startsWith(codigoEnvio));
+      return envios.find(f => f.active) || envios[envios.length - 1] || fe;
+    };
 
     // Usar código forzado si se proporciona (desde búsqueda), si no calcular desde ruta
     const codigoRastreo = codigoUnicoForzado || `${codigoEnvio}${rutaCompleta?.idCliente || ''}${rutaCompleta?.origen || ''}${rutaCompleta?.destino || ''}`;
@@ -1338,11 +1323,13 @@ export default function SimulacionPeriodo() {
       const stp = (startTime || '00:00').split(':').map(Number);
       simStart.setHours(stp[0], stp[1], 0, 0);
       let cursorDate = rc.fechaRegistro ? parseDateStr(rc.fechaRegistro) : simStart;
-      const saleP = tramo.sale.split(':').map(Number);
+      const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
+      const saleP = saleTime.split(':').map(Number);
       let saleDate = new Date(cursorDate);
       saleDate.setHours(saleP[0], saleP[1], 0, 0);
       if (saleDate.getTime() < cursorDate.getTime()) saleDate.setDate(saleDate.getDate() + 1);
-      const llegaP = tramo.llega.split(':').map(Number);
+      const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
+      const llegaP = llegaTime.split(':').map(Number);
       let llegaDate = new Date(saleDate);
       llegaDate.setHours(llegaP[0], llegaP[1], 0, 0);
       if (llegaDate.getTime() < saleDate.getTime()) llegaDate.setDate(llegaDate.getDate() + 1);
@@ -1403,8 +1390,9 @@ export default function SimulacionPeriodo() {
     }
 
     function generarVistaMonitoreo() {
+      const latestFe = getLatestFe();
       const tramos = rc.tramos || [];
-      const tramoActual = fe.tramoOrden;
+      const tramoActual = latestFe.tramoOrden;
 
       const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending' }[] = [];
       aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'done' });
@@ -1432,7 +1420,7 @@ export default function SimulacionPeriodo() {
           </div>`;
       }).join('');
 
-      const restMin = Math.max(0, fe.minutosFin - simMinutos);
+      const restMin = Math.max(0, latestFe.minutosFin - currentMinSimRef.current);
       const restHH = Math.floor(restMin / 60);
       const restMM = restMin % 60;
       const tiempoRestante = restMin > 0 ? `${restHH}h ${restMM}m` : 'Completado';
@@ -1464,6 +1452,7 @@ export default function SimulacionPeriodo() {
           <span style="font-size:11px;color:#6b7280;font-weight:600;">Tipo de Ruta</span>
           <span style="font-size:12px;padding:3px 10px;border-radius:999px;background:${tipoRuta === 'Directo' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)'};color:${tipoRuta === 'Directo' ? '#16a34a' : '#d97706'};font-weight:700;">${tipoRuta}</span>
         </div>
+        <div id="monitoreo-content-${codigoEnvio}">
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:10px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">Ruta Planificada</div>
           ${timelineHtml}
@@ -1478,7 +1467,68 @@ export default function SimulacionPeriodo() {
             <div style="font-size:12px;color:${trColor};font-weight:700;">${tiempoRestante}</div>
           </div>
         </div>
+        </div>
         <button id="backToPlanBtn" style="width:100%;padding:9px;font-size:12px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;cursor:pointer;font-weight:600;color:var(--text-primary);">← Volver al Plan de Viaje</button>
+      `;
+    }
+
+    function refreshMonitoreoContent() {
+      if (currentView !== 'monitoreo') return;
+      const container = document.getElementById(`monitoreo-content-${codigoEnvio}`);
+      if (!container) return;
+
+      const latestFe = getLatestFe();
+      const tramos = rc.tramos || [];
+      const tramoActual = latestFe.tramoOrden;
+
+      const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending' }[] = [];
+      aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'done' });
+      tramos.forEach(tramo => {
+        const state = tramo.orden < tramoActual ? 'done' : tramo.orden === tramoActual ? 'active' : 'pending';
+        const last = aeropuertosRuta[aeropuertosRuta.length - 1];
+        if (last.codigo !== tramo.destino) aeropuertosRuta.push({ codigo: tramo.destino, nombre: getUbicacion(tramo.destino), state });
+      });
+
+      const timelineHtml = aeropuertosRuta.map((ap, i) => {
+        const isLast = i === aeropuertosRuta.length - 1;
+        const colors = ap.state === 'done' ? { dot: '#16a34a', bg: 'rgba(34,197,94,0.12)', border: '#16a34a', label: '#16a34a', line: '#16a34a' }
+          : ap.state === 'active' ? { dot: '#2564eb', bg: 'rgba(37,100,235,0.1)', border: '#2564eb', label: '#2564eb', line: '#2564eb' }
+          : { dot: '#d1d5db', bg: '#f9fafb', border: '#e5e7eb', label: '#9ca3af', line: '#d1d5db' };
+        return `
+          <div style="display:flex;flex-direction:column;align-items:center;">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${colors.bg};border:1px solid ${colors.border};width:100%;box-sizing:border-box;">
+              <div style="width:12px;height:12px;border-radius:50%;background:${colors.dot};flex-shrink:0;${ap.state === 'active' ? 'box-shadow:0 0 0 3px rgba(37,100,235,0.2);' : ''}"></div>
+              <div style="flex:1;">
+                <div style="font-size:11px;color:#1f2937;font-weight:700;">${ap.nombre}</div>
+                <div style="font-size:10px;color:${colors.label};font-weight:600;">${ap.codigo}${ap.state === 'active' ? ' ● Actual' : ''}</div>
+              </div>
+            </div>
+            ${!isLast ? `<div style="width:2px;height:20px;background:${colors.line};margin:2px 0;border-radius:1px;"></div>` : ''}
+          </div>`;
+      }).join('');
+
+      const restMin = Math.max(0, latestFe.minutosFin - currentMinSimRef.current);
+      const restHH = Math.floor(restMin / 60);
+      const restMM = restMin % 60;
+      const tiempoRestante = restMin > 0 ? `${restHH}h ${restMM}m` : 'Completado';
+      const trBg = restMin > 0 ? 'rgba(37,100,235,0.08)' : 'rgba(34,197,94,0.1)';
+      const trColor = restMin > 0 ? '#1f2937' : '#16a34a';
+
+      container.innerHTML = `
+        <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
+          <div style="font-size:10px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">Ruta Planificada</div>
+          ${timelineHtml}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+          <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Plazo de Entrega</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div>
+          </div>
+          <div style="background:${trBg};padding:10px;border-radius:8px;">
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo Restante</div>
+            <div style="font-size:12px;color:${trColor};font-weight:700;">${tiempoRestante}</div>
+          </div>
+        </div>
       `;
     }
 
@@ -1492,9 +1542,26 @@ export default function SimulacionPeriodo() {
         p.innerHTML = html;
         p.style.opacity = '1';
         p.style.transform = 'translateX(0)';
-        document.getElementById('closeFEPanel')?.addEventListener('click', () => cerrarPanelEnvio());
-        document.getElementById('monitoreoBtn')?.addEventListener('click', () => transitarA(generarVistaMonitoreo()));
-        document.getElementById('backToPlanBtn')?.addEventListener('click', () => transitarA(generarVistaPlanViaje()));
+        document.getElementById('closeFEPanel')?.addEventListener('click', () => {
+          if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+          cerrarPanelEnvio();
+        });
+        document.getElementById('monitoreoBtn')?.addEventListener('click', () => {
+          currentView = 'monitoreo';
+          transitarA(generarVistaMonitoreo());
+          setTimeout(() => {
+            if (currentView === 'monitoreo') {
+              refreshMonitoreoContent();
+              if (refreshInterval) clearInterval(refreshInterval);
+              refreshInterval = window.setInterval(refreshMonitoreoContent, 1000);
+            }
+          }, 250);
+        });
+        document.getElementById('backToPlanBtn')?.addEventListener('click', () => {
+          currentView = 'plan';
+          if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+          transitarA(generarVistaPlanViaje());
+        });
       }, 200);
     }
 
@@ -1504,6 +1571,30 @@ export default function SimulacionPeriodo() {
   // ── Barra de progreso del cronómetro ─────────────────────────────────────
   const pct = Math.round(sim.progreso);
   const simTimeLabel = formatSimTime(simMinutos, startDate, startTime);
+
+  // ── Filtros + Virtual Scroll para el panel de vuelos ──────────────────────
+  const ITEM_HEIGHT = 90;
+  const OVERSCAN = 5;
+
+  const vuelosFiltrados = useMemo(() => {
+    return vuelosGlobales.filter(vuelo => {
+      const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, extraerHHMM(vuelo.salida));
+      const matchCodigo = filterCodigo === '' || codigoVuelo.toLowerCase().includes(filterCodigo.toLowerCase());
+      const matchOrigen = filterOrigen === '' || vuelo.origen.toLowerCase().includes(filterOrigen.toLowerCase());
+      const matchDestino = filterDestino === '' || vuelo.destino.toLowerCase().includes(filterDestino.toLowerCase());
+      return matchCodigo && matchOrigen && matchDestino;
+    });
+  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino]);
+
+  const totalHeight = vuelosFiltrados.length * ITEM_HEIGHT;
+  const startIdx = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
+  const endIdx = Math.min(vuelosFiltrados.length, Math.ceil((scrollTop + containerHeight) / ITEM_HEIGHT) + OVERSCAN);
+  const visibleVuelos = vuelosFiltrados.slice(startIdx, endIdx);
+  const offsetY = startIdx * ITEM_HEIGHT;
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  }, []);
 
   return (
     <div className="main-wrapper">
@@ -2135,7 +2226,7 @@ export default function SimulacionPeriodo() {
         </div>
         </div>
 
-        {/* Panel Lateral de Vuelos — Derecha (Fuera del map-card, dentro del contenedor) */}
+        {/* Panel Lateral de Vuelos — Derecha — Virtual Scrolled */}
         <div style={{
           width: flightPanelOpen ? '280px' : '0',
           flexShrink: 0,
@@ -2162,108 +2253,46 @@ export default function SimulacionPeriodo() {
               </button>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Total: {vuelosGA.length} vuelos
+              Total: {vuelosGlobales.length} vuelos
             </div>
             <button
               ref={filterButtonRef}
               onClick={() => setFiltersOpen(!filtersOpen)}
               style={{
-                marginTop: '12px',
-                padding: '8px 12px',
-                fontSize: '12px',
-                backgroundColor: 'var(--accent-blue)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px'
+                marginTop: '12px', padding: '8px 12px', fontSize: '12px',
+                backgroundColor: 'var(--accent-blue)', color: 'white',
+                border: 'none', borderRadius: '6px', cursor: 'pointer',
+                fontWeight: 600, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', gap: '6px'
               }}
             >
               🔽 Filtrar
             </button>
             {filtersOpen && (
               <div style={{
-                position: 'fixed',
-                top: filterPosition.top,
-                left: filterPosition.left,
-                backgroundColor: 'white',
-                padding: '8px',
-                borderRadius: '6px',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-                zIndex: 999999,
-                minWidth: '200px',
-                animation: 'fadeIn 0.2s ease-out'
+                position: 'fixed', top: filterPosition.top, left: filterPosition.left,
+                backgroundColor: 'white', padding: '8px', borderRadius: '6px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 999999,
+                minWidth: '200px'
               }}>
                 <style>{`
-                  @keyframes fadeIn {
-                    from {
-                      opacity: 0;
-                      transform: translateY(-10px);
-                    }
-                    to {
-                      opacity: 1;
-                      transform: translateY(0);
-                    }
-                  }
+                  @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
                 `}</style>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Filtros
-                  </h3>
-                  <button
-                    onClick={() => setFiltersOpen(false)}
-                    style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: 'var(--text-secondary)' }}
-                  >
-                    ×
-                  </button>
+                  <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</h3>
+                  <button onClick={() => setFiltersOpen(false)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: 'var(--text-secondary)' }}>×</button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div>
-                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>
-                      Código
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="LAX-JFK"
-                      value={filterCodigo}
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Código</label>
+                    <input type="text" placeholder="LAX-JFK" value={filterCodigo}
                       onChange={(e) => setFilterCodigo(e.target.value)}
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '11px',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '3px',
-                        outline: 'none',
-                        backgroundColor: 'var(--bg-primary)',
-                        color: 'var(--text-primary)',
-                        width: '100%',
-                        boxSizing: 'border-box'
-                      }}
-                    />
+                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box' }} />
                   </div>
                   <div>
-                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>
-                      Origen
-                    </label>
-                    <select
-                      value={filterOrigen}
-                      onChange={(e) => setFilterOrigen(e.target.value)}
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '11px',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '3px',
-                        outline: 'none',
-                        backgroundColor: 'var(--bg-primary)',
-                        color: 'var(--text-primary)',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        cursor: 'pointer'
-                      }}
-                    >
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Origen</label>
+                    <select value={filterOrigen} onChange={(e) => setFilterOrigen(e.target.value)}
+                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box', cursor: 'pointer' }}>
                       <option value="">Todos</option>
                       {origenesUnicos.map(og => (
                         <option key={og} value={og}>{og}{aeropuertoMap.has(og) ? ` - ${aeropuertoMap.get(og)}` : ''}</option>
@@ -2271,25 +2300,9 @@ export default function SimulacionPeriodo() {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>
-                      Destino
-                    </label>
-                    <select
-                      value={filterDestino}
-                      onChange={(e) => setFilterDestino(e.target.value)}
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '11px',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '3px',
-                        outline: 'none',
-                        backgroundColor: 'var(--bg-primary)',
-                        color: 'var(--text-primary)',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        cursor: 'pointer'
-                      }}
-                    >
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Destino</label>
+                    <select value={filterDestino} onChange={(e) => setFilterDestino(e.target.value)}
+                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box', cursor: 'pointer' }}>
                       <option value="">Todos</option>
                       {destinosUnicos.map(dest => (
                         <option key={dest} value={dest}>{dest}{aeropuertoMap.has(dest) ? ` - ${aeropuertoMap.get(dest)}` : ''}</option>
@@ -2300,138 +2313,80 @@ export default function SimulacionPeriodo() {
               </div>
             )}
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
-            {vuelosGA.length === 0 ? (
+          {/* Virtual Scroll Container */}
+          <div ref={scrollContainerRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '12px', minHeight: 0 }}>
+            {vuelosFiltrados.length === 0 ? (
               <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
                 ⏳ Esperando planificación del GA...
               </div>
             ) : (
-              <div style={{ paddingBottom: '20px' }}>
-                {vuelosGA
-                  .filter((vuelo) => simMinutos < vuelo.minutosFin)
-                  .filter((vuelo) => {
-                    // Extraer hora de salida del formato "DD/MM/AAAA HH:MM"
-                    const horaSalida = vuelo.salida.split(' ')[1] || '00:00';
-                    const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, horaSalida);
-                    const matchCodigo = filterCodigo === '' || codigoVuelo.toLowerCase().includes(filterCodigo.toLowerCase());
-                    const matchOrigen = filterOrigen === '' || vuelo.origen.toLowerCase().includes(filterOrigen.toLowerCase());
-                    const matchDestino = filterDestino === '' || vuelo.destino.toLowerCase().includes(filterDestino.toLowerCase());
-                    return matchCodigo && matchOrigen && matchDestino;
-                  })
-                  .map((vuelo, idx) => {
-                    // Guard para eliminar vuelos completados
-                    if (simMinutos >= vuelo.minutosFin) return null;
-                    // Extraer hora de salida del formato "DD/MM/AAAA HH:MM"
-                    const horaSalida = vuelo.salida.split(' ')[1] || '00:00';
-                    const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, horaSalida);
-                    const claveVuelo = getClaveVuelo(vuelo);
-                    const esCancelado = sim.cancelledFlights.has(claveVuelo);
-                    const esCancelling = cancellingFlights.has(claveVuelo);
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => {
-                          if (esCancelado || esCancelling) return;
-                          const fe = findFlightEvent(vuelo);
-                          if (fe) mostrarPanelAvion(fe);
-                        }}
-                        style={{
-                          backgroundColor: esCancelado ? 'rgba(220,53,69,0.05)' : 'var(--bg-tertiary)',
-                          border: `1px solid ${esCancelado ? 'rgba(220,53,69,0.3)' : 'var(--border-color)'}`,
-                          borderRadius: '6px',
-                          padding: '8px',
-                          marginBottom: '6px',
-                          cursor: esCancelado || esCancelling ? 'default' : 'pointer',
-                          opacity: esCancelado ? 0.6 : (esCancelling ? 0.4 : 1),
-                          pointerEvents: esCancelling ? 'none' : 'auto'
-                        }}
-                      >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: esCancelado ? 'var(--danger-red)' : 'var(--accent-blue)' }}>
-                        {codigoVuelo}
-                      </div>
-                      {esCancelado ? (
-                        <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(220,53,69,0.1)', color: 'var(--danger-red)' }}>
-                          Cancelado
-                        </span>
-                      ) : (() => {
-                        const fe = findFlightEvent(vuelo);
-                        let estado = 'Programado';
-                        let bgColor = 'rgba(37,100,235,0.1)';
-                        let textColor = '#2564eb';
-                        if (fe) {
-                          if (fe.done) {
-                            estado = 'Completado';
-                            bgColor = 'rgba(34,197,94,0.1)';
-                            textColor = '#22c55e';
-                          } else if (fe.active) {
-                            estado = 'En progreso';
-                            bgColor = 'rgba(245,158,11,0.1)';
-                            textColor = '#d97706';
-                          }
-                        }
-                        return (
-                          <span style={{
-                            fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600,
-                            backgroundColor: bgColor,
-                            color: textColor
-                          }}>
-                            {estado}
+              <div style={{ height: totalHeight, paddingTop: offsetY, boxSizing: 'border-box' }}>
+                {visibleVuelos.map((vuelo, i) => {
+                  const realIdx = startIdx + i;
+                  const salidaHHMM = extraerHHMM(vuelo.salida);
+                  const llegadaHHMM = extraerHHMM(vuelo.llegada);
+                  const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, salidaHHMM);
+                  const claveVuelo = getClaveVuelo(vuelo);
+                  const esCancelado = sim.cancelledFlights.has(claveVuelo);
+                  const esCancelling = cancellingFlights.has(claveVuelo);
+                  return (
+                    <div
+                      key={`${vuelo.origen}-${vuelo.destino}-${salidaHHMM}-${realIdx}`}
+                      style={{
+                        backgroundColor: esCancelado ? 'rgba(220,53,69,0.05)' : 'var(--bg-tertiary)',
+                        border: `1px solid ${esCancelado ? 'rgba(220,53,69,0.3)' : 'var(--border-color)'}`,
+                        borderRadius: '6px', padding: '8px', marginBottom: '6px',
+                        cursor: esCancelado || esCancelling ? 'default' : 'pointer',
+                        opacity: esCancelado ? 0.6 : (esCancelling ? 0.4 : 1),
+                        pointerEvents: esCancelling ? 'none' : 'auto',
+                        height: 'auto', boxSizing: 'border-box',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: esCancelado ? 'var(--danger-red)' : 'var(--accent-blue)' }}>
+                          {codigoVuelo}
+                        </div>
+                        {esCancelado && (
+                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(220,53,69,0.1)', color: 'var(--danger-red)' }}>
+                            Cancelado
                           </span>
-                        );
-                      })()}
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 500 }}>
-                      {vuelo.origen} → {vuelo.destino}
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '4px' }}>
-                      <div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Salida</div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{vuelo.salida}</div>
+                        )}
                       </div>
-                      <div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Llegada</div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{vuelo.llegada}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 500 }}>
+                        {vuelo.origen} → {vuelo.destino}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', flex: 1 }}>
+                          <div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Salida</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{salidaHHMM}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Llegada</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{llegadaHHMM}</div>
+                          </div>
+                        </div>
+                        {!esCancelado && !esCancelling && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
+                            style={{
+                              padding: '3px 8px', fontSize: '10px',
+                              backgroundColor: 'rgba(220, 53, 69, 0.1)', color: 'var(--danger-red)',
+                              border: '1px solid rgba(220, 53, 69, 0.3)', borderRadius: '4px',
+                              cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
+                            }}
+                          >
+                            Cancelar
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Capacidad</div>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>{vuelo.capacidad}</div>
-                      </div>
-                      {!esCancelado && !esCancelling && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
-                          style={{
-                            padding: '3px 8px',
-                            fontSize: '10px',
-                            backgroundColor: 'rgba(220, 53, 69, 0.1)',
-                            color: 'var(--danger-red)',
-                            border: '1px solid rgba(220, 53, 69, 0.3)',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontWeight: 600
-                          }}
-                        >
-                          Cancelar
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
               </div>
             )}
           </div>
-          <div style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: '40px',
-            background: 'linear-gradient(to bottom, transparent, rgba(255,255,255,0.95))',
-            pointerEvents: 'none'
-          }} />
         </div>
       </div>
 

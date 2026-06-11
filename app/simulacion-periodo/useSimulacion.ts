@@ -165,14 +165,16 @@ function rutaAFlightEvents(
     const aDestino = aeropuertos.get(tramo.destino);
     if (!aOrigen || !aDestino) continue;
 
-    const saleParts = tramo.sale.split(':').map(Number);
+    const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
+    const saleParts = saleTime.split(':').map(Number);
     let saleDate = new Date(cursorDate);
     saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
     if (saleDate.getTime() < cursorDate.getTime()) {
       saleDate.setDate(saleDate.getDate() + 1);
     }
 
-    const llegaParts = tramo.llega.split(':').map(Number);
+    const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
+    const llegaParts = llegaTime.split(':').map(Number);
     let llegaDate = new Date(saleDate);
     llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
     if (llegaDate.getTime() < saleDate.getTime()) {
@@ -233,7 +235,7 @@ function buildLogEvents(
   const esDirecto = totalTramos <= 1;
 
   // Extraer solo la hora de tramo.sale
-  const salidaTexto = totalTramos > 0 ? ` · Salida ${tramos[0].sale.split(':').slice(0, 2).join(':')}` : '';
+  const salidaTexto = totalTramos > 0 ? ` · Salida ${((tramos[0].sale || '').split(' ')[1] || '00:00').split(':').slice(0, 2).join(':')}` : '';
 
   const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
   const textRegistro = esDirecto
@@ -253,14 +255,16 @@ function buildLogEvents(
   let cursorDate = extraerFecha(ruta.fechaRegistro);
 
   for (const tramo of tramos) {
-    const saleParts = tramo.sale.split(':').map(Number);
+    const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
+    const saleParts = saleTime.split(':').map(Number);
     let saleDate = new Date(cursorDate);
     saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
     if (saleDate.getTime() < cursorDate.getTime()) {
       saleDate.setDate(saleDate.getDate() + 1);
     }
 
-    const llegaParts = tramo.llega.split(':').map(Number);
+    const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
+    const llegaParts = llegaTime.split(':').map(Number);
     let llegaDate = new Date(saleDate);
     llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
     if (llegaDate.getTime() < saleDate.getTime()) {
@@ -392,6 +396,8 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setAllLogEvents([]);
     setStats(null); setResumen(null); setColapso(null);
     setIteracion(0); setLogs([]); setTotalPlanificados(0); setTotalMaletas(0);
+    setCancelledFlights(new Set());
+    setSuppressedTramos(new Map());
     iteracionIdxRef.current = 0;
     realStartTimeRef.current = performance.now();
     rutasPlanificadasRef.current.clear();

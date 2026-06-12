@@ -5,7 +5,8 @@ import { useSimulacion, FlightEvent, LogEvent, SIM_CONFIG, LogEntry, fechaHoraAM
 
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
-function getAirplaneSVG(pct: number): string {
+function getAirplaneSVG(pct: number, isEmpty?: boolean): string {
+  if (isEmpty) return '/airplane-blue.svg';
   if (pct < 50) return '/airplane-green.svg';
   if (pct < 80) return '/airplane-orange.svg';
   return '/airplane-red.svg';
@@ -190,6 +191,123 @@ export default function SimulacionPeriodo() {
   // ── API: todos los vuelos de la base de datos (planes-vuelo + aeropuertos) ──
   const [apiFlights, setApiFlights] = useState<any[] | null>(null);
   const aeropuertoInfoRef = useRef<Map<number, { codigo: string; gmt: number }>>(new Map());
+
+  // ── Vuelos vacíos (no usados) de la BD ───────────────────────────────────
+  const emptyFlightsAddedRef = useRef<Set<string>>(new Set());
+
+  function crearEmptyFlightEvent(flight: any, simStartDate: Date): FlightEvent | null {
+    const infoOri = aeropuertoInfoRef.current.get(flight.idAeropuertoOrigen);
+    const infoDes = aeropuertoInfoRef.current.get(flight.idAeropuertoDestino);
+    const origen = infoOri?.codigo;
+    const destino = infoDes?.codigo;
+    if (!origen || !destino) return null;
+    const aOri = sim.aeropuertosRef.current.get(origen);
+    const aDes = sim.aeropuertosRef.current.get(destino);
+    if (!aOri || !aDes) return null;
+
+    const gmtO = infoOri.gmt;
+    const gmtD = infoDes.gmt;
+    const [lh, lm] = (flight.horaSalida || '00:00').split(':').map(Number);
+    const gmtH = ((lh - gmtO) % 24 + 24) % 24;
+    const [lha, lma] = (flight.horaLlegada || '00:00').split(':').map(Number);
+    const gmtHa = ((lha - gmtD) % 24 + 24) % 24;
+
+    let saleDate = new Date(simStartDate);
+    saleDate.setHours(gmtH, lm, 0, 0);
+    while (saleDate.getTime() < simStartDate.getTime()) {
+      saleDate.setDate(saleDate.getDate() + 1);
+    }
+
+    let llegaDate = new Date(saleDate);
+    llegaDate.setHours(gmtHa, lma, 0, 0);
+    if (llegaDate.getTime() <= saleDate.getTime()) llegaDate.setDate(llegaDate.getDate() + 1);
+
+    const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
+    const minutosFin = Math.round((llegaDate.getTime() - simStartDate.getTime()) / 60000);
+
+    if (minutosInicio < 0 || minutosInicio > TOTAL_MINUTOS_SIM) return null;
+
+    const key = `unused-${origen}-${destino}-${String(gmtH).padStart(2, '0')}${String(lm).padStart(2, '0')}`;
+
+    return {
+      key,
+      tramoOrden: 1,
+      origenCode: origen,
+      destinoCode: destino,
+      planVueloRuta: [origen, destino],
+      planVueloTipo: 'Directo',
+      latOrigen: aOri.latitud,
+      lngOrigen: aOri.longitud,
+      latDestino: aDes.latitud,
+      lngDestino: aDes.longitud,
+      minutosInicio,
+      minutosFin,
+      maletasVuelo: 0,
+      capacidadVuelo: flight.capacidad ?? 0,
+      ocupacionAlmacenOrigen: 0,
+      capacidadAlmacenOrigen: aOri.capacidad,
+      ocupacionAlmacenDestino: 0,
+      capacidadAlmacenDestino: aDes.capacidad,
+    };
+  }
+
+  useEffect(() => {
+    if (!apiFlights) return;
+    const simStart = sim.simStartDateRef.current;
+    if (!simStart) return;
+
+    // Build used flight keys from all SSE route data
+    const usedKeys = new Set<string>();
+    sim.rutasPlanificadasRef.current.forEach(ruta => {
+      (ruta.tramos || []).forEach(tramo => {
+        const gmtTime = (tramo.sale || '').split(' ')[1] || '00:00';
+        usedKeys.add(`${tramo.origen}-${tramo.destino}-${gmtTime}`);
+      });
+    });
+
+    // Mark empty flights as done if their key is now used
+    emptyFlightsAddedRef.current.forEach(key => {
+      const parts = key.split('-');
+      if (parts.length >= 4) {
+        const gmtTime = `${parts[parts.length - 2]}:${parts[parts.length - 1]}`;
+        const usedKey = `${parts[1]}-${parts[2]}-${gmtTime}`;
+        if (usedKeys.has(usedKey)) {
+          const fe = flightEventsRef.current.find(e => e.key === key);
+          if (fe && !fe.done) fe.done = true;
+          emptyFlightsAddedRef.current.delete(key);
+        }
+      }
+    });
+
+    // Add new empty flights for truly unused API flights
+    const added: FlightEvent[] = [];
+    for (const flight of apiFlights) {
+      if (flight.cancelado) continue;
+      const infoOri = aeropuertoInfoRef.current.get(flight.idAeropuertoOrigen);
+      const origen = infoOri?.codigo;
+      const destino = aeropuertoInfoRef.current.get(flight.idAeropuertoDestino)?.codigo;
+      if (!origen || !destino) continue;
+      const gmtO = infoOri?.gmt ?? 0;
+      const [lh, lm] = (flight.horaSalida || '00:00').split(':').map(Number);
+      const gmtH = ((lh - gmtO) % 24 + 24) % 24;
+      const gmtTime = `${String(gmtH).padStart(2, '0')}:${String(lm).padStart(2, '0')}`;
+
+      if (usedKeys.has(`${origen}-${destino}-${gmtTime}`)) continue;
+
+      const feKey = `unused-${origen}-${destino}-${String(gmtH).padStart(2, '0')}${String(lm).padStart(2, '0')}`;
+      if (emptyFlightsAddedRef.current.has(feKey)) continue;
+      if (flightEventsRef.current.find(e => e.key === feKey && !e.done)) continue;
+
+      const fe = crearEmptyFlightEvent(flight, simStart);
+      if (fe) {
+        added.push(fe);
+        emptyFlightsAddedRef.current.add(feKey);
+      }
+    }
+    if (added.length > 0) {
+      flightEventsRef.current = [...flightEventsRef.current, ...added];
+    }
+  }, [apiFlights, sim.allFlightEvents, sim.simStartDateRef.current]);
 
   useEffect(() => {
     const API = process.env.NEXT_PUBLIC_API_URL;
@@ -592,8 +710,9 @@ export default function SimulacionPeriodo() {
       const grp = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
 
+      const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct));
+      img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct, isEmpty));
       img.setAttribute('x', '-15');
       img.setAttribute('y', '-15');
       img.setAttribute('width', '30');
@@ -685,10 +804,11 @@ export default function SimulacionPeriodo() {
       );
 
       // Actualizar color si cambió
+      const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      const bucket = ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2;
+      const bucket = isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2);
       if ((fe as any)._lastColorBucket !== bucket) {
-        fe.airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct));
+        fe.airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct, isEmpty));
         (fe as any)._lastColorBucket = bucket;
       }
     }
@@ -1160,14 +1280,17 @@ export default function SimulacionPeriodo() {
     const durM = duracionMin % 60;
     const duracionLabel = durH > 0 ? `${durH}h ${durM}m` : `${durM}m`;
 
+    const isEmptyFlight = fe.key.startsWith('unused-');
+
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          ${isEmptyFlight ? '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;flex-shrink:0;"></div>' : ''}
           <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del viaje</h3>
-          
         </div>
         <button id="closeAvionPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
       </div>
+      ${isEmptyFlight ? '<div style="background:#eff6ff;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:11px;color:#2563eb;font-weight:600;">Vuelo sin uso — No transporta maletas</div>' : ''}
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
@@ -1202,7 +1325,7 @@ export default function SimulacionPeriodo() {
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
         <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">MALETAS</div>
-        <div style="font-size:12px;color:#1f2937;font-weight:700;">${fe.maletasVuelo} / ${fe.capacidadVuelo} maletas</div>
+        <div style="font-size:12px;color:#1f2937;font-weight:700;">${isEmptyFlight ? '0 / ' + fe.capacidadVuelo + ' maletas (vuelo vacío)' : fe.maletasVuelo + ' / ' + fe.capacidadVuelo + ' maletas'}</div>
       </div>
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
@@ -2332,6 +2455,33 @@ export default function SimulacionPeriodo() {
                   return (
                     <div
                       key={`${vuelo.origen}-${vuelo.destino}-${salidaHHMM}-${realIdx}`}
+                      onClick={() => {
+                        const simStart = sim.simStartDateRef.current;
+                        if (!simStart || esCancelado || esCancelling) return;
+                        const [hh, mm] = salidaHHMM.split(':').map(Number);
+                        let d = new Date(simStart); d.setHours(hh, mm, 0, 0);
+                        while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
+                        const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
+                        let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio && !e.done);
+                        if (!fe) {
+                          const aOri2 = sim.aeropuertosRef.current.get(vuelo.origen);
+                          const aDes2 = sim.aeropuertosRef.current.get(vuelo.destino);
+                          if (aOri2 && aDes2) {
+                            fe = {
+                              key: `card-${vuelo.origen}-${vuelo.destino}-${salidaHHMM.replace(':', '')}`,
+                              tramoOrden: 1, origenCode: vuelo.origen, destinoCode: vuelo.destino,
+                              planVueloRuta: [vuelo.origen, vuelo.destino], planVueloTipo: 'Directo',
+                              latOrigen: aOri2.latitud, lngOrigen: aOri2.longitud,
+                              latDestino: aDes2.latitud, lngDestino: aDes2.longitud,
+                              minutosInicio: minInicio, minutosFin: minInicio + 120,
+                              maletasVuelo: 0, capacidadVuelo: 0,
+                              ocupacionAlmacenOrigen: 0, capacidadAlmacenOrigen: aOri2.capacidad,
+                              ocupacionAlmacenDestino: 0, capacidadAlmacenDestino: aDes2.capacidad,
+                            };
+                          }
+                        }
+                        if (fe) mostrarPanelAvion(fe);
+                      }}
                       style={{
                         backgroundColor: esCancelado ? 'rgba(220,53,69,0.05)' : 'var(--bg-tertiary)',
                         border: `1px solid ${esCancelado ? 'rgba(220,53,69,0.3)' : 'var(--border-color)'}`,

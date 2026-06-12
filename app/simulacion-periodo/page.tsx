@@ -12,6 +12,13 @@ function getAirplaneSVG(pct: number, isEmpty?: boolean): string {
   return '/airplane-red.svg';
 }
 
+function getLocationSVG(pct: number): string {
+  if (pct === 0) return '/location-blue.svg';
+  if (pct < 50) return '/location-green.svg';
+  if (pct < 80) return '/location-orange.svg';
+  return '/location-red.svg';
+}
+
 function bezierCurve(
   p0: [number, number],
   p1: [number, number],
@@ -499,16 +506,6 @@ export default function SimulacionPeriodo() {
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
-    const icon = L.icon({
-      iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-      iconSize: [12, 18],
-      iconAnchor: [6, 18],
-      popupAnchor: [0, -18],
-      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-      shadowSize: [16, 16],
-      shadowAnchor: [6, 18],
-    });
-
     // Inicializar estado de almacenes con capacidad base del aeropuerto
     sim.aeropuertos.forEach(a => {
       if (!airportStateRef.current.has(a.codigo)) {
@@ -516,7 +513,24 @@ export default function SimulacionPeriodo() {
       }
     });
 
+    function crearIconoAlmacen(pct: number) {
+      return L.icon({
+        iconUrl: getLocationSVG(pct),
+        iconSize: [28, 36],
+        iconAnchor: [14, 36],
+        popupAnchor: [0, -36],
+        className: '',
+      });
+    }
+
+    function actualizarIconoAlmacen(marker: any, pct: number) {
+      marker.setIcon(crearIconoAlmacen(pct));
+    }
+
     sim.aeropuertos.forEach(a => {
+      const estadoInicial = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
+      const pctInicial = estadoInicial.capacidad > 0 ? (estadoInicial.ocupacion / estadoInicial.capacidad) * 100 : 0;
+
       const generarPopupHTML = () => {
         const estado = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
         const pct = estado.capacidad > 0 ? Math.min(100, (estado.ocupacion / estado.capacidad) * 100) : 0;
@@ -541,13 +555,16 @@ export default function SimulacionPeriodo() {
           </div>`;
       };
 
-      const m = L.marker([a.latitud, a.longitud], { icon }).addTo(mapInst.current);
+      const m = L.marker([a.latitud, a.longitud], { icon: crearIconoAlmacen(pctInicial) }).addTo(mapInst.current);
       m.airportCode = a.codigo;
       m.generarPopupHTML = generarPopupHTML;
       m.bindPopup(generarPopupHTML(), { maxWidth: 300 });
       m.on('popupopen', () => m.setPopupContent(m.generarPopupHTML()));
       markersRef.current.push(m);
     });
+
+    // Exponer actualizarIconoAlmacen para usarlo desde spawnAvion/removeAvion
+    (mapInst.current as any)._actualizarIconoAlmacen = actualizarIconoAlmacen;
   }, [sim.aeropuertos]);
 
   // ── Sincronizar flightEvents del hook → ref local ─────────────────────────
@@ -740,6 +757,9 @@ export default function SimulacionPeriodo() {
         ocupacion: fe.ocupacionAlmacenOrigen,
         capacidad: fe.capacidadAlmacenOrigen,
       });
+      const origPct = fe.capacidadAlmacenOrigen > 0 ? (fe.ocupacionAlmacenOrigen / fe.capacidadAlmacenOrigen) * 100 : 0;
+      const origMarker = markersRef.current.find((m: any) => m.airportCode === fe.origenCode);
+      if (origMarker) (mapInst.current as any)?._actualizarIconoAlmacen?.(origMarker, origPct);
 
       // (path se adjunta inline en el avión para el loop)
       (fe as any)._path = path;
@@ -765,6 +785,9 @@ export default function SimulacionPeriodo() {
         ocupacion: fe.ocupacionAlmacenDestino,
         capacidad: fe.capacidadAlmacenDestino,
       });
+      const destPct = fe.capacidadAlmacenDestino > 0 ? (fe.ocupacionAlmacenDestino / fe.capacidadAlmacenDestino) * 100 : 0;
+      const destMarker = markersRef.current.find((m: any) => m.airportCode === fe.destinoCode);
+      if (destMarker) (mapInst.current as any)?._actualizarIconoAlmacen?.(destMarker, destPct);
     }
 
     function updateAvionPosition(fe: FlightEvent, progress: number, map: any) {
@@ -1281,12 +1304,15 @@ export default function SimulacionPeriodo() {
     const duracionLabel = durH > 0 ? `${durH}h ${durM}m` : `${durM}m`;
 
     const isEmptyFlight = fe.key.startsWith('unused-');
+    const salidaHHMM = horaSalida.split(' ')[1] || '00:00';
+    const codigoVueloPanel = generarCodigoVuelo(fe.origenCode, fe.destinoCode, salidaHHMM);
 
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:8px;">
           ${isEmptyFlight ? '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;flex-shrink:0;"></div>' : ''}
           <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del viaje</h3>
+          <span style="font-size:11px;font-weight:700;color:var(--accent-blue,#2563eb);background:#eef2ff;padding:3px 8px;border-radius:6px;margin-left:4px;">${codigoVueloPanel}</span>
         </div>
         <button id="closeAvionPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
       </div>
@@ -2632,9 +2658,9 @@ export default function SimulacionPeriodo() {
               <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--accent-blue)' }}>ℹ️ Métricas</h3>
               {sim.isRunning && sim.iteracion > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <MetricBox label="Ocupación Almacenes" value={`${metricas.ocupacionPromedio.toFixed(1)}%`} />
+                  <MetricBox label="Ocupación Almacenes" value={`${metricas.ocupacionPromedio.toFixed(1)}%`} semaphoreValue={metricas.ocupacionPromedio} />
                   <MetricBox label="Tiempo Promedio" value={`${metricas.tiempoPromedio.toFixed(0)} min`} />
-                  <MetricBox label="Ocupación de Aviones" value={`${metricas.ocupacionAviones.toFixed(1)}%`} />
+                  <MetricBox label="Ocupación de Aviones" value={`${metricas.ocupacionAviones.toFixed(1)}%`} semaphoreValue={metricas.ocupacionAviones} />
                   <MetricBox label="Entregas Retrasadas" value="0" />
                 </div>
               ) : (
@@ -2659,11 +2685,20 @@ function StatCard({ title, value, color }: { title: string; value: number; color
   );
 }
 
-function MetricBox({ label, value }: { label: string; value: string }) {
+function MetricBox({ label, value, semaphoreValue }: { label: string; value: string; semaphoreValue?: number }) {
+  const semColor = semaphoreValue !== undefined
+    ? semaphoreValue < 50 ? '#22c55e' : semaphoreValue < 80 ? '#f97316' : '#ef4444'
+    : undefined;
   return (
-    <div style={{ padding: 12, backgroundColor: 'var(--bg-tertiary)', borderRadius: 6 }}>
+    <div style={{
+      padding: 12,
+      backgroundColor: 'var(--bg-tertiary)',
+      borderRadius: 6,
+      borderLeft: semColor ? `4px solid ${semColor}` : undefined,
+      transition: 'border-color 0.3s',
+    }}>
       <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, fontSize: 11 }}>{label}</small>
-      <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 6 }}>{value}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: semColor || 'var(--accent-blue)', marginTop: 6 }}>{value}</div>
     </div>
   );
 }

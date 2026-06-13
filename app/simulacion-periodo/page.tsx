@@ -1639,15 +1639,27 @@ export default function SimulacionPeriodo() {
       const tramos = rc.tramos || [];
       const tramoActual = latestFe.tramoOrden;
 
+      // Construir nodos de aeropuertos (sin sale/llega aún)
       const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending'; sale?: string; llega?: string }[] = [];
       aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'pending' });
       tramos.forEach(tramo => {
         const last = aeropuertosRuta[aeropuertosRuta.length - 1];
         if (last.codigo !== tramo.destino) {
-          const saleTime = (tramo.sale || '').split(' ')[1] || '';
-          const llegaTime = (tramo.llega || '').split(' ')[1] || '';
-          aeropuertosRuta.push({ codigo: tramo.destino, nombre: getUbicacion(tramo.destino), state: 'pending', sale: saleTime, llega: llegaTime });
+          aeropuertosRuta.push({ codigo: tramo.destino, nombre: getUbicacion(tramo.destino), state: 'pending' });
         }
+      });
+
+      // Asignar Sale/Llega según posición:
+      // 1er aeropuerto → Sale del tramo 1
+      // Aeropuerto intermedio → Llega del tramo anterior + Sale del tramo siguiente
+      // Último aeropuerto → Llega del último tramo
+      tramos.forEach((tramo, idx) => {
+        const saleTime = (tramo.sale || '').split(' ')[1] || '';
+        const llegaTime = (tramo.llega || '').split(' ')[1] || '';
+        // El origen de este tramo recibe su Sale (sobrescribe si es intermedio con Sale previo)
+        if (aeropuertosRuta[idx]) aeropuertosRuta[idx].sale = saleTime;
+        // El destino de este tramo recibe su Llega
+        if (aeropuertosRuta[idx + 1]) aeropuertosRuta[idx + 1].llega = llegaTime;
       });
 
       // Marcar según estado del vuelo
@@ -1683,7 +1695,7 @@ export default function SimulacionPeriodo() {
                   <div style="font-size:11px;color:#1f2937;font-weight:700;">${ap.nombre}</div>
                   <div style="font-size:10px;color:${colors.label};font-weight:600;">${ap.codigo}${ap.state === 'active' ? ' ● Actual' : ''}</div>
                 </div>
-                <div style="display:flex;align-items:center;gap:2px;margin-left:auto;">${saleStr}${llegaStr}</div>
+                <div style="display:flex;align-items:center;gap:2px;margin-left:auto;">${llegaStr}${saleStr}</div>
               </div>
             </div>
             ${!isLast ? `<div style="width:2px;height:20px;background:${colors.line};margin:2px 0;border-radius:1px;"></div>` : ''}
@@ -1716,13 +1728,13 @@ export default function SimulacionPeriodo() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div style="background:#eef2ff;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Origen</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionOrigen}</div>
-            <div style="font-size:11px;color:#6b7280;font-weight:600;">${rc.origen}</div>
+            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rc.origen}</div>
+            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubicacionOrigen}</div>
           </div>
           <div style="background:#fef3c7;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Destino</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionDestino}</div>
-            <div style="font-size:11px;color:#6b7280;font-weight:600;">${rc.destino}</div>
+            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rc.destino}</div>
+            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubicacionDestino}</div>
           </div>
         </div>
         <div style="background:#f3f4f6;padding:8px 12px;border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
@@ -2403,13 +2415,6 @@ export default function SimulacionPeriodo() {
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#f97316', marginTop: 2 }}>{sim.diaActual}/5</div>
               </div>
 
-              <div>
-                <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tramos en Cola</small>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#8b5cf6', marginTop: 2 }}>
-                  {sim.allFlightEvents.length}
-                </div>
-              </div>
-
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={handleDetener} disabled={!sim.isRunning}
                   style={{ padding: '7px 12px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', opacity: !sim.isRunning ? 0.6 : 1, fontWeight: 600 }}>
@@ -2659,7 +2664,7 @@ export default function SimulacionPeriodo() {
                       }
                     }
                     esSinUso = !fe || fe.key.startsWith('unused-');
-                    if (fe && !esSinUso) {
+                    if (fe && !esSinUso && currentMinSimRef.current >= minInicio) {
                       if (fe.capacidadVuelo > 0) {
                         pctOcupacion = (fe.maletasVuelo / fe.capacidadVuelo) * 100;
                         ocupColor = pctOcupacion < 50 ? '#22c55e' : pctOcupacion < 80 ? '#f97316' : '#ef4444';

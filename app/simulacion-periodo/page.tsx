@@ -134,7 +134,14 @@ export default function SimulacionPeriodo() {
   const [simMinutos, setSimMinutos] = useState(0);
   const clockEnabledRef = useRef(false);
 
-
+  // Hora real del sistema (momento presente)
+  const [horaActual, setHoraActual] = useState('');
+  useEffect(() => {
+    const tick = () => setHoraActual(new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const isInitialized = useRef(false);
 
@@ -153,6 +160,29 @@ export default function SimulacionPeriodo() {
   }, []);
 
   const sim = useSimulacion(startDate || undefined, startTime || undefined);
+
+  // Cronómetro de tiempo real transcurrido (stopwatch)
+  const stopwatchStartRef = useRef<number | null>(null);
+  const [stopwatch, setStopwatch] = useState('00:00');
+  useEffect(() => {
+    if (sim.isRunning && sim.iteracion > 0 && stopwatchStartRef.current === null) {
+      stopwatchStartRef.current = performance.now();
+    }
+    if (!sim.isRunning) {
+      stopwatchStartRef.current = null;
+      setStopwatch('00:00');
+      return;
+    }
+    if (stopwatchStartRef.current === null) return;
+    const id = setInterval(() => {
+      const elapsed = performance.now() - stopwatchStartRef.current!;
+      const totalSec = Math.floor(elapsed / 1000);
+      const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
+      const s = String(totalSec % 60).padStart(2, '0');
+      setStopwatch(`${m}:${s}`);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [sim.isRunning, sim.iteracion]);
 
   // Detectar estado del sidebar desde localStorage
   useEffect(() => {
@@ -188,9 +218,13 @@ export default function SimulacionPeriodo() {
   const [filterOrigen, setFilterOrigen] = useState('');
   const [filterDestino, setFilterDestino] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortBy, setSortBy] = useState('salida');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [refreshTick, setRefreshTick] = useState(0);
   const [filterPosition, setFilterPosition] = useState({ top: 0, left: 0 });
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const [cancellingFlights, setCancellingFlights] = useState<Set<string>>(new Set());
+  const canceledLocallyRef = useRef<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(600);
@@ -273,6 +307,7 @@ export default function SimulacionPeriodo() {
     });
 
     // Mark empty flights as done if their key is now used
+    let changed = false;
     emptyFlightsAddedRef.current.forEach(key => {
       const parts = key.split('-');
       if (parts.length >= 4) {
@@ -280,11 +315,12 @@ export default function SimulacionPeriodo() {
         const usedKey = `${parts[1]}-${parts[2]}-${gmtTime}`;
         if (usedKeys.has(usedKey)) {
           const fe = flightEventsRef.current.find(e => e.key === key);
-          if (fe && !fe.done) fe.done = true;
+          if (fe && !fe.done) { fe.done = true; changed = true; }
           emptyFlightsAddedRef.current.delete(key);
         }
       }
     });
+    if (changed) setRefreshTick(t => t + 1);
 
     // Add new empty flights for truly unused API flights
     const added: FlightEvent[] = [];
@@ -999,7 +1035,7 @@ export default function SimulacionPeriodo() {
       panel = document.createElement('div');
       panel.id = 'shipmentSearchPanel';
       panel.style.cssText = `
-        position:absolute;left:12px;bottom:238px;width:280px;
+        position:absolute;left:12px;bottom:270px;width:280px;
         background:white;border-radius:10px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
         padding:12px;z-index:999996;
@@ -1229,6 +1265,10 @@ export default function SimulacionPeriodo() {
       if (res.ok) {
         const msg = await res.text();
         sim.addLog(`✅ Cancelación exitosa: ${msg}`, '#22c55e');
+        // Persistir cancelación local si el vuelo no está en el SSE
+        if (!sim.cancelledFlights.has(claveVuelo)) {
+          canceledLocallyRef.current = new Set(canceledLocallyRef.current).add(claveVuelo);
+        }
       } else {
         sim.addLog(`❌ Error al cancelar vuelo`, '#ef4444');
       }
@@ -1271,15 +1311,21 @@ export default function SimulacionPeriodo() {
 
     panelFlightKeyRef.current = fe.key;
 
+    // Fallback: si capacidadVuelo es 0 y no es vuelo sin uso, buscar en SSE
+    if (fe.capacidadVuelo === 0 && !fe.key.startsWith('unused-')) {
+      for (const ruta of rutasPlanificadasRef.current.values()) {
+        const tramo = (ruta.tramos || []).find(t => t.origen === fe.origenCode && t.destino === fe.destinoCode);
+        if (tramo && (tramo.capacidadVuelo > 0 || tramo.maletasVuelo > 0)) {
+          fe.capacidadVuelo = tramo.capacidadVuelo ?? 0;
+          fe.maletasVuelo = tramo.maletasVuelo ?? 0;
+          break;
+        }
+      }
+    }
+
     // Resolución de aeropuertos
     const aeropuertoOrigen = sim.aeropuertos.find(a => a.codigo === fe.origenCode);
     const aeropuertoDestino = sim.aeropuertos.find(a => a.codigo === fe.destinoCode);
-    const ciudadOrigen = aeropuertoOrigen
-      ? `${aeropuertoOrigen.ciudad}, ${aeropuertoOrigen.pais}`
-      : fe.origenCode;
-    const ciudadDestino = aeropuertoDestino
-      ? `${aeropuertoDestino.ciudad}, ${aeropuertoDestino.pais}`
-      : fe.destinoCode;
 
     // Calcular horarios
     const simStartDate = sim.simStartDateRef.current;
@@ -1307,6 +1353,24 @@ export default function SimulacionPeriodo() {
     const salidaHHMM = horaSalida.split(' ')[1] || '00:00';
     const codigoVueloPanel = generarCodigoVuelo(fe.origenCode, fe.destinoCode, salidaHHMM);
 
+    // Buscar envíos relacionados (solo para vuelos en uso)
+    const enviosRelacionados: { codigo: string; label: string }[] = [];
+    if (!isEmptyFlight) {
+      const codigosVistos = new Set<string>();
+      flightEventsRef.current.forEach(e => {
+        if (e.key.startsWith('unused-')) return;
+        if (e.origenCode === fe.origenCode && e.destinoCode === fe.destinoCode && e.minutosInicio === fe.minutosInicio) {
+          const codEnvio = e.key.split('-')[0];
+          if (!codigosVistos.has(codEnvio)) {
+            codigosVistos.add(codEnvio);
+            const ruta = rutasPlanificadasRef.current.get(codEnvio);
+            const label = ruta ? `${ruta.origen} → ${ruta.destino}${(ruta.tramos?.length ?? 0) > 1 ? ` (${ruta.tramos.length} tramos)` : ''}` : codEnvio;
+            enviosRelacionados.push({ codigo: codEnvio, label });
+          }
+        }
+      });
+    }
+
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:8px;">
@@ -1325,12 +1389,18 @@ export default function SimulacionPeriodo() {
         <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:8px;">
           <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
             <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Origen</span>
-            <span style="display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">${ciudadOrigen}</span>
+            <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
+              <span>${fe.origenCode}</span>
+              <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aeropuertoOrigen ? `${aeropuertoOrigen.ciudad}, ${aeropuertoOrigen.pais}` : ''}</span>
+            </span>
           </span>
           <span style="color:#9ca3af;font-size:18px;font-weight:800;margin-top:18px;">→</span>
           <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
             <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Destino</span>
-            <span style="display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#fef3c7;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">${ciudadDestino}</span>
+            <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#fef3c7;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
+              <span>${fe.destinoCode}</span>
+              <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aeropuertoDestino ? `${aeropuertoDestino.ciudad}, ${aeropuertoDestino.pais}` : ''}</span>
+            </span>
           </span>
         </div>
       </div>
@@ -1358,7 +1428,27 @@ export default function SimulacionPeriodo() {
         <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">DURACIÓN DEL TRAMO</div>
         <div style="font-size:14px;color:#1f2937;font-weight:700;">${duracionLabel}</div>
       </div>
+      ${enviosRelacionados.length > 0 ? `
+      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-top:10px;">
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">ENVÍOS RELACIONADOS</div>
+        ${enviosRelacionados.map((env, i) => `
+        <div id="relEnvio_${i}" data-codigo="${env.codigo}" style="padding:6px 8px;background:white;border-radius:6px;cursor:pointer;margin-bottom:4px;border:1px solid var(--border-color,#e5e7eb);display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;font-weight:600;color:var(--accent-blue,#2563eb);">${env.codigo}</span>
+          <span style="font-size:10px;color:#6b7280;">${env.label}</span>
+        </div>`).join('')}
+      </div>` : ''}
     `;
+
+    // Agregar listeners para envíos relacionados
+    enviosRelacionados.forEach((env, i) => {
+      const el = document.getElementById(`relEnvio_${i}`);
+      if (el) {
+        el.addEventListener('click', () => {
+          const envioFe = flightEventsRef.current.find(e => e.key.startsWith(env.codigo));
+          if (envioFe) mostrarPanelEnvio(envioFe);
+        });
+      }
+    });
 
     document.getElementById('closeAvionPanel')?.addEventListener('click', () => {
       cerrarPanelAvion(fe.key);
@@ -1465,8 +1555,6 @@ export default function SimulacionPeriodo() {
     const tramosVisual = rc.tramos?.map((tramo, index) => {
       const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
       const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
-      const uOrigen = aOrigen ? `${aOrigen.ciudad}, ${aOrigen.pais}` : tramo.origen;
-      const uDestino = aDestino ? `${aDestino.ciudad}, ${aDestino.pais}` : tramo.destino;
       const isLast = index === (rc.tramos?.length ?? 0) - 1;
       const simStart = new Date(startDate || '2027-01-02');
       const stp = (startTime || '00:00').split(':').map(Number);
@@ -1489,14 +1577,22 @@ export default function SimulacionPeriodo() {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <div style="flex:1;"><div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Origen</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${uOrigen}</div></div>
-            <div style="display:flex;align-items:center;gap:4px;">
-              <div style="width:24px;height:2px;background:#d1d5db;border-radius:1px;"></div>
-              <span style="color:#9ca3af;font-size:16px;font-weight:800;">✈</span>
-              <div style="width:24px;height:2px;background:#d1d5db;border-radius:1px;"></div>
-            </div>
-            <div style="flex:1;"><div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Destino</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${uDestino}</div></div>
+          <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;margin-bottom:8px;">
+            <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
+              <span style="font-size:9px;color:#6b7280;font-weight:600;">Origen</span>
+              <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
+                <span>${tramo.origen}</span>
+                <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aOrigen ? `${aOrigen.ciudad}, ${aOrigen.pais}` : ''}</span>
+              </span>
+            </span>
+            <span style="color:#9ca3af;font-size:18px;font-weight:800;margin-top:18px;flex-shrink:0;">✈</span>
+            <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
+              <span style="font-size:9px;color:#6b7280;font-weight:600;">Destino</span>
+              <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#fef3c7;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
+                <span>${tramo.destino}</span>
+                <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aDestino ? `${aDestino.ciudad}, ${aDestino.pais}` : ''}</span>
+              </span>
+            </span>
           </div>
           <div style="display:flex;justify-content:space-between;gap:12px;">
             <div style="flex:1;background:white;padding:8px;border-radius:6px;"><div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Sale</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${saleD}</div></div>
@@ -1538,38 +1634,70 @@ export default function SimulacionPeriodo() {
       `;
     }
 
-    function generarVistaMonitoreo() {
+    function generarTimelineMonitoreo() {
       const latestFe = getLatestFe();
       const tramos = rc.tramos || [];
       const tramoActual = latestFe.tramoOrden;
 
-      const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending' }[] = [];
-      aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'done' });
+      const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending'; sale?: string; llega?: string }[] = [];
+      aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'pending' });
       tramos.forEach(tramo => {
-        const state = tramo.orden < tramoActual ? 'done' : tramo.orden === tramoActual ? 'active' : 'pending';
         const last = aeropuertosRuta[aeropuertosRuta.length - 1];
-        if (last.codigo !== tramo.destino) aeropuertosRuta.push({ codigo: tramo.destino, nombre: getUbicacion(tramo.destino), state });
+        if (last.codigo !== tramo.destino) {
+          const saleTime = (tramo.sale || '').split(' ')[1] || '';
+          const llegaTime = (tramo.llega || '').split(' ')[1] || '';
+          aeropuertosRuta.push({ codigo: tramo.destino, nombre: getUbicacion(tramo.destino), state: 'pending', sale: saleTime, llega: llegaTime });
+        }
       });
+
+      // Marcar según estado del vuelo
+      if (tramoActual && tramoActual > 0) {
+        const originIdx = tramoActual - 1;
+        const destIdx = tramoActual;
+        if (latestFe?.done) {
+          // Llegó al destino (layover o final): solo el aeropuerto actual
+          if (aeropuertosRuta[destIdx]) aeropuertosRuta[destIdx].state = 'active';
+        } else {
+          // En vuelo: origen + destino del tramo activo
+          if (aeropuertosRuta[originIdx]) aeropuertosRuta[originIdx].state = 'active';
+          if (aeropuertosRuta[destIdx]) aeropuertosRuta[destIdx].state = 'active';
+        }
+      } else {
+        // Sin vuelo iniciado: solo el origen
+        aeropuertosRuta[0].state = 'active';
+      }
 
       const timelineHtml = aeropuertosRuta.map((ap, i) => {
         const isLast = i === aeropuertosRuta.length - 1;
         const colors = ap.state === 'done' ? { dot: '#16a34a', bg: 'rgba(34,197,94,0.12)', border: '#16a34a', label: '#16a34a', line: '#16a34a' }
           : ap.state === 'active' ? { dot: '#2564eb', bg: 'rgba(37,100,235,0.1)', border: '#2564eb', label: '#2564eb', line: '#2564eb' }
           : { dot: '#d1d5db', bg: '#f9fafb', border: '#e5e7eb', label: '#9ca3af', line: '#d1d5db' };
+        const saleStr = ap.sale ? `<span style="font-size:9px;color:#16a34a;font-weight:600;margin-left:auto;">Sale ${ap.sale}</span>` : '';
+        const llegaStr = ap.llega ? `<span style="font-size:9px;color:#2564eb;font-weight:600;margin-left:6px;">Llega ${ap.llega}</span>` : '';
         return `
           <div style="display:flex;flex-direction:column;align-items:center;">
             <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${colors.bg};border:1px solid ${colors.border};width:100%;box-sizing:border-box;">
               <div style="width:12px;height:12px;border-radius:50%;background:${colors.dot};flex-shrink:0;${ap.state === 'active' ? 'box-shadow:0 0 0 3px rgba(37,100,235,0.2);' : ''}"></div>
-              <div style="flex:1;">
-                <div style="font-size:11px;color:#1f2937;font-weight:700;">${ap.nombre}</div>
-                <div style="font-size:10px;color:${colors.label};font-weight:600;">${ap.codigo}${ap.state === 'active' ? ' ● Actual' : ''}</div>
+              <div style="flex:1;display:flex;align-items:center;gap:6px;">
+                <div>
+                  <div style="font-size:11px;color:#1f2937;font-weight:700;">${ap.nombre}</div>
+                  <div style="font-size:10px;color:${colors.label};font-weight:600;">${ap.codigo}${ap.state === 'active' ? ' ● Actual' : ''}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:2px;margin-left:auto;">${saleStr}${llegaStr}</div>
               </div>
             </div>
             ${!isLast ? `<div style="width:2px;height:20px;background:${colors.line};margin:2px 0;border-radius:1px;"></div>` : ''}
           </div>`;
       }).join('');
 
-      const restMin = Math.max(0, latestFe.minutosFin - currentMinSimRef.current);
+      return { timelineHtml, aeropuertosRuta };
+    }
+
+    function generarVistaMonitoreo() {
+      const latestFe = getLatestFe();
+      const { timelineHtml } = generarTimelineMonitoreo();
+
+      const restMin = Math.max(0, Math.floor(latestFe.minutosFin - currentMinSimRef.current));
       const restHH = Math.floor(restMin / 60);
       const restMM = restMin % 60;
       const tiempoRestante = restMin > 0 ? `${restHH}h ${restMM}m` : 'Completado';
@@ -1627,36 +1755,9 @@ export default function SimulacionPeriodo() {
       if (!container) return;
 
       const latestFe = getLatestFe();
-      const tramos = rc.tramos || [];
-      const tramoActual = latestFe.tramoOrden;
+      const { timelineHtml } = generarTimelineMonitoreo();
 
-      const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending' }[] = [];
-      aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'done' });
-      tramos.forEach(tramo => {
-        const state = tramo.orden < tramoActual ? 'done' : tramo.orden === tramoActual ? 'active' : 'pending';
-        const last = aeropuertosRuta[aeropuertosRuta.length - 1];
-        if (last.codigo !== tramo.destino) aeropuertosRuta.push({ codigo: tramo.destino, nombre: getUbicacion(tramo.destino), state });
-      });
-
-      const timelineHtml = aeropuertosRuta.map((ap, i) => {
-        const isLast = i === aeropuertosRuta.length - 1;
-        const colors = ap.state === 'done' ? { dot: '#16a34a', bg: 'rgba(34,197,94,0.12)', border: '#16a34a', label: '#16a34a', line: '#16a34a' }
-          : ap.state === 'active' ? { dot: '#2564eb', bg: 'rgba(37,100,235,0.1)', border: '#2564eb', label: '#2564eb', line: '#2564eb' }
-          : { dot: '#d1d5db', bg: '#f9fafb', border: '#e5e7eb', label: '#9ca3af', line: '#d1d5db' };
-        return `
-          <div style="display:flex;flex-direction:column;align-items:center;">
-            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${colors.bg};border:1px solid ${colors.border};width:100%;box-sizing:border-box;">
-              <div style="width:12px;height:12px;border-radius:50%;background:${colors.dot};flex-shrink:0;${ap.state === 'active' ? 'box-shadow:0 0 0 3px rgba(37,100,235,0.2);' : ''}"></div>
-              <div style="flex:1;">
-                <div style="font-size:11px;color:#1f2937;font-weight:700;">${ap.nombre}</div>
-                <div style="font-size:10px;color:${colors.label};font-weight:600;">${ap.codigo}${ap.state === 'active' ? ' ● Actual' : ''}</div>
-              </div>
-            </div>
-            ${!isLast ? `<div style="width:2px;height:20px;background:${colors.line};margin:2px 0;border-radius:1px;"></div>` : ''}
-          </div>`;
-      }).join('');
-
-      const restMin = Math.max(0, latestFe.minutosFin - currentMinSimRef.current);
+      const restMin = Math.max(0, Math.floor(latestFe.minutosFin - currentMinSimRef.current));
       const restHH = Math.floor(restMin / 60);
       const restMM = restMin % 60;
       const tiempoRestante = restMin > 0 ? `${restHH}h ${restMM}m` : 'Completado';
@@ -1726,14 +1827,45 @@ export default function SimulacionPeriodo() {
   const OVERSCAN = 5;
 
   const vuelosFiltrados = useMemo(() => {
-    return vuelosGlobales.filter(vuelo => {
+    const sorted = vuelosGlobales.filter(vuelo => {
       const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, extraerHHMM(vuelo.salida));
       const matchCodigo = filterCodigo === '' || codigoVuelo.toLowerCase().includes(filterCodigo.toLowerCase());
       const matchOrigen = filterOrigen === '' || vuelo.origen.toLowerCase().includes(filterOrigen.toLowerCase());
       const matchDestino = filterDestino === '' || vuelo.destino.toLowerCase().includes(filterDestino.toLowerCase());
       return matchCodigo && matchOrigen && matchDestino;
     });
-  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino]);
+
+    const simStart = sim.simStartDateRef.current;
+    const feRef = flightEventsRef.current;
+
+    sorted.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'salida') {
+        cmp = a.salida.localeCompare(b.salida);
+      } else if (sortBy === 'llegada') {
+        cmp = a.llegada.localeCompare(b.llegada);
+      } else if (sortBy === 'origen') {
+        cmp = a.origen.localeCompare(b.origen);
+      } else if (sortBy === 'destino') {
+        cmp = a.destino.localeCompare(b.destino);
+      } else if (sortBy === 'ocupacion') {
+        const getOcup = (v: typeof a) => {
+          if (!simStart) return -1;
+          const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
+          let d = new Date(simStart); d.setHours(hh, mm, 0, 0);
+          while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
+          const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
+          const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && e.minutosInicio === minInicio);
+          if (!fe || fe.key.startsWith('unused-')) return -1;
+          if (fe.capacidadVuelo > 0) return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
+          return 0;
+        };
+        cmp = getOcup(a) - getOcup(b);
+      }
+      return sortDir === 'desc' ? -cmp : cmp;
+    });
+    return sorted;
+  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick]);
 
   const totalHeight = vuelosFiltrados.length * ITEM_HEIGHT;
   const startIdx = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
@@ -2297,7 +2429,9 @@ export default function SimulacionPeriodo() {
         </div>
 
         {/* Barra de Progreso — Izquierda Superior */}
-        <div style={{ position: 'absolute', top: 710, left:12, width: 'auto', maxWidth: 140, backgroundColor: 'rgba(255,255,255,0.92)', padding: '8px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', pointerEvents: 'auto', zIndex: 999998 }}>
+        <div style={{ position: 'absolute', bottom: 130, left:12, minWidth: 160, backgroundColor: 'rgba(255,255,255,0.92)', padding: '8px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', pointerEvents: 'auto', zIndex: 999998 }}>
+          <div style={{ fontSize: 9, color: '#6b7280', marginBottom: 2, textAlign: 'center', fontWeight: 600 }}>🕐 {horaActual}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#059669', marginBottom: 6, textAlign: 'center' }}>⏱ {stopwatch}</div>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 4, textTransform: 'uppercase' }}>Progreso de Simulación</div>
 
           {/* Barra GA (iteraciones) */}
@@ -2429,7 +2563,10 @@ export default function SimulacionPeriodo() {
                 `}</style>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                   <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</h3>
-                  <button onClick={() => setFiltersOpen(false)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: 'var(--text-secondary)' }}>×</button>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button onClick={() => { setFilterCodigo(''); setFilterOrigen(''); setFilterDestino(''); setSortBy('salida'); setSortDir('asc'); }} style={{ background: 'none', border: 'none', fontSize: '11px', cursor: 'pointer', color: 'var(--danger-red)', padding: '2px 4px', fontWeight: 600 }}>✕ Borrar</button>
+                    <button onClick={() => setFiltersOpen(false)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: 'var(--text-secondary)' }}>×</button>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div>
@@ -2458,15 +2595,36 @@ export default function SimulacionPeriodo() {
                       ))}
                     </select>
                   </div>
+                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Ordenar por</label>
+                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
+                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box', cursor: 'pointer', marginBottom: '4px' }}>
+                      <option value="salida">Hora de salida</option>
+                      <option value="llegada">Hora de llegada</option>
+                      <option value="origen">Origen</option>
+                      <option value="destino">Destino</option>
+                      <option value="ocupacion">Nivel de ocupación</option>
+                    </select>
+                    <button onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                      style={{ padding: '4px 8px', fontSize: '11px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '3px', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {sortDir === 'asc' ? '↑ Ascendente' : '↓ Descendente'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
           </div>
           {/* Virtual Scroll Container */}
           <div ref={scrollContainerRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '12px', minHeight: 0 }}>
-            {vuelosFiltrados.length === 0 ? (
+            {sim.isRunning && sim.iteracion === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                <span style={{ display: 'inline-block', width: '20px', height: '20px', border: '3px solid rgba(59,130,246,0.3)', borderRadius: '50%', borderTopColor: '#3b82f6', animation: 'algo-spin-vuelos 1s linear infinite' }}></span>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-blue)' }}>Configurando algoritmo...</span>
+                <style>{`@keyframes algo-spin-vuelos { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            ) : vuelosFiltrados.length === 0 ? (
               <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
-                ⏳ Esperando planificación del GA...
+                <span>⏳ Esperando planificación del GA...</span>
               </div>
             ) : (
               <div style={{ height: totalHeight, paddingTop: offsetY, boxSizing: 'border-box' }}>
@@ -2476,8 +2634,41 @@ export default function SimulacionPeriodo() {
                   const llegadaHHMM = extraerHHMM(vuelo.llegada);
                   const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, salidaHHMM);
                   const claveVuelo = getClaveVuelo(vuelo);
-                  const esCancelado = sim.cancelledFlights.has(claveVuelo);
+                  const esCancelado = sim.cancelledFlights.has(claveVuelo) || canceledLocallyRef.current.has(claveVuelo);
                   const esCancelling = cancellingFlights.has(claveVuelo);
+                  // Buscar FlightEvent activo para obtener ocupación y detectar sin uso
+                  let pctOcupacion = -1;
+                  let ocupColor = '';
+                  let esSinUso = false;
+                  const simStartOcc = sim.simStartDateRef.current;
+                  if (simStartOcc) {
+                    const [hh, mm] = salidaHHMM.split(':').map(Number);
+                    let d = new Date(simStartOcc); d.setHours(hh, mm, 0, 0);
+                    while (d.getTime() < simStartOcc.getTime()) d.setDate(d.getDate() + 1);
+                    const minInicio = Math.round((d.getTime() - simStartOcc.getTime()) / 60000);
+                    let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio);
+                    if (!fe) {
+                      for (const ruta of rutasPlanificadasRef.current.values()) {
+                        const tramo = (ruta.tramos || []).find(t => t.origen === vuelo.origen && t.destino === vuelo.destino);
+                        if (tramo) {
+                          fe = flightEventsRef.current.find(e => e.key.includes(`${ruta.idEnvio}`) && e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino);
+                          if (fe) break;
+                          fe = { key: 'synthetic', tramoOrden: 1, origenCode: vuelo.origen, destinoCode: vuelo.destino, planVueloRuta: [vuelo.origen, vuelo.destino], planVueloTipo: 'Directo', latOrigen: 0, lngOrigen: 0, latDestino: 0, lngDestino: 0, minutosInicio: minInicio, minutosFin: minInicio, maletasVuelo: tramo.maletasVuelo ?? 0, capacidadVuelo: tramo.capacidadVuelo ?? 0, ocupacionAlmacenOrigen: 0, capacidadAlmacenOrigen: 0, ocupacionAlmacenDestino: 0, capacidadAlmacenDestino: 0 };
+                          break;
+                        }
+                      }
+                    }
+                    esSinUso = !fe || fe.key.startsWith('unused-');
+                    if (fe && !esSinUso) {
+                      if (fe.capacidadVuelo > 0) {
+                        pctOcupacion = (fe.maletasVuelo / fe.capacidadVuelo) * 100;
+                        ocupColor = pctOcupacion < 50 ? '#22c55e' : pctOcupacion < 80 ? '#f97316' : '#ef4444';
+                      } else {
+                        pctOcupacion = 0;
+                        ocupColor = '#2563eb';
+                      }
+                    }
+                  }
                   return (
                     <div
                       key={`${vuelo.origen}-${vuelo.destino}-${salidaHHMM}-${realIdx}`}
@@ -2528,12 +2719,17 @@ export default function SimulacionPeriodo() {
                             Cancelado
                           </span>
                         )}
+                        {esSinUso && !esCancelado && (
+                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
+                            Sin uso
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 500 }}>
                         {vuelo.origen} → {vuelo.destino}
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', flex: 1 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', flex: 1 }}>
                           <div>
                             <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Salida</div>
                             <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{salidaHHMM}</div>
@@ -2542,6 +2738,12 @@ export default function SimulacionPeriodo() {
                             <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Llegada</div>
                             <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{llegadaHHMM}</div>
                           </div>
+                          {pctOcupacion >= 0 && (
+                            <div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Ocup.</div>
+                              <div style={{ fontSize: '11px', fontWeight: 700, color: ocupColor }}>{pctOcupacion.toFixed(1)}%</div>
+                            </div>
+                          )}
                         </div>
                         {!esCancelado && !esCancelling && (
                           <button
@@ -2613,6 +2815,14 @@ export default function SimulacionPeriodo() {
                 </span>
               </div>
 
+              {sim.isRunning && sim.iteracion === 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px' }}>
+                  <span style={{ display: 'inline-block', width: '20px', height: '20px', border: '3px solid rgba(59,130,246,0.3)', borderRadius: '50%', borderTopColor: '#3b82f6', animation: 'algo-spin-registro 1s linear infinite' }}></span>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-blue)' }}>Configurando algoritmo...</span>
+                  <style>{`@keyframes algo-spin-registro { to { transform: rotate(360deg); } }`}</style>
+                </div>
+              ) : (
+                <>
               <div 
                 ref={logsContainerRef}
                 style={{ maxHeight: 350, overflowY: 'auto' }}
@@ -2628,6 +2838,8 @@ export default function SimulacionPeriodo() {
                   </div>
                 ))}
               </div>
+                </>
+              )}
 
               {/* Botón Reanudar */}
               {isLogsPaused && (

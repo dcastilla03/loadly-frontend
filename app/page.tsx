@@ -19,59 +19,13 @@ export default function Home() {
           
           {/* Botón Nueva Simulación */}
           <div style={{ marginBottom: '28px' }}>
-            <button className="btn btn-primary" onClick={() => window.abrirModalSimulacion()}>
-              ⚙️ Nueva Simulación
-            </button>
-          </div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            <a href="/registro-maletas" style={{ textDecoration: 'none' }}>
-              <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid var(--border-color)' }} onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-blue)'; }} onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}>
-                <div style={{ fontSize: '32px', marginBottom: '8px' }}>📦</div>
-                <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>Registrar Maletas</div>
-              </div>
-            </a>
-            <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid var(--border-color)' }} onClick={() => window.abrirModalSimulacion()} onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-blue)'; }} onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}>
-              <div style={{ fontSize: '32px', marginBottom: '8px' }}>⚙️</div>
-              <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>Simulador</div>
-            </div>
-            <a href="/rastreo" style={{ textDecoration: 'none' }}>
-              <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid var(--border-color)' }} onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-blue)'; }} onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}>
-                <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔍</div>
-                <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>Rastreo</div>
-              </div>
-            </a>
-            <a href="/gestion-vuelos" style={{ textDecoration: 'none' }}>
-              <div style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid var(--border-color)' }} onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-secondary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-blue)'; }} onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}>
-                <div style={{ fontSize: '32px', marginBottom: '8px' }}>✈️</div>
-                <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>Gestión de Vuelos</div>
-              </div>
-            </a>
           </div>
         </div>
 
-        {/* Estadísticas Rápidas */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px', marginTop: '50px', marginBottom: '40px' }}>
-          <div className="stat-card">
-            <h3>Maletas en Sistema</h3>
-            <div className="value">2,458</div>
-          </div>
-          <div className="stat-card">
-            <h3>Vuelos Activos</h3>
-            <div className="value">42</div>
-          </div>
-          <div className="stat-card">
-            <h3>Almacenes</h3>
-            <div className="value">15</div>
-          </div>
-          <div className="stat-card">
-            <h3>Puntualidad</h3>
-            <div className="value">98.5%</div>
-          </div>
-        </div>
+        
 
         {/* Información Rápida */}
-        <div className="card fade-in">
+        <div className="card fade-in" style={{ marginTop: '28px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '20px', color: 'var(--text-primary)' }}>
             ℹ️ Información del Sistema
           </h2>
@@ -79,9 +33,9 @@ export default function Home() {
             <div>
               <strong style={{ color: 'var(--text-primary)' }}>Cobertura Global:</strong>
               <ul style={{ marginTop: '8px', marginLeft: '16px' }}>
-                <li>✓ América: Lima, Miami, São Paulo, México, NY, Atlanta</li>
-                <li>✓ Europa: Frankfurt, Madrid, Londres, París, Ámsterdam</li>
-                <li>✓ Asia: Tokio, Singapur, Hong Kong, Dubái, Bangkok</li>
+                <li>✓ América</li>
+                <li>✓ Europa</li>
+                <li>✓ Asia</li>
               </ul>
             </div>
             <div>

@@ -76,7 +76,6 @@ export const Sidebar: React.FC<SidebarProps> = () => {
   ];
 
   const navItemsAfterSimulations = [
-    { href: '/rastreo', icon: '🔍', label: 'Rastreo' },
     { href: '/gestion-vuelos', icon: '✈️', label: 'Gestión de Vuelos' },
     { href: '/almacenes', icon: '🏭', label: 'Almacenes' },
   ];
@@ -118,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = () => {
             onClick={toggleSimulations}
           >
             <span className="nav-icon">⚙️</span>
-            <span className="nav-text">Simulador</span>
+            <span className="nav-text">Escenarios</span>
             <span className="nav-expand-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="6 9 12 15 18 9"></polyline>

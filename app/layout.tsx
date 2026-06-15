@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import './globals.css';
 import { Sidebar } from '../components/Sidebar';
 import { ProtectedRoute } from '../components/ProtectedRoute';
+import { SimulationProvider } from './SimulationContext';
 
 declare global {
   interface Window {
@@ -138,8 +139,11 @@ export default function RootLayout({
         <ProtectedRoute>
           {pathname !== '/login' && <Sidebar />}
 
+          {/* SimulationProvider mantiene la simulación activa al navegar entre páginas */}
+          <SimulationProvider startDate={startDate} startTime={startTime}>
           {/* Contenido Principal */}
           {children}
+          </SimulationProvider>
 
         {/* Modal del Wizard de Simulación */}
         <div 

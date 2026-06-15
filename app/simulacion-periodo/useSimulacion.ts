@@ -389,7 +389,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     });
   }, []);
 
-  const iniciar = useCallback(() => {
+  const iniciar = useCallback((customStartDate?: string, customStartTime?: string) => {
     if (esRef.current) esRef.current.close();
     setIsRunning(true);
     setAllFlightEvents([]);
@@ -443,13 +443,14 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     let fin = '20270107-00-00';
     let simStart = new Date(2027, 0, 2, 0, 0, 0, 0);
 
-    if (startDate) {
-      const [year, month, day] = startDate.split('-');
+    const sd = customStartDate || startDate;
+    const st = customStartTime || startTime;
+    if (sd) {
+      const [year, month, day] = sd.split('-');
 
-      // Parse startTime (formato HH:MM)
       let hour = 0, minute = 0;
-      if (startTime) {
-        const [h, m] = startTime.split(':').map(Number);
+      if (st) {
+        const [h, m] = st.split(':').map(Number);
         hour = h || 0;
         minute = m || 0;
       }

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { useSimulacion, FlightEvent, LogEvent, SIM_CONFIG, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha } from './useSimulacion';
+import { useSimulacion, FlightEvent, LogEvent, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha } from './useSimulacion';
+import { useSimulationContext } from '../SimulationContext';
 
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
@@ -91,36 +92,33 @@ export default function SimulacionPeriodo() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInst = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
+  const [mapReady, setMapReady] = useState(false);
 
-  // Estado dinámico de almacenes: codigo → {ocupacion, capacidad}
-  const airportStateRef = useRef<Map<string, { ocupacion: number; capacidad: number }>>(new Map());
+  const ctx = useSimulationContext();
+  const sim = ctx.sim;
+  const airportStateRef = ctx.airportStateRef;
+  const flightEventsRef = ctx.flightEventsRef;
+  const cancelledFlightsRef = ctx.cancelledFlightsRef;
+  const panelFlightKeyRef = ctx.panelFlightKeyRef;
+  const logEventsRef = ctx.logEventsRef;
+  const addLogRef = ctx.addLogRef;
+  const currentMinSimRef = ctx.currentMinSimRef;
+  const clockStateRef = ctx.clockStateRef;
+  const lastFrameTimeRef = ctx.lastFrameTimeRef;
+  const lastIteracionRef = ctx.lastIteracionRef;
+  const emptyFlightsAddedRef = ctx.emptyFlightsAddedRef;
+  const canceledLocallyRef = ctx.canceledLocallyRef;
+  const suppressedTramosRef = ctx.suppressedTramosRef;
 
-  // Lista viva de FlightEvent (con svgElement adjunto cuando están activos)
-  const flightEventsRef = useRef<FlightEvent[]>([]);
-  const cancelledFlightsRef = useRef<Set<string>>(new Set());
-  const panelFlightKeyRef = useRef<string | null>(null);
-
-  // Lista viva de LogEvent temporizados (se disparan al compas del cronómetro)
-  const logEventsRef = useRef<LogEvent[]>([]);
-
-  // Ref estable a addLog (evita problemas de closure en el loop de animación)
-  const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => { });
-
-  // Refs para el nuevo control de tiempo
-  const currentMinSimRef = useRef<number>(0);
-  const clockStateRef = useRef<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
-  const lastFrameTimeRef = useRef<number>(0);
-  const lastIteracionRef = useRef<number>(0);
-
-  const [clockState, setClockState] = useState<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
-  const [configCountdown, setConfigCountdown] = useState(60);
+  const calcStartedAtRef = ctx.calcStartedAtRef;
+  const configCountdownRef = ctx.configCountdownRef;
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [flightPanelOpen, setFlightPanelOpen] = useState(false);
   const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Configuration wizard state
-  const [showConfigOverlay, setShowConfigOverlay] = useState(true);
+  const [showConfigOverlay, setShowConfigOverlay] = useState(!sim.isRunning);
   const [configWizardStep, setConfigWizardStep] = useState(1);
   const [configStartDate, setConfigStartDate] = useState('');
   const [configStartTime, setConfigStartTime] = useState('00:00');
@@ -128,8 +126,12 @@ export default function SimulacionPeriodo() {
   const [showStoppedOverlay, setShowStoppedOverlay] = useState(false);
 
   // Minutos simulados actuales (para mostrar en UI)
-  const [simMinutos, setSimMinutos] = useState(0);
-  const clockEnabledRef = useRef(false);
+  const [simMinutos, setSimMinutos] = useState(() => Math.floor(currentMinSimRef.current));
+
+  // Al montar, resetear lastFrameTimeRef para evitar salto de tiempo
+  useEffect(() => {
+    lastFrameTimeRef.current = performance.now();
+  }, []);
 
   // Hora real del sistema (momento presente)
   const [horaActual, setHoraActual] = useState('');
@@ -156,30 +158,11 @@ export default function SimulacionPeriodo() {
     }
   }, []);
 
-  const sim = useSimulacion(startDate || undefined, startTime || undefined);
+  // sim se obtiene de SimulationContext (arriba vía useSimulationContext)
 
-  // Cronómetro de tiempo real transcurrido (stopwatch)
-  const stopwatchStartRef = useRef<number | null>(null);
+  // Cronómetro de tiempo real transcurrido (stopwatch) — se actualiza en el render loop
   const [stopwatch, setStopwatch] = useState('00:00');
-  useEffect(() => {
-    if (sim.isRunning && sim.iteracion > 0 && stopwatchStartRef.current === null) {
-      stopwatchStartRef.current = performance.now();
-    }
-    if (!sim.isRunning) {
-      stopwatchStartRef.current = null;
-      setStopwatch('00:00');
-      return;
-    }
-    if (stopwatchStartRef.current === null) return;
-    const id = setInterval(() => {
-      const elapsed = performance.now() - stopwatchStartRef.current!;
-      const totalSec = Math.floor(elapsed / 1000);
-      const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
-      const s = String(totalSec % 60).padStart(2, '0');
-      setStopwatch(`${m}:${s}`);
-    }, 1000);
-    return () => clearInterval(id);
-  }, [sim.isRunning, sim.iteracion]);
+  const lastStopwatchLabelRef = useRef('');
 
   // Detectar estado del sidebar desde localStorage
   useEffect(() => {
@@ -221,7 +204,6 @@ export default function SimulacionPeriodo() {
   const [filterPosition, setFilterPosition] = useState({ top: 0, left: 0 });
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const [cancellingFlights, setCancellingFlights] = useState<Set<string>>(new Set());
-  const canceledLocallyRef = useRef<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(600);
@@ -247,7 +229,6 @@ export default function SimulacionPeriodo() {
   const aeropuertoInfoRef = useRef<Map<number, { codigo: string; gmt: number }>>(new Map());
 
   // ── Vuelos vacíos (no usados) de la BD ───────────────────────────────────
-  const emptyFlightsAddedRef = useRef<Set<string>>(new Set());
 
   function crearEmptyFlightEvent(flight: any, simStartDate: Date): FlightEvent | null {
     const infoOri = aeropuertoInfoRef.current.get(flight.idAeropuertoOrigen);
@@ -469,53 +450,10 @@ export default function SimulacionPeriodo() {
 
   // Iniciar simulación automáticamente cuando tenemos la fecha y la configuración está completa
   useEffect(() => {
-    if (startDate && !showConfigOverlay && !isInitialized.current) {
-      sim.iniciar();
-      isInitialized.current = true;
-      // El reloj se iniciará cuando iteracion > 0
+    if (startDate && !showConfigOverlay && !sim.isRunning) {
+      sim.iniciar(startDate, startTime || undefined);
     }
-  }, [startDate, showConfigOverlay, sim.iniciar]);
-
-  useEffect(() => {
-    if (sim.isRunning && sim.iteracion === 0) {
-      clockEnabledRef.current = false;
-      currentMinSimRef.current = 0;
-      lastFrameTimeRef.current = 0;
-      clockStateRef.current = 'CALCULANDO';
-      setClockState('CALCULANDO');
-      setSimMinutos(0);
-    }
-
-    if (sim.iteracion > 0 && !clockEnabledRef.current) {
-      clockEnabledRef.current = true;
-      clockStateRef.current = 'VISUALIZANDO';
-      setClockState('VISUALIZANDO');
-      lastFrameTimeRef.current = performance.now();
-    }
-  }, [sim.isRunning, sim.iteracion]);
-
-  // ── Controlar estados del cronómetro por iteración ───────────────
-  useEffect(() => {
-    if (sim.isRunning && sim.iteracion === 0) {
-      lastIteracionRef.current = 0;
-
-      setConfigCountdown(60);
-      const interval = setInterval(() => {
-        setConfigCountdown(prev => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(interval);
-    } else if (sim.isRunning && sim.iteracion === 1 && lastIteracionRef.current === 0) {
-      lastIteracionRef.current = 1;
-    } else if (sim.isRunning && sim.iteracion > lastIteracionRef.current) {
-      lastIteracionRef.current = sim.iteracion;
-    }
-  }, [sim.isRunning, sim.iteracion]);
+  }, [startDate, startTime, showConfigOverlay, sim.iniciar, sim.isRunning]);
 
   // ── Inicializar mapa ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -540,6 +478,7 @@ export default function SimulacionPeriodo() {
           noWrap: true,
         }).addTo(map);
         mapInst.current = map;
+        setMapReady(true);
       } catch (error) {
         console.error('Error inicializando mapa:', error);
       }
@@ -550,6 +489,7 @@ export default function SimulacionPeriodo() {
         mapInst.current.remove();
         mapInst.current = null;
       }
+      setMapReady(false);
     };
   }, []);
 
@@ -621,85 +561,7 @@ export default function SimulacionPeriodo() {
 
     // Exponer actualizarIconoAlmacen para usarlo desde spawnAvion/removeAvion
     (mapInst.current as any)._actualizarIconoAlmacen = actualizarIconoAlmacen;
-  }, [sim.aeropuertos]);
-
-  // ── Sincronizar flightEvents del hook → ref local ─────────────────────────
-  // El hook acumula FlightEvents con state; los copiamos a un ref para
-  // accederlos desde el loop de animación sin cierres obsoletos.
-  useEffect(() => {
-    // Añadimos solo los eventos nuevos (los que no están en la ref todavía)
-    const existingKeys = new Set(flightEventsRef.current.map(e => e.key));
-    const nuevos = sim.allFlightEvents.filter(e => !existingKeys.has(e.key));
-    if (nuevos.length > 0) {
-      flightEventsRef.current = [...flightEventsRef.current, ...nuevos];
-    }
-  }, [sim.allFlightEvents]);
-
-  // ── Sincronizar logEvents del hook → ref local ────────────────────────────
-  useEffect(() => {
-    if (sim.allLogEvents.length === 0) {
-      // Reset al reiniciar la simulación
-      logEventsRef.current = [];
-      return;
-    }
-    const nuevos = sim.allLogEvents.slice(logEventsRef.current.length);
-    if (nuevos.length > 0) {
-      logEventsRef.current = [...logEventsRef.current, ...nuevos];
-    }
-  }, [sim.allLogEvents]);
-
-  // ── Sincronizar cancelledFlights del hook → ref local ─────────────────────
-  useEffect(() => {
-    cancelledFlightsRef.current = sim.cancelledFlights;
-    const simStart = sim.simStartDateRef.current;
-    if (!simStart) return;
-    // Marcar como done los FlightEvent inactivos que ya fueron cancelados
-    sim.cancelledFlights.forEach((key: string) => {
-      const parts = key.split('-');
-      if (parts.length < 3) return;
-      const orig = parts[0], dest = parts[1];
-      const [h, m] = parts[2].split(':').map(Number);
-      const keyMinutosDelDia = h * 60 + m;
-      const fe = flightEventsRef.current.find(e => {
-        if (e.origenCode !== orig || e.destinoCode !== dest || e.active) return false;
-        const depDate = new Date(simStart.getTime() + e.minutosInicio * 60000);
-        const apt = sim.aeropuertosRef.current.get(e.origenCode);
-        const offset = apt?.gmt ?? 0;
-        const gmtHour = depDate.getHours();
-        const gmtMin = depDate.getMinutes();
-        const localMinutosDelDia = ((gmtHour + offset) % 24 + 24) % 24 * 60 + gmtMin;
-        return localMinutosDelDia === keyMinutosDelDia;
-      });
-      if (fe) fe.done = true;
-    });
-  }, [sim.cancelledFlights]);
-
-  // ── Suprimir FlightEvents y LogEvents de envíos afectados por cancelación ──
-  const suppressedTramosRef = useRef<Map<string, { minTramoOrden: number; iteracionIdx: number }>>(new Map());
-  useEffect(() => {
-    suppressedTramosRef.current = sim.suppressedTramos;
-    if (sim.suppressedTramos.size === 0) return;
-    sim.suppressedTramos.forEach((info, idEnvio) => {
-      for (const fe of flightEventsRef.current) {
-        const feIdEnvio = fe.key.split('-')[0];
-        if (feIdEnvio !== idEnvio || fe.tramoOrden < info.minTramoOrden || fe.active) continue;
-        const m = fe.key.match(/iter(\d+)/);
-        if (m && parseInt(m[1]) === info.iteracionIdx) {
-          fe.done = true;
-        }
-      }
-      for (const le of logEventsRef.current) {
-        if (le.idEnvio === idEnvio && le.tramoOrden !== undefined && le.tramoOrden >= info.minTramoOrden) {
-          le.fired = true;
-        }
-      }
-    });
-  }, [sim.suppressedTramos]);
-
-  // ── Mantener addLogRef siempre apuntando a la función actual ──────────────
-  useEffect(() => {
-    addLogRef.current = sim.addLog;
-  }, [sim.addLog]);
+  }, [sim.aeropuertos, mapReady]);
 
   // ── Calcular métricas en tiempo real (memoizado para renderizado eficiente) ───
   const metricas = useMemo(() => {
@@ -759,13 +621,14 @@ export default function SimulacionPeriodo() {
 
 
 
-  // ── Cronómetro + Loop de animación ───────────────────────────────────────
+  // ── Loop de renderizado en mapa (solo SVG, sin lógica de tiempo) ────────
+  // El motor de simulación (tiempo + ciclo de vida FlightEvents) corre en SimulationContext
   useEffect(() => {
     let frameId: number;
     let checkInterval: ReturnType<typeof setInterval> | null = null;
     let started = false;
 
-    function spawnAvion(fe: FlightEvent, map: any) {
+    function spawnAvionRender(fe: FlightEvent, map: any) {
       const L = require('leaflet');
       const path = bezierCurve(
         [fe.latOrigen, fe.lngOrigen],
@@ -800,7 +663,6 @@ export default function SimulacionPeriodo() {
       fe.svgElement = svgEl;
       fe.airplaneGroup = grp;
       fe.airplaneImage = img;
-      fe.active = true;
 
       // Click → panel de detalle del avión (tramo de vuelo)
       img.addEventListener('click', (ev: any) => {
@@ -808,42 +670,33 @@ export default function SimulacionPeriodo() {
         mostrarPanelAvion(fe);
       });
 
-      // Actualizar almacén de origen al salir
-      airportStateRef.current.set(fe.origenCode, {
-        ocupacion: fe.ocupacionAlmacenOrigen,
-        capacidad: fe.capacidadAlmacenOrigen,
-      });
+      // Actualizar icono almacén de origen
       const origPct = fe.capacidadAlmacenOrigen > 0 ? (fe.ocupacionAlmacenOrigen / fe.capacidadAlmacenOrigen) * 100 : 0;
       const origMarker = markersRef.current.find((m: any) => m.airportCode === fe.origenCode);
-      if (origMarker) (mapInst.current as any)?._actualizarIconoAlmacen?.(origMarker, origPct);
+      const mapAny = mapInst.current as any;
+      if (origMarker && mapAny._actualizarIconoAlmacen) mapAny._actualizarIconoAlmacen(origMarker, origPct);
 
-      // (path se adjunta inline en el avión para el loop)
       (fe as any)._path = path;
       (fe as any)._lastColorBucket = -1;
     }
 
-    function removeAvion(fe: FlightEvent) {
+    function removeAvionRender(fe: FlightEvent) {
       if (fe.svgElement) {
         try { fe.svgElement.remove(); } catch (_) { }
         fe.svgElement = undefined;
         fe.airplaneGroup = undefined;
         fe.airplaneImage = undefined;
       }
-      fe.active = false;
-      fe.done = true;
 
       if (panelFlightKeyRef.current === fe.key) {
         cerrarPanelAvion(fe.key);
       }
 
-      // Actualizar almacén de destino al llegar
-      airportStateRef.current.set(fe.destinoCode, {
-        ocupacion: fe.ocupacionAlmacenDestino,
-        capacidad: fe.capacidadAlmacenDestino,
-      });
+      // Actualizar icono almacén de destino
       const destPct = fe.capacidadAlmacenDestino > 0 ? (fe.ocupacionAlmacenDestino / fe.capacidadAlmacenDestino) * 100 : 0;
       const destMarker = markersRef.current.find((m: any) => m.airportCode === fe.destinoCode);
-      if (destMarker) (mapInst.current as any)?._actualizarIconoAlmacen?.(destMarker, destPct);
+      const mapAny = mapInst.current as any;
+      if (destMarker && mapAny._actualizarIconoAlmacen) mapAny._actualizarIconoAlmacen(destMarker, destPct);
     }
 
     function updateAvionPosition(fe: FlightEvent, progress: number, map: any) {
@@ -903,115 +756,62 @@ export default function SimulacionPeriodo() {
       if (!map) return;
       started = true;
 
-      function loop() {
+      function renderLoop() {
         const map = mapInst.current;
-        if (!map) { frameId = requestAnimationFrame(loop); return; }
-
-        const now = performance.now();
-        if (clockEnabledRef.current) {
-          const deltaMs = now - (lastFrameTimeRef.current || now);
-          lastFrameTimeRef.current = now;
-
-          // Avanzar minutos simulados continuamente usando K sin parar
-          const deltaMinSim = (deltaMs / 1000) * (SIM_CONFIG.K / 60);
-          currentMinSimRef.current += deltaMinSim;
-        } else {
-          // Mantener lastFrameTime actualizado mientras esperamos la primera iteración
-          lastFrameTimeRef.current = now;
-        }
+        if (!map) { frameId = requestAnimationFrame(renderLoop); return; }
 
         const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
         setSimMinutos(Math.floor(minSim));
 
+        // Actualizar stopwatch cada frame (usar refs del contexto, no closure obsoleto)
+        if (ctx.clockEnabledRef.current && ctx.stopwatchStartedAtRef.current === null) {
+          ctx.stopwatchStartedAtRef.current = Date.now();
+        }
+        if (ctx.clockEnabledRef.current && ctx.stopwatchStartedAtRef.current != null) {
+          const elapsedSec = Math.floor((Date.now() - ctx.stopwatchStartedAtRef.current) / 1000);
+          const label = `${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`;
+          if (label !== lastStopwatchLabelRef.current) {
+            lastStopwatchLabelRef.current = label;
+            setStopwatch(label);
+          }
+        } else {
+          if (lastStopwatchLabelRef.current !== '') {
+            lastStopwatchLabelRef.current = '';
+            setStopwatch('00:00');
+          }
+        }
+
         const events = flightEventsRef.current;
 
         for (const fe of events) {
-          if (fe.done) continue;
-
-          if (!fe.active && minSim >= fe.minutosInicio) {
-            // No despegar si fue cancelado: calcular cancelKey desde minutosInicio del FlightEvent
-            // (no desde la ruta, porque puede haber sido sobreescrita por una ITERACION posterior)
-            const idEnvio = fe.key.split('-')[0];
-            const simStart = sim.simStartDateRef.current;
-            const depDate = simStart ? new Date(simStart.getTime() + fe.minutosInicio * 60000) : new Date();
-            const apt = sim.aeropuertosRef.current.get(fe.origenCode);
-            const offset = apt?.gmt ?? 0;
-            const gmtHour = depDate.getHours();
-            const gmtMin = depDate.getMinutes();
-            const localHour = ((gmtHour + offset) % 24 + 24) % 24;
-            const hh = String(localHour).padStart(2, '0');
-            const mm = String(gmtMin).padStart(2, '0');
-            const cancelKey = `${fe.origenCode}-${fe.destinoCode}-${hh}:${mm}`;
-            let suprimido = cancelKey && cancelledFlightsRef.current.has(cancelKey);
-            // También verificar suppressedTramosRef (cubre tramos posteriores al cancelado)
-            if (!suprimido) {
-              const supInfo = suppressedTramosRef.current.get(idEnvio);
-              if (supInfo && fe.tramoOrden >= supInfo.minTramoOrden) {
-                const m = fe.key.match(/iter(\d+)/);
-                suprimido = !!(m && parseInt(m[1]) === supInfo.iteracionIdx);
-              }
-            }
-            if (suprimido) {
-              fe.done = true;
-            } else {
-              spawnAvion(fe, map);
-            }
+          if (fe.done) {
+            if (fe.svgElement) removeAvionRender(fe);
+            continue;
           }
 
-          if (fe.active) {
+          if (fe.active && !fe.svgElement) {
+            spawnAvionRender(fe, map);
+          }
+
+          if (fe.active && fe.svgElement) {
             const duracion = fe.minutosFin - fe.minutosInicio;
             if (duracion <= 0) {
-              removeAvion(fe);
+              removeAvionRender(fe);
               continue;
             }
             const progress = Math.min(1, (minSim - fe.minutosInicio) / duracion);
-
             if (progress >= 1) {
-              removeAvion(fe);
+              removeAvionRender(fe);
             } else {
               updateAvionPosition(fe, progress, map);
             }
           }
         }
 
-        // ── Disparar LogEvents temporizados al compas del cronómetro ──────────
-        const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
-        for (const le of logEventsRef.current) {
-          if (!le.fired && minSim >= le.minutosDisparo) {
-            // Saltar LogEvents de tramos suprimidos por cancelación
-            if (le.idEnvio && le.tramoOrden !== undefined) {
-              const info = suppressedTramosRef.current.get(le.idEnvio);
-              if (info && le.tramoOrden >= info.minTramoOrden) {
-                le.fired = true;
-                continue;
-              }
-            }
-            le.fired = true;
-            pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
-
-            if (le.updatePopupCode !== undefined) {
-              const estado = airportStateRef.current.get(le.updatePopupCode);
-              if (estado) {
-                estado.ocupacion = le.updatePopupOcupacion!;
-                estado.capacidad = le.updatePopupCapacidad!;
-                const marker = markersRef.current.find(m => m.airportCode === le.updatePopupCode);
-                if (marker && marker.isPopupOpen()) {
-                  marker.setPopupContent(marker.generarPopupHTML());
-                }
-              }
-            }
-          }
-        }
-        // ✅ OPTIMIZACIÓN: Batch todos los logs en una sola llamada en lugar de múltiples setState
-        if (pendingLogs.length > 0) {
-          sim.addLogBatch(pendingLogs);
-        }
-
-        frameId = requestAnimationFrame(loop);
+        frameId = requestAnimationFrame(renderLoop);
       }
 
       map.on('move zoom moveend zoomend', () => {
-        // Forzar re-posicionamiento en evento de mapa
         const map = mapInst.current;
         if (!map) return;
         flightEventsRef.current.filter(fe => fe.active && !fe.done).forEach(fe => {
@@ -1024,10 +824,9 @@ export default function SimulacionPeriodo() {
         });
       });
 
-      loop();
+      renderLoop();
     }
 
-    // Intentar arrancar; si el mapa no está listo, reintentar
     startLoop();
     if (!started) {
       checkInterval = setInterval(() => {
@@ -1039,6 +838,12 @@ export default function SimulacionPeriodo() {
     return () => {
       cancelAnimationFrame(frameId);
       if (checkInterval) clearInterval(checkInterval);
+      // Limpiar referencias SVG para que al re-montar se vuelvan a crear
+      for (const fe of flightEventsRef.current) {
+        fe.svgElement = undefined;
+        fe.airplaneGroup = undefined;
+        fe.airplaneImage = undefined;
+      }
     };
   }, []);
 
@@ -1169,11 +974,10 @@ export default function SimulacionPeriodo() {
     isInitialized.current = false;
 
     // Reset clock state
-    clockEnabledRef.current = false;
+    ctx.clockEnabledRef.current = false;
     currentMinSimRef.current = 0;
     lastFrameTimeRef.current = 0;
     clockStateRef.current = 'CALCULANDO';
-    setClockState('CALCULANDO');
     setSimMinutos(0);
 
     // Remove all airplanes from the map
@@ -1850,7 +1654,10 @@ export default function SimulacionPeriodo() {
 
   // ── Barra de progreso del cronómetro ─────────────────────────────────────
   const pct = Math.round(sim.progreso);
-  const simTimeLabel = formatSimTime(simMinutos, startDate, startTime);
+  const simStartDateObj = sim.simStartDateRef.current;
+  const simDateStr = simStartDateObj ? `${simStartDateObj.getFullYear()}-${String(simStartDateObj.getMonth()+1).padStart(2,'0')}-${String(simStartDateObj.getDate()).padStart(2,'0')}` : null;
+  const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getHours()).padStart(2,'0')}:${String(simStartDateObj.getMinutes()).padStart(2,'0')}` : null;
+  const simTimeLabel = formatSimTime(simMinutos, simDateStr, simTimeStr);
 
   // ── Filtros + Virtual Scroll para el panel de vuelos ──────────────────────
   const ITEM_HEIGHT = 90;
@@ -2389,7 +2196,7 @@ export default function SimulacionPeriodo() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span className="algo-spinner"></span> Configurando algoritmo...
               </div>
-              <span style={{ fontSize: 14, color: 'var(--accent-blue)' }}>{configCountdown}s</span>
+              <span style={{ fontSize: 14, color: 'var(--accent-blue)' }}>{configCountdownRef.current}s</span>
             </div>
             <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>
               Esperando resultados iniciales...

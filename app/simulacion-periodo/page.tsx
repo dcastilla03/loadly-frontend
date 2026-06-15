@@ -13,10 +13,10 @@ function getAirplaneSVG(pct: number, isEmpty?: boolean): string {
 }
 
 function getLocationSVG(pct: number): string {
-  if (pct === 0) return '/location-blue.svg';
-  if (pct < 50) return '/location-green.svg';
-  if (pct < 80) return '/location-orange.svg';
-  return '/location-red.svg';
+  if (pct === 0) return '/almacen-blue.svg';
+  if (pct < 50) return '/almacen-green.svg';
+  if (pct < 80) return '/almacen-orange.svg';
+  return '/almacen-red.svg';
 }
 
 function bezierCurve(
@@ -123,10 +123,6 @@ export default function SimulacionPeriodo() {
   const [configWizardStep, setConfigWizardStep] = useState(1);
   const [configStartDate, setConfigStartDate] = useState('');
   const [configStartTime, setConfigStartTime] = useState('00:00');
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploadMessage, setUploadMessage] = useState<{ type: 'error' | 'success' | 'info' | 'warning' | null; text: string }>({ type: null, text: '' });
-  const [uploading, setUploading] = useState(false);
-
   // Simulation stopped overlay state
   const [showStoppedOverlay, setShowStoppedOverlay] = useState(false);
 
@@ -311,7 +307,8 @@ export default function SimulacionPeriodo() {
     emptyFlightsAddedRef.current.forEach(key => {
       const parts = key.split('-');
       if (parts.length >= 4) {
-        const gmtTime = `${parts[parts.length - 2]}:${parts[parts.length - 1]}`;
+        const timeStr = parts[parts.length - 1];
+        const gmtTime = `${timeStr.substring(0, 2)}:${timeStr.substring(2, 4)}`;
         const usedKey = `${parts[1]}-${parts[2]}-${gmtTime}`;
         if (usedKeys.has(usedKey)) {
           const fe = flightEventsRef.current.find(e => e.key === key);
@@ -339,7 +336,7 @@ export default function SimulacionPeriodo() {
 
       const feKey = `unused-${origen}-${destino}-${String(gmtH).padStart(2, '0')}${String(lm).padStart(2, '0')}`;
       if (emptyFlightsAddedRef.current.has(feKey)) continue;
-      if (flightEventsRef.current.find(e => e.key === feKey && !e.done)) continue;
+      if (flightEventsRef.current.find(e => e.key === feKey)) continue;
 
       const fe = crearEmptyFlightEvent(flight, simStart);
       if (fe) {
@@ -389,19 +386,24 @@ export default function SimulacionPeriodo() {
   const vuelosGlobales = useMemo(() => {
     if (!apiFlights) return [];
     return apiFlights.map((v: any) => {
-      const info = aeropuertoInfoRef.current.get(v.idAeropuertoOrigen);
-      const origen = info?.codigo || `ID${v.idAeropuertoOrigen}`;
-      const destino = aeropuertoInfoRef.current.get(v.idAeropuertoDestino)?.codigo || `ID${v.idAeropuertoDestino}`;
-      const gmtOffset = info?.gmt ?? 0;
-      // horaSalida de la API es hora LOCAL → convertir a GMT para getClaveVuelo
+      const infoOri = aeropuertoInfoRef.current.get(v.idAeropuertoOrigen);
+      const infoDes = aeropuertoInfoRef.current.get(v.idAeropuertoDestino);
+      const origen = infoOri?.codigo || `ID${v.idAeropuertoOrigen}`;
+      const destino = infoDes?.codigo || `ID${v.idAeropuertoDestino}`;
+      const gmtOffsetOri = infoOri?.gmt ?? 0;
+      const gmtOffsetDes = infoDes?.gmt ?? 0;
+      // horaSalida / horaLlegada de la API son hora LOCAL → convertir a GMT
       const [lh, lm] = (v.horaSalida || '00:00').split(':').map(Number);
-      const gmtHour = ((lh - gmtOffset) % 24 + 24) % 24;
+      const gmtHour = ((lh - gmtOffsetOri) % 24 + 24) % 24;
       const salidaGMT = `${String(gmtHour).padStart(2, '0')}:${String(lm).padStart(2, '0')}`;
+      const [llh, llm] = (v.horaLlegada || '00:00').split(':').map(Number);
+      const gmtLlegaHour = ((llh - gmtOffsetDes) % 24 + 24) % 24;
+      const llegadaGMT = `${String(gmtLlegaHour).padStart(2, '0')}:${String(llm).padStart(2, '0')}`;
       return {
         origen,
         destino,
         salida: salidaGMT,
-        llegada: v.horaLlegada || '00:00',
+        llegada: llegadaGMT,
       };
     });
   }, [apiFlights]);
@@ -552,10 +554,10 @@ export default function SimulacionPeriodo() {
     function crearIconoAlmacen(pct: number) {
       return L.icon({
         iconUrl: getLocationSVG(pct),
-        iconSize: [28, 36],
-        iconAnchor: [14, 36],
-        popupAnchor: [0, -36],
-        className: '',
+        iconSize: [24, 30],
+        iconAnchor: [12, 30],
+        popupAnchor: [0, -30],
+        className: 'almacen-marker',
       });
     }
 
@@ -592,6 +594,7 @@ export default function SimulacionPeriodo() {
       };
 
       const m = L.marker([a.latitud, a.longitud], { icon: crearIconoAlmacen(pctInicial) }).addTo(mapInst.current);
+      m.setZIndexOffset(10000);
       m.airportCode = a.codigo;
       m.generarPopupHTML = generarPopupHTML;
       m.bindPopup(generarPopupHTML(), { maxWidth: 300 });
@@ -834,9 +837,14 @@ export default function SimulacionPeriodo() {
       const size = map.getSize();
       const margin = 1000;
 
-      const idx = Math.min(Math.floor(progress * path.length), path.length - 1);
-      const nextIdx = Math.min(idx + 1, path.length - 1);
-      const [lat, lng] = path[idx];
+      const exact = progress * (path.length - 1);
+      const idx = Math.min(Math.floor(exact), path.length - 2);
+      const frac = exact - idx;
+      const nextIdx = idx + 1;
+      const [lat, lng] = [
+        path[idx][0] + (path[nextIdx][0] - path[idx][0]) * frac,
+        path[idx][1] + (path[nextIdx][1] - path[idx][1]) * frac,
+      ];
       const [nlat, nlng] = path[nextIdx];
 
       const cosLat = Math.cos(lat * Math.PI / 180);
@@ -1127,6 +1135,7 @@ export default function SimulacionPeriodo() {
 
   function handleDetener() {
     sim.detener();
+    flightEventsRef.current.filter(fe => fe.active).forEach(fe => removeAvion(fe));
     setShowStoppedOverlay(true);
   }
 
@@ -1136,8 +1145,6 @@ export default function SimulacionPeriodo() {
     setConfigWizardStep(1);
     setConfigStartDate('');
     setConfigStartTime('00:00');
-    setSelectedFiles([]);
-    setUploadMessage({ type: null, text: '' });
     isInitialized.current = false;
 
     // Reset clock state
@@ -1164,6 +1171,7 @@ export default function SimulacionPeriodo() {
       // Reset cancellation data refs
       cancelledFlightsRef.current = new Set();
       suppressedTramosRef.current = new Map();
+      emptyFlightsAddedRef.current = new Set();
     }
 
   function mostrarNotificacion(mensaje: string, color: string) {
@@ -1236,27 +1244,16 @@ export default function SimulacionPeriodo() {
     // Agregar al Set de vuelos cancelándose para bloquear visualmente
     setCancellingFlights(prev => new Set(prev).add(claveVuelo));
 
-    // Obtener la fecha de registro del envío (GMT, del backend)
-    const rutaCancel = sim.rutasPlanificadasRef.current.get(vuelo.idEnvio);
-    const fechaRegistro = rutaCancel?.fechaRegistro;
-    let reloj: string;
-    if (fechaRegistro) {
-      // Parsear "DD/MM/YYYY HH:MM" (GMT) → enviar último minuto de ese día GMT
-      const [datePart] = fechaRegistro.split(' ');
-      const [day, month, year] = datePart.split('/').map(Number);
-      reloj = `${year}${String(month).padStart(2, '0')}${String(day).padStart(2, '0')}-23-59`;
-    } else {
-      // Fallback: usar tiempo actual de simulación
-      const simStart = sim.simStartDateRef.current;
-      if (!simStart) { console.warn('[cancelarVuelo] simStartDateRef.current es null', vuelo); setCancellingFlights(prev => { const newSet = new Set(prev); newSet.delete(claveVuelo); return newSet; }); return; }
-      const relojDate = new Date(simStart.getTime() + Math.floor(currentMinSimRef.current) * 60000);
-      const y = relojDate.getUTCFullYear();
-      const M = String(relojDate.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(relojDate.getUTCDate()).padStart(2, '0');
-      const h = String(relojDate.getUTCHours()).padStart(2, '0');
-      const m = String(relojDate.getUTCMinutes()).padStart(2, '0');
-      reloj = `${y}${M}${d}-${h}-${m}`;
-    }
+    // Usar tiempo actual del cronómetro (local, como se muestra en pantalla)
+    const simStart = sim.simStartDateRef.current;
+    if (!simStart) { console.warn('[cancelarVuelo] simStartDateRef.current es null', vuelo); setCancellingFlights(prev => { const newSet = new Set(prev); newSet.delete(claveVuelo); return newSet; }); return; }
+    const relojDate = new Date(simStart.getTime() + Math.floor(currentMinSimRef.current) * 60000);
+    const y = relojDate.getFullYear();
+    const M = String(relojDate.getMonth() + 1).padStart(2, '0');
+    const d = String(relojDate.getDate()).padStart(2, '0');
+    const h = String(relojDate.getHours()).padStart(2, '0');
+    const m = String(relojDate.getMinutes()).padStart(2, '0');
+    const reloj = `${y}${M}${d}-${h}-${m}`;
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL;
       const url = `${API_URL}/api/simulacion/vuelos/cancelar?claveVuelo=${encodeURIComponent(claveVuelo)}&relojSimuladoActual=${encodeURIComponent(reloj)}`;
@@ -1877,7 +1874,7 @@ export default function SimulacionPeriodo() {
       return sortDir === 'desc' ? -cmp : cmp;
     });
     return sorted;
-  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick]);
+  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick, sim.allFlightEvents, sim.iteracion]);
 
   const totalHeight = vuelosFiltrados.length * ITEM_HEIGHT;
   const startIdx = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
@@ -1949,8 +1946,8 @@ export default function SimulacionPeriodo() {
                     width: '32px',
                     height: '32px',
                     borderRadius: '50%',
-                    backgroundColor: configWizardStep === 2 ? 'var(--accent-blue)' : configWizardStep > 2 ? '#10b981' : 'var(--bg-tertiary)',
-                    color: configWizardStep === 2 ? 'white' : configWizardStep > 2 ? 'white' : 'var(--text-secondary)',
+                    backgroundColor: configWizardStep === 2 ? 'var(--accent-blue)' : 'var(--bg-tertiary)',
+                    color: configWizardStep === 2 ? 'white' : 'var(--text-secondary)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1958,22 +1955,6 @@ export default function SimulacionPeriodo() {
                     fontSize: '14px',
                     marginBottom: '4px'
                   }}>2</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Carga de Envíos</div>
-                </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '50%',
-                    backgroundColor: configWizardStep === 3 ? 'var(--accent-blue)' : configWizardStep > 3 ? '#10b981' : 'var(--bg-tertiary)',
-                    color: configWizardStep === 3 ? 'white' : configWizardStep > 3 ? 'white' : 'var(--text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    fontSize: '14px',
-                    marginBottom: '4px'
-                  }}>3</div>
                   <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Confirmación</div>
                 </div>
               </div>
@@ -2034,167 +2015,8 @@ export default function SimulacionPeriodo() {
                 </div>
               )}
 
-              {/* Step 2: Carga de Envíos */}
+              {/* Step 2: Confirmación */}
               {configWizardStep === 2 && (
-                <div>
-                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px', fontSize: '16px' }}>
-                    📤 Carga Masiva de Envíos
-                  </h3>
-                  <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px', lineHeight: '1.6' }}>
-                    Sube archivos .txt con múltiples registros de envíos para importarlos en lote desde la carpeta de envíos.
-                  </p>
-
-                  <div
-                    onClick={() => document.getElementById('configFileInput')?.click()}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.txt'));
-                      setSelectedFiles(files);
-                    }}
-                    style={{
-                      border: '2px dashed var(--border-color)',
-                      borderRadius: '8px',
-                      padding: '40px 20px',
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      marginBottom: '20px'
-                    }}
-                  >
-                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>
-                      {uploading ? '⏳' : '📂'}
-                    </div>
-                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px', fontSize: '15px' }}>
-                      {uploading ? 'Cargando archivos...' : 'Arrastra carpeta o archivos aquí'}
-                    </div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                      {uploading ? 'Por favor espera...' : 'o haz clic para seleccionar'}
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      Formato: Carpeta o archivos .txt | Múltiples archivos
-                    </div>
-                    <input
-                      id="configFileInput"
-                      type="file"
-                      accept=".txt"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []).filter(f => f.name.endsWith('.txt'));
-                        setSelectedFiles(files);
-                      }}
-                      disabled={uploading}
-                      multiple
-                      {...({ webkitdirectory: true } as any)}
-                    />
-                  </div>
-
-                  {selectedFiles.length > 0 && (
-                    <div style={{ padding: '14px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', marginBottom: '16px', borderLeft: '3px solid var(--accent-blue)' }}>
-                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                        Archivos seleccionados: <strong>{selectedFiles.length}</strong>
-                      </div>
-                      <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
-                        {selectedFiles.map((file, idx) => (
-                          <div key={idx} style={{ fontSize: '12px', color: 'var(--text-primary)', paddingBottom: '6px', borderBottom: idx < selectedFiles.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
-                            • {file.name}
-                          </div>
-                        ))}
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
-                        Total: {(selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(2)} KB
-                      </div>
-                    </div>
-                  )}
-
-                  {uploadMessage.type && (
-                    <div style={{
-                      padding: '12px 14px',
-                      backgroundColor: uploadMessage.type === 'error' ? 'rgba(220, 38, 38, 0.1)' : uploadMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                      borderRadius: '8px',
-                      marginBottom: '16px',
-                      borderLeft: '3px solid ' + (uploadMessage.type === 'error' ? 'var(--danger-red)' : uploadMessage.type === 'success' ? 'var(--success-green)' : 'var(--accent-blue)'),
-                      fontSize: '13px',
-                      color: uploadMessage.type === 'error' ? 'var(--danger-red)' : uploadMessage.type === 'success' ? 'var(--success-green)' : 'var(--accent-blue)'
-                    }}>
-                      {uploadMessage.text}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', gap: '12px', marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFiles([])}
-                      disabled={uploading}
-                      style={{
-                        flex: 1,
-                        padding: '12px',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        backgroundColor: 'var(--bg-secondary)',
-                        color: 'var(--text-primary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        cursor: uploading ? 'default' : 'pointer'
-                      }}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (selectedFiles.length === 0) {
-                          setUploadMessage({ type: 'error', text: 'Por favor selecciona archivos o carpeta' });
-                          return;
-                        }
-                        setUploading(true);
-                        try {
-                          // 1. Agregamos los 30 archivos de texto
-                          const formData = new FormData();
-                          selectedFiles.forEach((file) => {
-                            formData.append('files', file);
-                          });
-
-                          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/envios/cargar-carpeta`, {
-                            method: 'POST',
-                            body: formData,
-                          });
-
-                          const data = await response.json();
-
-                          if (response.ok && data.exito) {
-                            setUploadMessage({ type: 'success', text: data.mensaje || `${selectedFiles.length} archivo${selectedFiles.length === 1 ? '' : 's'} cargado${selectedFiles.length === 1 ? '' : 's'} exitosamente` });
-                            setSelectedFiles([]);
-                          } else {
-                            setUploadMessage({ type: 'error', text: data.mensaje || `Error ${response.status}` });
-                          }
-                        } catch (error) {
-                          setUploadMessage({ type: 'error', text: `Error: ${error instanceof Error ? error.message : 'Error desconocido'}` });
-                        } finally {
-                          setUploading(false);
-                        }
-                      }}
-                      disabled={uploading || selectedFiles.length === 0}
-                      style={{
-                        flex: 1,
-                        padding: '12px',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        backgroundColor: uploading || selectedFiles.length === 0 ? 'var(--border-color)' : 'var(--accent-blue)',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: uploading || selectedFiles.length === 0 ? 'default' : 'pointer'
-                      }}
-                    >
-                      {uploading ? '⏳ Procesando...' : `↑ Procesar ${selectedFiles.length} Archivo${selectedFiles.length === 1 ? '' : 's'}`}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 3: Confirmación */}
-              {configWizardStep === 3 && (
                 <div>
                   <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
                     ✓ Resumen de Configuración
@@ -2266,30 +2088,25 @@ export default function SimulacionPeriodo() {
                       }
                       setConfigWizardStep(2);
                     } else if (configWizardStep === 2) {
-                      setConfigWizardStep(3);
-                    } else if (configWizardStep === 3) {
                       setStartDate(configStartDate);
                       setStartTime(configStartTime);
                       setShowConfigOverlay(false);
                     }
                   }}
-                  disabled={
-                    (configWizardStep === 1 && !configStartDate) ||
-                    (configWizardStep === 2 && uploading)
-                  }
+                  disabled={configWizardStep === 1 && !configStartDate}
                   style={{
                     flex: 1,
                     padding: '10px 16px',
                     fontSize: '14px',
                     fontWeight: 600,
-                    backgroundColor: (configWizardStep === 1 && !configStartDate) || (configWizardStep === 2 && uploading) ? 'var(--border-color)' : 'var(--accent-blue)',
+                    backgroundColor: configWizardStep === 1 && !configStartDate ? 'var(--border-color)' : 'var(--accent-blue)',
                     color: 'white',
                     border: 'none',
                     borderRadius: '8px',
-                    cursor: (configWizardStep === 1 && !configStartDate) || (configWizardStep === 2 && uploading) ? 'default' : 'pointer'
+                    cursor: configWizardStep === 1 && !configStartDate ? 'default' : 'pointer'
                   }}
                 >
-                  {configWizardStep === 3 ? 'Iniciar Simulación' : 'Siguiente →'}
+                  {configWizardStep === 2 ? 'Iniciar Simulación' : 'Siguiente →'}
                 </button>
               </div>
             </div>
@@ -2365,7 +2182,7 @@ export default function SimulacionPeriodo() {
         {/* Panel de Control — Centro Superior */}
         <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
           <div style={{ pointerEvents: 'auto', padding: '8px 12px' }}>
-            <div className="card" style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)' }}>
               <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
                 Simulación — Período 5 Días
                 <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }} />
@@ -2393,6 +2210,9 @@ export default function SimulacionPeriodo() {
                     border: 1px solid #b91c1c;
                     animation: led-blink 1.2s ease-in-out infinite;
                   }
+                  .almacen-marker {
+                    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25));
+                  }
                 `}</style>
               </h1>
               <div style={{ height: 20, width: 1, backgroundColor: 'var(--border-color)' }} />
@@ -2400,7 +2220,12 @@ export default function SimulacionPeriodo() {
               {/* Reloj simulado */}
               <div>
                 <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Simulado</small>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 2, whiteSpace: 'nowrap' }}>{simTimeLabel}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 2, whiteSpace: 'nowrap' }}>{simTimeLabel.split(' ')[0]} ⏱ {simTimeLabel.split(' ')[1]}</div>
+              </div>
+
+              <div>
+                <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Actual</small>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })} ⏱ {stopwatch}</div>
               </div>
 
               <div>
@@ -2423,27 +2248,6 @@ export default function SimulacionPeriodo() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* Barra de Progreso — Izquierda Superior */}
-        <div style={{ position: 'absolute', bottom: 130, left:12, minWidth: 160, backgroundColor: 'rgba(255,255,255,0.92)', padding: '8px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', pointerEvents: 'auto', zIndex: 999998 }}>
-          <div style={{ fontSize: 9, color: '#6b7280', marginBottom: 2, textAlign: 'center', fontWeight: 600 }}>🕐 {horaActual}</div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#059669', marginBottom: 6, textAlign: 'center' }}>⏱ {stopwatch}</div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 4, textTransform: 'uppercase' }}>Progreso de Simulación</div>
-
-          {/* Barra GA (iteraciones) */}
-          <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 2 }}>GA — {pct}% ({sim.iteracion}/{sim.totalIter} iter.)</div>
-          <div style={{ width: '100%', height: 5, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden', marginBottom: 5 }}>
-            <div style={{ height: '100%', backgroundColor: 'var(--accent-blue)', width: `${pct}%`, transition: 'width 0.4s ease' }} />
-          </div>
-
-          {/* Barra reloj simulado */}
-          <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 2 }}>
-            Cronómetro — {Math.round((simMinutos / TOTAL_MINUTOS_SIM) * 100)}%
-          </div>
-          <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
-            <div style={{ height: '100%', backgroundColor: '#10b981', width: `${(simMinutos / TOTAL_MINUTOS_SIM) * 100}%`, transition: 'width 0.4s ease' }} />
           </div>
         </div>
 
@@ -2644,20 +2448,18 @@ export default function SimulacionPeriodo() {
                     let d = new Date(simStartOcc); d.setHours(hh, mm, 0, 0);
                     while (d.getTime() < simStartOcc.getTime()) d.setDate(d.getDate() + 1);
                     const minInicio = Math.round((d.getTime() - simStartOcc.getTime()) / 60000);
-                    let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio);
+                    let fe = sim.allFlightEvents.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio);
                     if (!fe) {
                       for (const ruta of rutasPlanificadasRef.current.values()) {
                         const tramo = (ruta.tramos || []).find(t => t.origen === vuelo.origen && t.destino === vuelo.destino);
                         if (tramo) {
-                          fe = flightEventsRef.current.find(e => e.key.includes(`${ruta.idEnvio}`) && e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino);
-                          if (fe) break;
-                          fe = { key: 'synthetic', tramoOrden: 1, origenCode: vuelo.origen, destinoCode: vuelo.destino, planVueloRuta: [vuelo.origen, vuelo.destino], planVueloTipo: 'Directo', latOrigen: 0, lngOrigen: 0, latDestino: 0, lngDestino: 0, minutosInicio: minInicio, minutosFin: minInicio, maletasVuelo: tramo.maletasVuelo ?? 0, capacidadVuelo: tramo.capacidadVuelo ?? 0, ocupacionAlmacenOrigen: 0, capacidadAlmacenOrigen: 0, ocupacionAlmacenDestino: 0, capacidadAlmacenDestino: 0 };
-                          break;
+                          fe = sim.allFlightEvents.find(e => e.key.includes(`${ruta.idEnvio}`) && e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino);
+                        if (fe) break;
                         }
                       }
                     }
                     esSinUso = !fe || fe.key.startsWith('unused-');
-                    if (fe && !esSinUso && currentMinSimRef.current >= minInicio) {
+                    if (fe && !esSinUso && currentMinSimRef.current >= minInicio && currentMinSimRef.current < fe.minutosFin) {
                       if (fe.capacidadVuelo > 0) {
                         pctOcupacion = (fe.maletasVuelo / fe.capacidadVuelo) * 100;
                         ocupColor = pctOcupacion < 50 ? '#22c55e' : pctOcupacion < 80 ? '#f97316' : '#ef4444';

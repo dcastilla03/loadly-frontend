@@ -116,6 +116,7 @@ export default function SimulacionPeriodo() {
   const [configCountdown, setConfigCountdown] = useState(60);
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [flightPanelOpen, setFlightPanelOpen] = useState(false);
+  const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Configuration wizard state
@@ -196,17 +197,17 @@ export default function SimulacionPeriodo() {
     };
   }, []);
 
-  // Actualizar clase CSS del map-container para el panel de vuelos
+  // Actualizar clase CSS del map-container para los paneles laterales
   useEffect(() => {
     const mapContainer = document.querySelector('.map-container') as HTMLElement;
     if (mapContainer) {
-      if (flightPanelOpen) {
+      if (flightPanelOpen || almacenesPanelOpen) {
         mapContainer.classList.add('flight-panel-open');
       } else {
         mapContainer.classList.remove('flight-panel-open');
       }
     }
-  }, [flightPanelOpen]);
+  }, [flightPanelOpen, almacenesPanelOpen]);
   const rutasPlanificadasRef = sim.rutasPlanificadasRef;
 
   // States for flight filters and virtual scroll
@@ -224,6 +225,22 @@ export default function SimulacionPeriodo() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(600);
+
+  // ── Estados del panel de Almacenes ──────────────────────────────────────────────
+  const [scrollTopAlm, setScrollTopAlm] = useState(0);
+  const [containerHeightAlm, setContainerHeightAlm] = useState(600);
+  const [selectedAlmacen, setSelectedAlmacen] = useState<string | null>(null);
+  const [filtrosAlmOpen, setFiltrosAlmOpen] = useState(false);
+  const [filterAlmCodigo, setFilterAlmCodigo] = useState('');
+  const [filterAlmCiudad, setFilterAlmCiudad] = useState('');
+  const [filterAlmPais, setFilterAlmPais] = useState('');
+  const [sortAlmBy, setSortAlmBy] = useState('codigo');
+  const [sortAlmDir, setSortAlmDir] = useState<'asc' | 'desc'>('asc');
+  const filterAlmButtonRef = useRef<HTMLButtonElement>(null);
+  const [filterAlmPosition, setFilterAlmPosition] = useState({ top: 0, left: 0 });
+  const scrollContainerAlmRef = useRef<HTMLDivElement>(null);
+  const refrescoAlmRef = useRef(0);
+  const [, setRefrescoAlm] = useState(0);
 
   // ── API: todos los vuelos de la base de datos (planes-vuelo + aeropuertos) ──
   const [apiFlights, setApiFlights] = useState<any[] | null>(null);
@@ -1135,7 +1152,11 @@ export default function SimulacionPeriodo() {
 
   function handleDetener() {
     sim.detener();
-    flightEventsRef.current.filter(fe => fe.active).forEach(fe => removeAvion(fe));
+    flightEventsRef.current.filter(fe => fe.active).forEach(fe => {
+      if (fe.svgElement) { try { fe.svgElement.remove(); } catch (_) {} fe.svgElement = undefined; fe.airplaneGroup = undefined; fe.airplaneImage = undefined; }
+      fe.active = false;
+      fe.done = true;
+    });
     setShowStoppedOverlay(true);
   }
 
@@ -1876,6 +1897,97 @@ export default function SimulacionPeriodo() {
     return sorted;
   }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick, sim.allFlightEvents, sim.iteracion]);
 
+  // ── Datos derivados de Almacenes ────────────────────────────────────────────
+  const almacenesData = useMemo(() => {
+    const feRef = flightEventsRef.current;
+    const rutasMap = rutasPlanificadasRef.current;
+
+    const salientesPorOrigen = new Map<string, { envios: Set<string>; maletas: number }>();
+    const entrantesPorDestino = new Map<string, { envios: Set<string>; maletas: number }>();
+
+    for (const ruta of rutasMap.values()) {
+      for (const tramo of ruta.tramos || []) {
+        let s = salientesPorOrigen.get(tramo.origen);
+        if (!s) { s = { envios: new Set(), maletas: 0 }; salientesPorOrigen.set(tramo.origen, s); }
+        s.envios.add(ruta.idEnvio);
+        s.maletas += tramo.maletasVuelo;
+
+        let e = entrantesPorDestino.get(tramo.destino);
+        if (!e) { e = { envios: new Set(), maletas: 0 }; entrantesPorDestino.set(tramo.destino, e); }
+        e.envios.add(ruta.idEnvio);
+        e.maletas += tramo.maletasVuelo;
+      }
+    }
+
+    const transitoPorDestino = new Map<string, { vuelos: number; maletas: number }>();
+    for (const fe of feRef) {
+      if (fe.active && !fe.done && fe.destinoCode && !fe.key.startsWith('unused-') && fe.maletasVuelo > 0) {
+        const prev = transitoPorDestino.get(fe.destinoCode) || { vuelos: 0, maletas: 0 };
+        prev.vuelos++;
+        prev.maletas += fe.maletasVuelo;
+        transitoPorDestino.set(fe.destinoCode, prev);
+      }
+    }
+
+    return sim.aeropuertos.map(a => {
+      const state = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
+      const pct = state.capacidad > 0 ? (state.ocupacion / state.capacidad) * 100 : 0;
+      const rawSal = salientesPorOrigen.get(a.codigo);
+      const rawEnt = entrantesPorDestino.get(a.codigo);
+      const sal = { envios: rawSal?.envios.size ?? 0, maletas: rawSal?.maletas ?? 0 };
+      const ent = { envios: rawEnt?.envios.size ?? 0, maletas: rawEnt?.maletas ?? 0 };
+      const tra = transitoPorDestino.get(a.codigo) || { vuelos: 0, maletas: 0 };
+      return {
+        codigo: a.codigo,
+        ciudad: a.ciudad,
+        pais: a.pais,
+        capacidad: state.capacidad,
+        ocupacion: state.ocupacion,
+        pct,
+        salientes: sal,
+        entrantes: ent,
+        transito: tra,
+      };
+    });
+  }, [sim.aeropuertos, flightEventsRef, rutasPlanificadasRef, refreshTick, sim.allFlightEvents, simMinutos]);
+
+  const ITEM_HEIGHT_ALM = 100;
+  const OVERSCAN_ALM = 5;
+  const almacenesFiltrados = useMemo(() => {
+    let list = almacenesData;
+    if (filterAlmCodigo) {
+      const q = filterAlmCodigo.toLowerCase();
+      list = list.filter(a => a.codigo.toLowerCase().includes(q));
+    }
+    if (filterAlmCiudad) {
+      const q = filterAlmCiudad.toLowerCase();
+      list = list.filter(a => a.ciudad.toLowerCase().includes(q));
+    }
+    if (filterAlmPais) {
+      const q = filterAlmPais.toLowerCase();
+      list = list.filter(a => a.pais.toLowerCase().includes(q));
+    }
+    list = [...list].sort((a, b) => {
+      let cmp = 0;
+      if (sortAlmBy === 'codigo') cmp = a.codigo.localeCompare(b.codigo);
+      else if (sortAlmBy === 'ciudad') cmp = a.ciudad.localeCompare(b.ciudad);
+      else if (sortAlmBy === 'pais') cmp = a.pais.localeCompare(b.pais);
+      else if (sortAlmBy === 'ocupacion') cmp = a.pct - b.pct;
+      else if (sortAlmBy === 'stock') cmp = a.ocupacion - b.ocupacion;
+      else if (sortAlmBy === 'entrantes') cmp = a.entrantes.maletas - b.entrantes.maletas;
+      else if (sortAlmBy === 'salientes') cmp = a.salientes.maletas - b.salientes.maletas;
+      else if (sortAlmBy === 'transito') cmp = a.transito.maletas - b.transito.maletas;
+      return sortAlmDir === 'desc' ? -cmp : cmp;
+    });
+    return list;
+  }, [almacenesData, filterAlmCodigo, filterAlmPais, sortAlmBy, sortAlmDir]);
+
+  const totalHeightAlm = almacenesFiltrados.length * ITEM_HEIGHT_ALM;
+  const startIdxAlm = Math.max(0, Math.floor(scrollTopAlm / ITEM_HEIGHT_ALM) - OVERSCAN_ALM);
+  const endIdxAlm = Math.min(almacenesFiltrados.length, Math.ceil((scrollTopAlm + containerHeightAlm) / ITEM_HEIGHT_ALM) + OVERSCAN_ALM);
+  const visibleAlmacenes = almacenesFiltrados.slice(startIdxAlm, endIdxAlm);
+  const offsetYAlm = startIdxAlm * ITEM_HEIGHT_ALM;
+
   const totalHeight = vuelosFiltrados.length * ITEM_HEIGHT;
   const startIdx = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
   const endIdx = Math.min(vuelosFiltrados.length, Math.ceil((scrollTop + containerHeight) / ITEM_HEIGHT) + OVERSCAN);
@@ -2242,9 +2354,13 @@ export default function SimulacionPeriodo() {
                   style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
                   🔍 Buscar envío
                 </button>
-                <button onClick={() => setFlightPanelOpen(!flightPanelOpen)}
+                <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) setAlmacenesPanelOpen(false); }}
                   style={{ padding: '7px 12px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
                   ✈️ Vuelos
+                </button>
+                <button onClick={() => { setAlmacenesPanelOpen(!almacenesPanelOpen); if (!almacenesPanelOpen) setFlightPanelOpen(false); }}
+                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: almacenesPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                  🏭 Almacenes
                 </button>
               </div>
             </div>
@@ -2311,19 +2427,25 @@ export default function SimulacionPeriodo() {
         </div>
         </div>
 
-        {/* Panel Lateral de Vuelos — Derecha — Virtual Scrolled */}
+        {/* Panel Lateral Compartido — Vuelos / Almacenes */}
         <div style={{
-          width: flightPanelOpen ? '280px' : '0',
+          width: (flightPanelOpen || almacenesPanelOpen) ? '280px' : '0',
           flexShrink: 0,
-          backgroundColor: 'rgba(255,255,255,0.98)',
-          boxShadow: flightPanelOpen ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
-          display: 'flex',
-          flexDirection: 'column',
+          position: 'relative',
           overflow: 'hidden',
           zIndex: 999997,
-          position: 'relative',
           transition: 'width 0.35s ease',
-          height: '100%'
+          height: '100%',
+          backgroundColor: 'rgba(255,255,255,0.98)',
+          boxShadow: (flightPanelOpen || almacenesPanelOpen) ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
+        }}>
+
+        {/* Vuelos Disponibles */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          display: flightPanelOpen ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}>
           <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2565,6 +2687,210 @@ export default function SimulacionPeriodo() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Almacenes Panel (overlays on top of Vuelos panel) */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          display: almacenesPanelOpen ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          backgroundColor: 'rgba(255,255,255,0.98)',
+          zIndex: 1,
+        }}>
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                Almacenes
+              </h3>
+              <button
+                onClick={() => setAlmacenesPanelOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              Total: {almacenesFiltrados.length} almacenes
+            </div>
+            <button
+              ref={filterAlmButtonRef}
+              onClick={() => { setFiltrosAlmOpen(!filtrosAlmOpen); if (filterAlmButtonRef.current) { const r = filterAlmButtonRef.current.getBoundingClientRect(); setFilterAlmPosition({ top: r.bottom + 4, left: r.left }); } }}
+              style={{
+                marginTop: '12px', padding: '8px 12px', fontSize: '12px',
+                backgroundColor: 'var(--accent-blue)', color: 'white',
+                border: 'none', borderRadius: '6px', cursor: 'pointer',
+                fontWeight: 600, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', gap: '6px'
+              }}
+            >
+              🔽 Filtrar
+            </button>
+          </div>
+
+          {filtrosAlmOpen && (
+            <div style={{
+              position: 'fixed', top: filterAlmPosition.top, left: filterAlmPosition.left,
+              backgroundColor: 'white', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 999999,
+              padding: '14px', minWidth: '220px',
+              animation: 'fadeIn 0.15s ease'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
+                <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmCiudad(''); setFilterAlmPais(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
+                  style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
+                  ✕ Borrar
+                </button>
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Código</label>
+                <input value={filterAlmCodigo} onChange={e => setFilterAlmCodigo(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ciudad</label>
+                <input value={filterAlmCiudad} onChange={e => setFilterAlmCiudad(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>País</label>
+                <input value={filterAlmPais} onChange={e => setFilterAlmPais(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
+                <select value={sortAlmBy} onChange={e => setSortAlmBy(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none' }}>
+                  <option value="codigo">Código</option>
+                  <option value="ciudad">Ciudad</option>
+                  <option value="pais">País</option>
+                  <option value="ocupacion">Ocupación</option>
+                  <option value="stock">Stock</option>
+                  <option value="entrantes">Entrantes</option>
+                  <option value="salientes">Salientes</option>
+                  <option value="transito">En tránsito</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setSortAlmDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
+                <button onClick={() => setSortAlmDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
+              </div>
+            </div>
+          )}
+
+          <div ref={scrollContainerAlmRef} style={{ flex: 1, overflowY: 'auto', padding: '12px' }}
+            onScroll={(e) => { setScrollTopAlm(e.currentTarget.scrollTop); if (scrollContainerAlmRef.current) { setContainerHeightAlm(scrollContainerAlmRef.current.clientHeight); } }}
+          >
+            {sim.isRunning && sim.iteracion === 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px' }}>
+                <span style={{ display: 'inline-block', width: '20px', height: '20px', border: '3px solid rgba(59,130,246,0.3)', borderRadius: '50%', borderTopColor: '#3b82f6', animation: 'alm-spin 1s linear infinite' }}></span>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-blue)' }}>Configurando algoritmo...</span>
+                <style>{`@keyframes alm-spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            ) : almacenesFiltrados.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
+                <span>⏳ Esperando datos de almacenes...</span>
+              </div>
+            ) : (
+              <div style={{ height: totalHeightAlm, paddingTop: offsetYAlm, boxSizing: 'border-box' }}>
+                {visibleAlmacenes.map((alm, i) => {
+                  const estadoColor = alm.pct === 0 ? '#6366f1' : alm.pct < 50 ? '#22c55e' : alm.pct < 80 ? '#f97316' : '#ef4444';
+                  return (
+                    <div
+                      key={alm.codigo}
+                      onClick={() => setSelectedAlmacen(selectedAlmacen === alm.codigo ? null : alm.codigo)}
+                      style={{
+                        padding: '10px',
+                        marginBottom: '8px',
+                        backgroundColor: selectedAlmacen === alm.codigo ? 'rgba(59,130,246,0.06)' : 'var(--bg-tertiary)',
+                        border: `1px solid ${selectedAlmacen === alm.codigo ? 'var(--accent-blue)' : 'var(--border-color)'}`,
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        position: 'relative',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{alm.codigo}</span>
+                          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}</div>
+                        </div>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: estadoColor }}>{alm.pct.toFixed(0)}%</span>
+                      </div>
+                      <div style={{ marginTop: '6px', height: '6px', backgroundColor: 'var(--border-color)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', backgroundColor: estadoColor, width: `${Math.min(100, alm.pct)}%`, borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
+                        <span>📦 Stock: <strong style={{ color: 'var(--text-primary)' }}>{alm.ocupacion}/{alm.capacidad}</strong></span>
+                        <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#2563eb' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
+                        <span>📤 Salen: <strong style={{ color: '#d97706' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
+                        <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#059669' }}>{alm.transito.maletas}</strong></span>
+                      </div>
+                      {selectedAlmacen === alm.codigo && (
+                        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>📋 Envíos</div>
+                          {(() => {
+                            const rutas = Array.from(rutasPlanificadasRef.current.values());
+                            const salientes = rutas.filter(r => (r.tramos || []).some(t => t.origen === alm.codigo));
+                            const entrantes = rutas.filter(r => (r.tramos || []).some(t => t.destino === alm.codigo));
+                            const enTransito = flightEventsRef.current.filter(fe => fe.destinoCode === alm.codigo && fe.active && !fe.done && !fe.key.startsWith('unused-') && fe.maletasVuelo > 0);
+                            return (
+                              <>
+                                {salientes.length > 0 && (
+                                  <div style={{ marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '9px', fontWeight: 600, color: '#d97706' }}>📤 Salen ({salientes.length}):</span>
+                                    {salientes.slice(0, 3).map(r => {
+                                      const tramo = (r.tramos || []).find(t => t.origen === alm.codigo);
+                                      const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
+                                      return (
+                                        <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
+                                          {codUnico} → {r.destino} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
+                                        </div>
+                                      );
+                                    })}
+                                      {salientes.length > 3 && <div style={{ fontSize: '8px', color: 'var(--text-muted)', paddingLeft: '12px' }}>... y {salientes.length - 3} más</div>}
+                                  </div>
+                                )}
+                                {entrantes.length > 0 && (
+                                  <div style={{ marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '9px', fontWeight: 600, color: '#2563eb' }}>📥 Entran ({entrantes.length}):</span>
+                                    {entrantes.slice(0, 3).map(r => {
+                                      const tramo = (r.tramos || []).find(t => t.destino === alm.codigo);
+                                      const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
+                                      return (
+                                        <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
+                                          {tramo?.origen} → {codUnico} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
+                                        </div>
+                                      );
+                                    })}
+                                      {entrantes.length > 3 && <div style={{ fontSize: '8px', color: 'var(--text-muted)', paddingLeft: '12px' }}>... y {entrantes.length - 3} más</div>}
+                                  </div>
+                                )}
+                                {enTransito.length > 0 && (
+                                  <div>
+                                    <span style={{ fontSize: '9px', fontWeight: 600, color: '#059669' }}>✈️ En tránsito ({enTransito.length}):</span>
+                                {enTransito.filter(fe => fe.maletasVuelo > 0).map(fe => (
+                                  <div key={fe.key} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
+                                    {fe.origenCode} → ({fe.maletasVuelo} maletas)
+                                  </div>
+                                ))}
+                                  </div>
+                                )}
+                                {salientes.length === 0 && entrantes.length === 0 && enTransito.length === 0 && (
+                                  <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Sin envíos</div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
         </div>
       </div>
 

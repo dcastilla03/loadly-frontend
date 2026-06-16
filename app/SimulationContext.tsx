@@ -214,6 +214,7 @@ export function SimulationProvider({ children, startDate, startTime }: { childre
             fe.done = true;
           } else {
             fe.active = true;
+            (fe as any)._activatedThisFrame = true;
             airportStateRef.current.set(fe.origenCode, {
               ocupacion: fe.ocupacionAlmacenOrigen,
               capacidad: fe.capacidadAlmacenOrigen,
@@ -222,14 +223,42 @@ export function SimulationProvider({ children, startDate, startTime }: { childre
         }
 
         if (fe.active) {
-          const duracion = fe.minutosFin - fe.minutosInicio;
-          if (duracion <= 0 || minSim >= fe.minutosFin) {
-            fe.done = true;
-            fe.active = false;
-            airportStateRef.current.set(fe.destinoCode, {
-              ocupacion: fe.ocupacionAlmacenDestino,
-              capacidad: fe.capacidadAlmacenDestino,
-            });
+          // Saltar verificación de done en el mismo frame que se activó
+          if ((fe as any)._activatedThisFrame) {
+            (fe as any)._activatedThisFrame = false;
+          } else {
+            const duracion = fe.minutosFin - fe.minutosInicio;
+            if (duracion <= 0 || minSim >= fe.minutosFin) {
+              fe.done = true;
+              fe.active = false;
+              airportStateRef.current.set(fe.destinoCode, {
+                ocupacion: fe.ocupacionAlmacenDestino,
+                capacidad: fe.capacidadAlmacenDestino,
+              });
+              // Liberar el placeholder (empty flight) correspondiente
+              if (!fe.key.startsWith('unused-')) {
+                const mod1440 = fe.minutosInicio % 1440;
+                for (const placeholder of events) {
+                  if (placeholder.key.startsWith('unused-') && placeholder.done &&
+                      placeholder.origenCode === fe.origenCode &&
+                      placeholder.destinoCode === fe.destinoCode &&
+                      (placeholder.minutosInicio % 1440) === mod1440) {
+                    placeholder.done = false;
+                    // Recalcular próxima salida de este slot horario
+                    const timeOfDay = placeholder.minutosInicio % 1440;
+                    const duracionPlaceholder = placeholder.minutosFin - placeholder.minutosInicio;
+                    const todayDeparture = Math.floor(minSim / 1440) * 1440 + timeOfDay;
+                    if (todayDeparture <= minSim) {
+                      placeholder.minutosInicio = todayDeparture + 1440;
+                    } else {
+                      placeholder.minutosInicio = todayDeparture;
+                    }
+                    placeholder.minutosFin = placeholder.minutosInicio + duracionPlaceholder;
+                    break;
+                  }
+                }
+              }
+            }
           }
         }
       }

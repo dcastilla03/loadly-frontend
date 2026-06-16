@@ -564,15 +564,18 @@ export function useSimulacion(startDate?: string, startTime?: string) {
               for (const fe of allFlightEventsRef.current) {
                 if (!fe.key.startsWith(ae.idEnvio + '-')) continue;
                 if (fe.origenCode !== cancelledOrig || fe.destinoCode !== cancelledDest) continue;
-                // Convertir minutosInicio a hora local del aeropuerto origen
-                const depDate = new Date(simStart.getTime() + fe.minutosInicio * 60000);
-                const apt = aeropuertosRef.current.get(fe.origenCode);
-                const offset = apt?.gmt ?? 0;
-                const gmtHour = depDate.getHours();
-                const gmtMin = depDate.getMinutes();
-                const depLocalH = ((gmtHour + offset) % 24 + 24) % 24;
-                const depLocalM = gmtMin;
-                if (depLocalH === localH && depLocalM === localM) {
+                // Usar tramo.sale exacto de los datos de ruta (evita errores de timezone)
+                const feIdEnvio = fe.key.split('-')[0];
+                const feRuta = rutasPlanificadasRef.current.get(feIdEnvio);
+                let feH = -1, feM = -1;
+                if (feRuta && feRuta.tramos) {
+                  const feTramo = feRuta.tramos.find(t => t.orden === fe.tramoOrden);
+                  if (feTramo && feTramo.sale) {
+                    const parts = feTramo.sale.split(':').map(Number);
+                    feH = parts[0]; feM = parts[1];
+                  }
+                }
+                if (feH === localH && feM === localM) {
                   const m = fe.key.match(/iter(\d+)/);
                   const iterIdx = m ? parseInt(m[1]) : -1;
                   nuevosSuppressed.set(ae.idEnvio, { minTramoOrden: fe.tramoOrden, iteracionIdx: iterIdx });

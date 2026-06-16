@@ -291,16 +291,27 @@ export default function SimulacionPeriodo() {
     const simStart = sim.simStartDateRef.current;
     if (!simStart) return;
 
-    // Build used flight keys from all SSE route data
-    const usedKeys = new Set<string>();
+    // Build used flight keys from active (non-done) SSE FlightEvents
+    const activeUsedKeys = new Set<string>();
+    const allForKeys = sim.allFlightEvents.length > 0 ? sim.allFlightEvents : flightEventsRef.current;
+    for (const fe of allForKeys) {
+      if (!fe.key.startsWith('unused-') && !fe.done) {
+        const hh = String(Math.floor((fe.minutosInicio % 1440) / 60)).padStart(2, '0');
+        const mm = String(fe.minutosInicio % 60).padStart(2, '0');
+        activeUsedKeys.add(`${fe.origenCode}-${fe.destinoCode}-${hh}:${mm}`);
+      }
+    }
+
+    // Build all historical keys (for skipping empty flight creation)
+    const allUsedKeys = new Set<string>();
     sim.rutasPlanificadasRef.current.forEach(ruta => {
       (ruta.tramos || []).forEach(tramo => {
         const gmtTime = (tramo.sale || '').split(' ')[1] || '00:00';
-        usedKeys.add(`${tramo.origen}-${tramo.destino}-${gmtTime}`);
+        allUsedKeys.add(`${tramo.origen}-${tramo.destino}-${gmtTime}`);
       });
     });
 
-    // Mark empty flights as done if their key is now used
+    // Mark empty flights as done only if their slot has an ACTIVE SSE flight
     let changed = false;
     emptyFlightsAddedRef.current.forEach(key => {
       const parts = key.split('-');
@@ -308,10 +319,9 @@ export default function SimulacionPeriodo() {
         const timeStr = parts[parts.length - 1];
         const gmtTime = `${timeStr.substring(0, 2)}:${timeStr.substring(2, 4)}`;
         const usedKey = `${parts[1]}-${parts[2]}-${gmtTime}`;
-        if (usedKeys.has(usedKey)) {
+        if (activeUsedKeys.has(usedKey)) {
           const fe = flightEventsRef.current.find(e => e.key === key);
           if (fe && !fe.done) { fe.done = true; changed = true; }
-          emptyFlightsAddedRef.current.delete(key);
         }
       }
     });
@@ -330,7 +340,7 @@ export default function SimulacionPeriodo() {
       const gmtH = ((lh - gmtO) % 24 + 24) % 24;
       const gmtTime = `${String(gmtH).padStart(2, '0')}:${String(lm).padStart(2, '0')}`;
 
-      if (usedKeys.has(`${origen}-${destino}-${gmtTime}`)) continue;
+      if (allUsedKeys.has(`${origen}-${destino}-${gmtTime}`)) continue;
 
       const feKey = `unused-${origen}-${destino}-${String(gmtH).padStart(2, '0')}${String(lm).padStart(2, '0')}`;
       if (emptyFlightsAddedRef.current.has(feKey)) continue;
@@ -402,6 +412,7 @@ export default function SimulacionPeriodo() {
         destino,
         salida: salidaGMT,
         llegada: llegadaGMT,
+        horaSalida: v.horaSalida,
       };
     });
   }, [apiFlights]);
@@ -700,6 +711,8 @@ export default function SimulacionPeriodo() {
     }
 
     function updateAvionPosition(fe: FlightEvent, progress: number, map: any) {
+      if (!Number.isFinite(progress)) return;
+      if (!fe.svgElement || !fe.airplaneGroup || !fe.airplaneImage) return;
       const path: [number, number][] = (fe as any)._path;
       if (!path || path.length < 2) return;
 
@@ -790,20 +803,25 @@ export default function SimulacionPeriodo() {
           }
 
           if (fe.active && !fe.svgElement) {
-            spawnAvionRender(fe, map);
+            // No re-spawnear si el vuelo ya llegó (rawProgress >= 1)
+            const dur = fe.minutosFin - fe.minutosInicio;
+            const raw = dur > 0 ? (minSim - fe.minutosInicio) / dur : 1;
+            if (Number.isFinite(raw) && raw < 1) {
+              spawnAvionRender(fe, map);
+            }
           }
 
           if (fe.active && fe.svgElement) {
             const duracion = fe.minutosFin - fe.minutosInicio;
-            if (duracion <= 0) {
+            if (!Number.isFinite(duracion) || duracion <= 0) {
               removeAvionRender(fe);
               continue;
             }
-            const progress = Math.min(1, (minSim - fe.minutosInicio) / duracion);
-            if (progress >= 1) {
+            const rawProgress = (minSim - fe.minutosInicio) / duracion;
+            if (!Number.isFinite(rawProgress) || rawProgress >= 1) {
               removeAvionRender(fe);
             } else {
-              updateAvionPosition(fe, progress, map);
+              updateAvionPosition(fe, rawProgress, map);
             }
           }
         }
@@ -814,7 +832,7 @@ export default function SimulacionPeriodo() {
       map.on('move zoom moveend zoomend', () => {
         const map = mapInst.current;
         if (!map) return;
-        flightEventsRef.current.filter(fe => fe.active && !fe.done).forEach(fe => {
+        flightEventsRef.current.filter(fe => fe.active && !fe.done && fe.svgElement).forEach(fe => {
           const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
           const duracion = fe.minutosFin - fe.minutosInicio;
           if (duracion > 0) {
@@ -958,7 +976,7 @@ export default function SimulacionPeriodo() {
   function handleDetener() {
     sim.detener();
     flightEventsRef.current.filter(fe => fe.active).forEach(fe => {
-      if (fe.svgElement) { try { fe.svgElement.remove(); } catch (_) {} fe.svgElement = undefined; fe.airplaneGroup = undefined; fe.airplaneImage = undefined; }
+      if (fe.svgElement) { try { fe.svgElement.remove(); } catch (_) { } fe.svgElement = undefined; fe.airplaneGroup = undefined; fe.airplaneImage = undefined; }
       fe.active = false;
       fe.done = true;
     });
@@ -990,14 +1008,14 @@ export default function SimulacionPeriodo() {
       }
     });
 
-      // Reset flight events ref
-      flightEventsRef.current = [];
+    // Reset flight events ref
+    flightEventsRef.current = [];
 
-      // Reset cancellation data refs
-      cancelledFlightsRef.current = new Set();
-      suppressedTramosRef.current = new Map();
-      emptyFlightsAddedRef.current = new Set();
-    }
+    // Reset cancellation data refs
+    cancelledFlightsRef.current = new Set();
+    suppressedTramosRef.current = new Map();
+    emptyFlightsAddedRef.current = new Set();
+  }
 
   function mostrarNotificacion(mensaje: string, color: string) {
     const notif = document.createElement('div');
@@ -1050,20 +1068,16 @@ export default function SimulacionPeriodo() {
     return timePart.substring(0, 5);
   };
 
-  // Obtiene la clave de vuelo en el formato que espera el backend (ORIGEN-DESTINO-HH:MM hora local)
-  const getClaveVuelo = (vuelo: any): string => {
-    const [gmtHour, gmtMin] = extraerHHMM(vuelo.salida).split(':').map(Number);
-    const apt = sim.aeropuertosRef.current.get(vuelo.origen);
-    const offset = apt?.gmt ?? 0;
-    const localHour = ((gmtHour + offset) % 24 + 24) % 24;
-    const hh = String(localHour).padStart(2, '0');
-    const mm = String(gmtMin).padStart(2, '0');
-    return `${vuelo.origen}-${vuelo.destino}-${hh}:${mm}`;
+  // Obtiene la clave de vuelo que espera el backend (ORIGEN-DESTINO-HH:MM hora LOCAL)
+  // Usa vuelo.horaSalida (local original de la API) directamente, evitando doble conversión GMT.
+  const getCancelKey = (vuelo: any): string => {
+    const [h, m] = (vuelo.horaSalida || '00:00').split(':').map(Number);
+    return `${vuelo.origen}-${vuelo.destino}-${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
   // Cancela un vuelo llamando al backend
   const cancelarVuelo = async (vuelo: any) => {
-    const claveVuelo = getClaveVuelo(vuelo);
+    const claveVuelo = getCancelKey(vuelo);
     console.log('[cancelarVuelo] Enviando claveVuelo:', claveVuelo, 'vuelo:', vuelo);
 
     // Agregar al Set de vuelos cancelándose para bloquear visualmente
@@ -1149,21 +1163,25 @@ export default function SimulacionPeriodo() {
     const aeropuertoOrigen = sim.aeropuertos.find(a => a.codigo === fe.origenCode);
     const aeropuertoDestino = sim.aeropuertos.find(a => a.codigo === fe.destinoCode);
 
-    // Calcular horarios
+    // Calcular horarios en GMT (consistente con vuelosGlobales y el backend)
     const simStartDate = sim.simStartDateRef.current;
+    if (!simStartDate) return;
     let startDateStr = startDate;
-    let startTimeStr = startTime;
-    if (simStartDate) {
-      startDateStr = `${simStartDate.getFullYear()}-${String(simStartDate.getMonth() + 1).padStart(2, '0')}-${String(simStartDate.getDate()).padStart(2, '0')}`;
-      startTimeStr = `${String(simStartDate.getHours()).padStart(2, '0')}:${String(simStartDate.getMinutes()).padStart(2, '0')}`;
-    }
-    if (!startDateStr) {
-      const now = new Date();
-      startDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      startTimeStr = startTimeStr || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    }
-    const horaSalida = formatSimTime(fe.minutosInicio, startDateStr, startTimeStr);
-    const horaLlegada = formatSimTime(fe.minutosFin, startDateStr, startTimeStr);
+    startDateStr = `${simStartDate.getFullYear()}-${String(simStartDate.getMonth() + 1).padStart(2, '0')}-${String(simStartDate.getDate()).padStart(2, '0')}`;
+    const depDate = new Date(simStartDate.getTime() + fe.minutosInicio * 60000);
+    const arrDate = new Date(simStartDate.getTime() + fe.minutosFin * 60000);
+    const depHH = String(depDate.getHours()).padStart(2, '0');
+    const depMi = String(depDate.getMinutes()).padStart(2, '0');
+    const arrHH = String(arrDate.getHours()).padStart(2, '0');
+    const arrMi = String(arrDate.getMinutes()).padStart(2, '0');
+    const depDD = String(depDate.getDate()).padStart(2, '0');
+    const depMM = String(depDate.getMonth() + 1).padStart(2, '0');
+    const depYYYY = depDate.getFullYear();
+    const arrDD = String(arrDate.getDate()).padStart(2, '0');
+    const arrMM = String(arrDate.getMonth() + 1).padStart(2, '0');
+    const arrYYYY = arrDate.getFullYear();
+    const horaSalida = `${depDD}/${depMM}/${depYYYY} ${depHH}:${depMi}`;
+    const horaLlegada = `${arrDD}/${arrMM}/${arrYYYY} ${arrHH}:${arrMi}`;
 
     // Calcular duración en horas y minutos
     const duracionMin = fe.minutosFin - fe.minutosInicio;
@@ -1175,19 +1193,34 @@ export default function SimulacionPeriodo() {
     const salidaHHMM = horaSalida.split(' ')[1] || '00:00';
     const codigoVueloPanel = generarCodigoVuelo(fe.origenCode, fe.destinoCode, salidaHHMM);
 
-    // Buscar envíos relacionados (solo para vuelos en uso)
+    // Buscar envíos relacionados (misma ruta por idEnvio)
     const enviosRelacionados: { codigo: string; label: string }[] = [];
     if (!isEmptyFlight) {
+      let currentIdEnvio = fe.key.split('-')[0];
+      // Si es key sintético (card-), buscar el idEnvio real desde rutasPlanificadasRef
+      if (fe.key.startsWith('card-')) {
+        const timeSlot = fe.minutosInicio % 1440;
+        for (const ruta of rutasPlanificadasRef.current.values()) {
+          for (const tramo of ruta.tramos || []) {
+            const [th, tm] = (tramo.sale || '00:00').split(':').map(Number);
+            if ((th * 60 + tm) === timeSlot && tramo.origen === fe.origenCode && tramo.destino === fe.destinoCode) {
+              currentIdEnvio = ruta.idEnvio;
+              break;
+            }
+          }
+          if (currentIdEnvio !== fe.key.split('-')[0]) break;
+        }
+      }
+      const prefix = currentIdEnvio + '-';
       const codigosVistos = new Set<string>();
       flightEventsRef.current.forEach(e => {
-        if (e.key.startsWith('unused-')) return;
-        if (e.origenCode === fe.origenCode && e.destinoCode === fe.destinoCode && e.minutosInicio === fe.minutosInicio) {
-          const codEnvio = e.key.split('-')[0];
-          if (!codigosVistos.has(codEnvio)) {
-            codigosVistos.add(codEnvio);
-            const ruta = rutasPlanificadasRef.current.get(codEnvio);
-            const label = ruta ? `${ruta.origen} → ${ruta.destino}${(ruta.tramos?.length ?? 0) > 1 ? ` (${ruta.tramos.length} tramos)` : ''}` : codEnvio;
-            enviosRelacionados.push({ codigo: codEnvio, label });
+        if (e.key.startsWith('unused-') || e.key.startsWith('card-')) return;
+        if (e.key.startsWith(prefix) && e.key !== fe.key) {
+          if (!codigosVistos.has(currentIdEnvio)) {
+            codigosVistos.add(currentIdEnvio);
+            const ruta = rutasPlanificadasRef.current.get(currentIdEnvio);
+            const label = ruta ? `${ruta.origen} → ${ruta.destino}${(ruta.tramos?.length ?? 0) > 1 ? ` (${ruta.tramos.length} tramos)` : ''}` : currentIdEnvio;
+            enviosRelacionados.push({ codigo: currentIdEnvio, label });
           }
         }
       });
@@ -1278,10 +1311,10 @@ export default function SimulacionPeriodo() {
   }
 
   // ── Panel de Detalle del Envío (se abre SOLO desde la búsqueda) ───────────
-    function cerrarPanelEnvio() {
-      const panel = document.getElementById('airplaneDetailsPanel');
-      if (panel) panel.remove();
-    }
+  function cerrarPanelEnvio() {
+    const panel = document.getElementById('airplaneDetailsPanel');
+    if (panel) panel.remove();
+  }
 
   function mostrarPanelEnvio(fe: FlightEvent, codigoUnicoForzado?: string) {
     cerrarPanelAvion();
@@ -1505,7 +1538,7 @@ export default function SimulacionPeriodo() {
         const isLast = i === aeropuertosRuta.length - 1;
         const colors = ap.state === 'done' ? { dot: '#16a34a', bg: 'rgba(34,197,94,0.12)', border: '#16a34a', label: '#16a34a', line: '#16a34a' }
           : ap.state === 'active' ? { dot: '#2564eb', bg: 'rgba(37,100,235,0.1)', border: '#2564eb', label: '#2564eb', line: '#2564eb' }
-          : { dot: '#d1d5db', bg: '#f9fafb', border: '#e5e7eb', label: '#9ca3af', line: '#d1d5db' };
+            : { dot: '#d1d5db', bg: '#f9fafb', border: '#e5e7eb', label: '#9ca3af', line: '#d1d5db' };
         const saleStr = ap.sale ? `<span style="font-size:9px;color:#16a34a;font-weight:600;margin-left:auto;">Sale ${ap.sale}</span>` : '';
         const llegaStr = ap.llega ? `<span style="font-size:9px;color:#2564eb;font-weight:600;margin-left:6px;">Llega ${ap.llega}</span>` : '';
         return `
@@ -1655,8 +1688,8 @@ export default function SimulacionPeriodo() {
   // ── Barra de progreso del cronómetro ─────────────────────────────────────
   const pct = Math.round(sim.progreso);
   const simStartDateObj = sim.simStartDateRef.current;
-  const simDateStr = simStartDateObj ? `${simStartDateObj.getFullYear()}-${String(simStartDateObj.getMonth()+1).padStart(2,'0')}-${String(simStartDateObj.getDate()).padStart(2,'0')}` : null;
-  const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getHours()).padStart(2,'0')}:${String(simStartDateObj.getMinutes()).padStart(2,'0')}` : null;
+  const simDateStr = simStartDateObj ? `${simStartDateObj.getFullYear()}-${String(simStartDateObj.getMonth() + 1).padStart(2, '0')}-${String(simStartDateObj.getDate()).padStart(2, '0')}` : null;
+  const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getHours()).padStart(2, '0')}:${String(simStartDateObj.getMinutes()).padStart(2, '0')}` : null;
   const simTimeLabel = formatSimTime(simMinutos, simDateStr, simTimeStr);
 
   // ── Filtros + Virtual Scroll para el panel de vuelos ──────────────────────
@@ -1692,7 +1725,7 @@ export default function SimulacionPeriodo() {
           let d = new Date(simStart); d.setHours(hh, mm, 0, 0);
           while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
           const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
-          const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && e.minutosInicio === minInicio);
+          const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && (e.minutosInicio % 1440) === (minInicio % 1440));
           if (!fe || fe.key.startsWith('unused-')) return -1;
           if (fe.capacidadVuelo > 0) return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
           return 0;
@@ -1811,301 +1844,301 @@ export default function SimulacionPeriodo() {
         <div className="card map-card" style={{ padding: 0, overflow: 'visible', height: '100vh', display: 'flex', flexDirection: 'column', flex: 1, margin: 0, borderRadius: 0, position: 'relative', transition: 'flex 0.35s ease' }}>
           <div ref={mapRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
 
-        {/* Configuration Overlay */}
-        {showConfigOverlay && (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            zIndex: 9999999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
+          {/* Configuration Overlay */}
+          {showConfigOverlay && (
             <div style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              maxWidth: '700px',
-              width: '90%',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-              padding: '24px'
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              zIndex: 9999999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}>
-              {/* Modal Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  ⚙️ Configurar Simulación
-                </h2>
-              </div>
-
-              {/* Wizard Steps */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '50%',
-                    backgroundColor: configWizardStep === 1 ? 'var(--accent-blue)' : configWizardStep > 1 ? '#10b981' : 'var(--bg-tertiary)',
-                    color: configWizardStep === 1 ? 'white' : configWizardStep > 1 ? 'white' : 'var(--text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    fontSize: '14px',
-                    marginBottom: '4px'
-                  }}>1</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Fecha de Inicio</div>
+              <div style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                maxWidth: '700px',
+                width: '90%',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                padding: '24px'
+              }}>
+                {/* Modal Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    ⚙️ Configurar Simulación
+                  </h2>
                 </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '50%',
-                    backgroundColor: configWizardStep === 2 ? 'var(--accent-blue)' : 'var(--bg-tertiary)',
-                    color: configWizardStep === 2 ? 'white' : 'var(--text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    fontSize: '14px',
-                    marginBottom: '4px'
-                  }}>2</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Confirmación</div>
-                </div>
-              </div>
 
-              {/* Step 1: Fecha de Inicio */}
-              {configWizardStep === 1 && (
-                <div>
-                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
-                    Fecha y Hora de Inicio (Período de 5 Días)
-                  </h3>
-                  <div style={{ display: 'grid', gap: '16px' }}>
-                    <div>
-                      <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: 600 }}>
-                        Selecciona la fecha de inicio:
-                      </label>
-                      <input
-                        type="date"
-                        value={configStartDate}
-                        onChange={(e) => setConfigStartDate(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          borderRadius: '8px',
-                          border: '1px solid var(--border-color)',
-                          backgroundColor: 'var(--bg-secondary)',
-                          color: 'var(--text-primary)',
-                          fontSize: '14px',
-                          boxSizing: 'border-box'
-                        }}
-                      />
+                {/* Wizard Steps */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      backgroundColor: configWizardStep === 1 ? 'var(--accent-blue)' : configWizardStep > 1 ? '#10b981' : 'var(--bg-tertiary)',
+                      color: configWizardStep === 1 ? 'white' : configWizardStep > 1 ? 'white' : 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      fontSize: '14px',
+                      marginBottom: '4px'
+                    }}>1</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Fecha de Inicio</div>
+                  </div>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      backgroundColor: configWizardStep === 2 ? 'var(--accent-blue)' : 'var(--bg-tertiary)',
+                      color: configWizardStep === 2 ? 'white' : 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      fontSize: '14px',
+                      marginBottom: '4px'
+                    }}>2</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center' }}>Confirmación</div>
+                  </div>
+                </div>
+
+                {/* Step 1: Fecha de Inicio */}
+                {configWizardStep === 1 && (
+                  <div>
+                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
+                      Fecha y Hora de Inicio (Período de 5 Días)
+                    </h3>
+                    <div style={{ display: 'grid', gap: '16px' }}>
+                      <div>
+                        <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: 600 }}>
+                          Selecciona la fecha de inicio:
+                        </label>
+                        <input
+                          type="date"
+                          value={configStartDate}
+                          onChange={(e) => setConfigStartDate(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-secondary)',
+                            color: 'var(--text-primary)',
+                            fontSize: '14px',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: 600 }}>
+                          Selecciona la hora de inicio:
+                        </label>
+                        <input
+                          type="time"
+                          value={configStartTime}
+                          onChange={(e) => setConfigStartTime(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-secondary)',
+                            color: 'var(--text-primary)',
+                            fontSize: '14px',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+                      <div style={{ padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid var(--accent-blue)', borderRadius: '8px' }}>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>
+                          📅 La simulación durará <strong>5 días</strong> a partir de la fecha y hora seleccionadas.
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '8px', fontWeight: 600 }}>
-                        Selecciona la hora de inicio:
-                      </label>
-                      <input
-                        type="time"
-                        value={configStartTime}
-                        onChange={(e) => setConfigStartTime(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          borderRadius: '8px',
-                          border: '1px solid var(--border-color)',
-                          backgroundColor: 'var(--bg-secondary)',
-                          color: 'var(--text-primary)',
-                          fontSize: '14px',
-                          boxSizing: 'border-box'
-                        }}
-                      />
+                  </div>
+                )}
+
+                {/* Step 2: Confirmación */}
+                {configWizardStep === 2 && (
+                  <div>
+                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
+                      ✓ Resumen de Configuración
+                    </h3>
+
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                      <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                        <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tipo de Simulación</small>
+                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
+                          📅 Simulación de Período
+                        </div>
+                      </div>
+
+                      <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                        <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fecha y Hora de Inicio</small>
+                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
+                          {configStartDate ? (() => {
+                            const date = new Date(configStartDate + 'T00:00:00');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const year = date.getFullYear();
+                            const time = configStartTime || '00:00';
+                            return `${day}/${month}/${year} ${time}`;
+                          })() : '-'}
+                        </div>
+                      </div>
+
+                      <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
+                        <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Duración</small>
+                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
+                          5 días (fijo)
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid var(--accent-blue)', borderRadius: '8px' }}>
+
+                    <div style={{ marginTop: '24px', padding: '16px', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid var(--success-green)', borderRadius: '8px' }}>
                       <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>
-                        📅 La simulación durará <strong>5 días</strong> a partir de la fecha y hora seleccionadas.
+                        ✓ La configuración está lista. Haz clic en <strong>"Iniciar Simulación"</strong> para comenzar el proceso.
                       </p>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Step 2: Confirmación */}
-              {configWizardStep === 2 && (
-                <div>
-                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '16px' }}>
-                    ✓ Resumen de Configuración
-                  </h3>
-
-                  <div style={{ display: 'grid', gap: '12px' }}>
-                    <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
-                      <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tipo de Simulación</small>
-                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
-                        📅 Simulación de Período
-                      </div>
-                    </div>
-
-                    <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
-                      <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fecha y Hora de Inicio</small>
-                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
-                        {configStartDate ? (() => {
-                          const date = new Date(configStartDate + 'T00:00:00');
-                          const day = String(date.getDate()).padStart(2, '0');
-                          const month = String(date.getMonth() + 1).padStart(2, '0');
-                          const year = date.getFullYear();
-                          const time = configStartTime || '00:00';
-                          return `${day}/${month}/${year} ${time}`;
-                        })() : '-'}
-                      </div>
-                    </div>
-
-                    <div style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', borderLeft: '3px solid var(--accent-blue)' }}>
-                      <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Duración</small>
-                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
-                        5 días (fijo)
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: '24px', padding: '16px', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid var(--success-green)', borderRadius: '8px' }}>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>
-                      ✓ La configuración está lista. Haz clic en <strong>"Iniciar Simulación"</strong> para comenzar el proceso.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Modal Footer */}
-              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
-                <button
-                  onClick={() => setConfigWizardStep(configWizardStep - 1)}
-                  disabled={configWizardStep === 1}
-                  style={{
-                    padding: '10px 16px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    backgroundColor: configWizardStep === 1 ? 'var(--border-color)' : 'var(--bg-secondary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    cursor: configWizardStep === 1 ? 'default' : 'pointer',
-                    display: configWizardStep === 1 ? 'none' : 'block'
-                  }}
-                >
-                  ← Anterior
-                </button>
-                <button
-                  onClick={() => {
-                    if (configWizardStep === 1) {
-                      if (!configStartDate) {
-                        alert('Por favor selecciona una fecha de inicio.');
-                        return;
+                {/* Modal Footer */}
+                <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                  <button
+                    onClick={() => setConfigWizardStep(configWizardStep - 1)}
+                    disabled={configWizardStep === 1}
+                    style={{
+                      padding: '10px 16px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: configWizardStep === 1 ? 'var(--border-color)' : 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      cursor: configWizardStep === 1 ? 'default' : 'pointer',
+                      display: configWizardStep === 1 ? 'none' : 'block'
+                    }}
+                  >
+                    ← Anterior
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (configWizardStep === 1) {
+                        if (!configStartDate) {
+                          alert('Por favor selecciona una fecha de inicio.');
+                          return;
+                        }
+                        setConfigWizardStep(2);
+                      } else if (configWizardStep === 2) {
+                        setStartDate(configStartDate);
+                        setStartTime(configStartTime);
+                        setShowConfigOverlay(false);
                       }
-                      setConfigWizardStep(2);
-                    } else if (configWizardStep === 2) {
-                      setStartDate(configStartDate);
-                      setStartTime(configStartTime);
-                      setShowConfigOverlay(false);
-                    }
-                  }}
-                  disabled={configWizardStep === 1 && !configStartDate}
-                  style={{
-                    flex: 1,
-                    padding: '10px 16px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    backgroundColor: configWizardStep === 1 && !configStartDate ? 'var(--border-color)' : 'var(--accent-blue)',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: configWizardStep === 1 && !configStartDate ? 'default' : 'pointer'
-                  }}
-                >
-                  {configWizardStep === 2 ? 'Iniciar Simulación' : 'Siguiente →'}
-                </button>
+                    }}
+                    disabled={configWizardStep === 1 && !configStartDate}
+                    style={{
+                      flex: 1,
+                      padding: '10px 16px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: configWizardStep === 1 && !configStartDate ? 'var(--border-color)' : 'var(--accent-blue)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: configWizardStep === 1 && !configStartDate ? 'default' : 'pointer'
+                    }}
+                  >
+                    {configWizardStep === 2 ? 'Iniciar Simulación' : 'Siguiente →'}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Simulation Stopped Overlay */}
-        {showStoppedOverlay && (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            zIndex: 9999999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
+          {/* Simulation Stopped Overlay */}
+          {showStoppedOverlay && (
             <div style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              maxWidth: '400px',
-              width: '90%',
-              padding: '32px',
-              textAlign: 'center',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              zIndex: 9999999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}>
-              <div style={{ fontSize: '24px', marginBottom: '16px' }}>⏹️</div>
-              <h2 style={{ margin: '0 0 12px 0', fontSize: '20px', color: '#1f2937', fontWeight: 700 }}>
-                La simulación fue detenida
-              </h2>
-              <p style={{ margin: '0 0 24px 0', fontSize: '14px', color: '#6b7280' }}>
-                La simulación se ha detenido correctamente. Puedes iniciar una nueva simulación o reanudar la actual (próximamente).
-              </p>
-              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                <button
-                  disabled
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    backgroundColor: '#d1d5db',
-                    color: '#6b7280',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'not-allowed'
-                  }}
-                >
-                  Reanudar
-                </button>
-                <button
-                  onClick={handleNuevaSimulacion}
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    backgroundColor: 'var(--accent-blue)',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Nueva Simulación
-                </button>
+              <div style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                maxWidth: '400px',
+                width: '90%',
+                padding: '32px',
+                textAlign: 'center',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+              }}>
+                <div style={{ fontSize: '24px', marginBottom: '16px' }}>⏹️</div>
+                <h2 style={{ margin: '0 0 12px 0', fontSize: '20px', color: '#1f2937', fontWeight: 700 }}>
+                  La simulación fue detenida
+                </h2>
+                <p style={{ margin: '0 0 24px 0', fontSize: '14px', color: '#6b7280' }}>
+                  La simulación se ha detenido correctamente. Puedes iniciar una nueva simulación o reanudar la actual (próximamente).
+                </p>
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                  <button
+                    disabled
+                    style={{
+                      padding: '10px 20px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: '#d1d5db',
+                      color: '#6b7280',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'not-allowed'
+                    }}
+                  >
+                    Reanudar
+                  </button>
+                  <button
+                    onClick={handleNuevaSimulacion}
+                    style={{
+                      padding: '10px 20px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: 'var(--accent-blue)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Nueva Simulación
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Panel de Control — Centro Superior */}
-        <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
-          <div style={{ pointerEvents: 'auto', padding: '8px 12px' }}>
-            <div style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)' }}>
-              <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
-                Simulación — Período 5 Días
-                <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }} />
-                <style>{`
+          {/* Panel de Control — Centro Superior */}
+          <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
+            <div style={{ pointerEvents: 'auto', padding: '8px 12px' }}>
+              <div style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)' }}>
+                <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  Simulación — Período 5 Días
+                  <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }} />
+                  <style>{`
                   /* LED apagado (inicial) */
                   .led-off {
                     background-color: rgba(107, 114, 128, 0.3);
@@ -2133,78 +2166,78 @@ export default function SimulacionPeriodo() {
                     filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25));
                   }
                 `}</style>
-              </h1>
-              <div style={{ height: 20, width: 1, backgroundColor: 'var(--border-color)' }} />
+                </h1>
+                <div style={{ height: 20, width: 1, backgroundColor: 'var(--border-color)' }} />
 
-              {/* Reloj simulado */}
-              <div>
-                <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Simulado</small>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 2, whiteSpace: 'nowrap' }}>{simTimeLabel.split(' ')[0]} ⏱ {simTimeLabel.split(' ')[1]}</div>
-              </div>
+                {/* Reloj simulado */}
+                <div>
+                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Simulado</small>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 2, whiteSpace: 'nowrap' }}>{simTimeLabel.split(' ')[0]} ⏱ {simTimeLabel.split(' ')[1]}</div>
+                </div>
 
-              <div>
-                <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Actual</small>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })} ⏱ {stopwatch}</div>
-              </div>
+                <div>
+                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Actual</small>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })} ⏱ {stopwatch}</div>
+                </div>
 
-              <div>
-                <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Día</small>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#f97316', marginTop: 2 }}>{sim.diaActual}/5</div>
-              </div>
+                <div>
+                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Día</small>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#f97316', marginTop: 2 }}>{sim.diaActual}/5</div>
+                </div>
 
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={handleDetener} disabled={!sim.isRunning}
-                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', opacity: !sim.isRunning ? 0.6 : 1, fontWeight: 600 }}>
-                  ⏹️ Detener
-                </button>
-                <button onClick={mostrarPanelBusqueda}
-                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
-                  🔍 Buscar envío
-                </button>
-                <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) setAlmacenesPanelOpen(false); }}
-                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
-                  ✈️ Vuelos
-                </button>
-                <button onClick={() => { setAlmacenesPanelOpen(!almacenesPanelOpen); if (!almacenesPanelOpen) setFlightPanelOpen(false); }}
-                  style={{ padding: '7px 12px', fontSize: 11, backgroundColor: almacenesPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
-                  🏭 Almacenes
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={handleDetener} disabled={!sim.isRunning}
+                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', opacity: !sim.isRunning ? 0.6 : 1, fontWeight: 600 }}>
+                    ⏹️ Detener
+                  </button>
+                  <button onClick={mostrarPanelBusqueda}
+                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                    🔍 Buscar envío
+                  </button>
+                  <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) setAlmacenesPanelOpen(false); }}
+                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                    ✈️ Vuelos
+                  </button>
+                  <button onClick={() => { setAlmacenesPanelOpen(!almacenesPanelOpen); if (!almacenesPanelOpen) setFlightPanelOpen(false); }}
+                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: almacenesPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                    🏭 Almacenes
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Leyenda de colores */}
-        <div style={{ position: 'absolute', bottom: 25, left: 12, backgroundColor: 'rgba(255,255,255,0.92)', padding: '10px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', zIndex: 999997 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 6, textTransform: 'uppercase' }}>Ocupación de Vuelos</div>
-          {[
-            { color: '#10b981', label: '< 50% — Bajo' },
-            { color: '#f97316', label: '50–80% — Medio' },
-            { color: '#ef4444', label: '> 80% — Alto' },
-          ].map(({ color, label }) => (
-            <div key={color} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />
-              <span style={{ fontSize: 10, color: '#374151' }}>{label}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Panel Configurando Algoritmo — Derecha Inferior */}
-        {sim.isRunning && sim.iteracion === 0 && (
-          <div style={{ position: 'absolute', bottom: 25, right: 20, width: 280, backgroundColor: 'rgba(255,255,255,0.95)', padding: 14, borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', pointerEvents: 'auto', zIndex: 999998 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="algo-spinner"></span> Configurando algoritmo...
+          {/* Leyenda de colores */}
+          <div style={{ position: 'absolute', bottom: 25, left: 12, backgroundColor: 'rgba(255,255,255,0.92)', padding: '10px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', zIndex: 999997 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 6, textTransform: 'uppercase' }}>Ocupación de Vuelos</div>
+            {[
+              { color: '#10b981', label: '< 50% — Bajo' },
+              { color: '#f97316', label: '50–80% — Medio' },
+              { color: '#ef4444', label: '> 80% — Alto' },
+            ].map(({ color, label }) => (
+              <div key={color} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />
+                <span style={{ fontSize: 10, color: '#374151' }}>{label}</span>
               </div>
-              <span style={{ fontSize: 14, color: 'var(--accent-blue)' }}>{configCountdownRef.current}s</span>
-            </div>
-            <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>
-              Esperando resultados iniciales...
-            </div>
-            <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ height: '100%', backgroundColor: 'var(--accent-blue)', width: '100%', animation: 'algo-progress-indeterminate 1.5s infinite linear' }} />
-            </div>
-            <style>{`
+            ))}
+          </div>
+
+          {/* Panel Configurando Algoritmo — Derecha Inferior */}
+          {sim.isRunning && sim.iteracion === 0 && (
+            <div style={{ position: 'absolute', bottom: 25, right: 20, width: 280, backgroundColor: 'rgba(255,255,255,0.95)', padding: 14, borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', pointerEvents: 'auto', zIndex: 999998 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="algo-spinner"></span> Configurando algoritmo...
+                </div>
+                <span style={{ fontSize: 14, color: 'var(--accent-blue)' }}>{configCountdownRef.current}s</span>
+              </div>
+              <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>
+                Esperando resultados iniciales...
+              </div>
+              <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', backgroundColor: 'var(--accent-blue)', width: '100%', animation: 'algo-progress-indeterminate 1.5s infinite linear' }} />
+              </div>
+              <style>{`
               @keyframes algo-progress-indeterminate {
                 0% { transform: translateX(-100%); }
                 100% { transform: translateX(100%); }
@@ -2222,16 +2255,16 @@ export default function SimulacionPeriodo() {
                 to { transform: rotate(360deg); }
               }
             `}</style>
-          </div>
-        )}
+            </div>
+          )}
 
-        {/* Botón scroll hacia estadísticas */}
-        <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 999999 }}>
-          <button onClick={() => document.getElementById('statsSection')?.scrollIntoView({ behavior: 'smooth' })}
-            style={{ background: 'var(--accent-blue)', border: 'none', color: 'white', width: 50, height: 50, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: '0 4px 12px rgba(37,100,235,0.3)' }}>
-            <img src="/down.svg" alt="↓" style={{ width: 28, height: 28 }} />
-          </button>
-        </div>
+          {/* Botón scroll hacia estadísticas */}
+          <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 999999 }}>
+            <button onClick={() => document.getElementById('statsSection')?.scrollIntoView({ behavior: 'smooth' })}
+              style={{ background: 'var(--accent-blue)', border: 'none', color: 'white', width: 50, height: 50, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: '0 4px 12px rgba(37,100,235,0.3)' }}>
+              <img src="/down.svg" alt="↓" style={{ width: 28, height: 28 }} />
+            </button>
+          </div>
         </div>
 
         {/* Panel Lateral Compartido — Vuelos / Almacenes */}
@@ -2247,457 +2280,448 @@ export default function SimulacionPeriodo() {
           boxShadow: (flightPanelOpen || almacenesPanelOpen) ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
         }}>
 
-        {/* Vuelos Disponibles */}
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          display: flightPanelOpen ? 'flex' : 'none',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}>
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Vuelos Disponibles
-              </h3>
+          {/* Vuelos Disponibles */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: flightPanelOpen ? 'flex' : 'none',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Vuelos Disponibles
+                </h3>
+                <button
+                  onClick={() => setFlightPanelOpen(false)}
+                  style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                Total: {vuelosGlobales.length} vuelos
+              </div>
               <button
-                onClick={() => setFlightPanelOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                ref={filterButtonRef}
+                onClick={() => setFiltersOpen(!filtersOpen)}
+                style={{
+                  marginTop: '12px', padding: '8px 12px', fontSize: '12px',
+                  backgroundColor: 'var(--accent-blue)', color: 'white',
+                  border: 'none', borderRadius: '6px', cursor: 'pointer',
+                  fontWeight: 600, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', gap: '6px'
+                }}
               >
-                ×
+                🔽 Filtrar
               </button>
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Total: {vuelosGlobales.length} vuelos
-            </div>
-            <button
-              ref={filterButtonRef}
-              onClick={() => setFiltersOpen(!filtersOpen)}
-              style={{
-                marginTop: '12px', padding: '8px 12px', fontSize: '12px',
-                backgroundColor: 'var(--accent-blue)', color: 'white',
-                border: 'none', borderRadius: '6px', cursor: 'pointer',
-                fontWeight: 600, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', gap: '6px'
-              }}
-            >
-              🔽 Filtrar
-            </button>
-            {filtersOpen && (
-              <div style={{
-                position: 'fixed', top: filterPosition.top, left: filterPosition.left,
-                backgroundColor: 'white', padding: '8px', borderRadius: '6px',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 999999,
-                minWidth: '200px'
-              }}>
-                <style>{`
-                  @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-                `}</style>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</h3>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button onClick={() => { setFilterCodigo(''); setFilterOrigen(''); setFilterDestino(''); setSortBy('salida'); setSortDir('asc'); }} style={{ background: 'none', border: 'none', fontSize: '11px', cursor: 'pointer', color: 'var(--danger-red)', padding: '2px 4px', fontWeight: 600 }}>✕ Borrar</button>
-                    <button onClick={() => setFiltersOpen(false)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: 'var(--text-secondary)' }}>×</button>
+              {filtersOpen && (
+                <div style={{
+                  position: 'fixed', top: filterPosition.top, left: filterPosition.left,
+                  backgroundColor: 'white', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 999999,
+                  padding: '14px', minWidth: '220px',
+                  animation: 'fadeIn 0.15s ease'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
+                    <button onClick={() => { setFilterCodigo(''); setFilterOrigen(''); setFilterDestino(''); setSortBy('salida'); setSortDir('asc'); }}
+                      style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
+                      ✕ Borrar
+                    </button>
                   </div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div>
-                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Código</label>
+                  <div style={{ marginBottom: 6 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Código</label>
                     <input type="text" placeholder="LAX-JFK" value={filterCodigo}
                       onChange={(e) => setFilterCodigo(e.target.value)}
-                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box' }} />
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
                   </div>
-                  <div>
-                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Origen</label>
+                  <div style={{ marginBottom: 6 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Origen</label>
                     <select value={filterOrigen} onChange={(e) => setFilterOrigen(e.target.value)}
-                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box', cursor: 'pointer' }}>
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
                       <option value="">Todos</option>
                       {origenesUnicos.map(og => (
                         <option key={og} value={og}>{og}{aeropuertoMap.has(og) ? ` - ${aeropuertoMap.get(og)}` : ''}</option>
                       ))}
                     </select>
                   </div>
-                  <div>
-                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Destino</label>
+                  <div style={{ marginBottom: 6 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Destino</label>
                     <select value={filterDestino} onChange={(e) => setFilterDestino(e.target.value)}
-                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box', cursor: 'pointer' }}>
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
                       <option value="">Todos</option>
                       {destinosUnicos.map(dest => (
                         <option key={dest} value={dest}>{dest}{aeropuertoMap.has(dest) ? ` - ${aeropuertoMap.get(dest)}` : ''}</option>
                       ))}
                     </select>
                   </div>
-                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
-                    <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px', display: 'block' }}>Ordenar por</label>
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
                     <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
-                      style={{ padding: '4px 8px', fontSize: '11px', border: '1px solid var(--border-color)', borderRadius: '3px', outline: 'none', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box', cursor: 'pointer', marginBottom: '4px' }}>
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
                       <option value="salida">Hora de salida</option>
                       <option value="llegada">Hora de llegada</option>
                       <option value="origen">Origen</option>
                       <option value="destino">Destino</option>
                       <option value="ocupacion">Nivel de ocupación</option>
                     </select>
-                    <button onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                      style={{ padding: '4px 8px', fontSize: '11px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '3px', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      {sortDir === 'asc' ? '↑ Ascendente' : '↓ Descendente'}
-                    </button>
                   </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => setSortDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
+                    <button onClick={() => setSortDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Virtual Scroll Container */}
+            <div ref={scrollContainerRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '12px', minHeight: 0 }}>
+              {sim.isRunning && sim.iteracion === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ display: 'inline-block', width: '20px', height: '20px', border: '3px solid rgba(59,130,246,0.3)', borderRadius: '50%', borderTopColor: '#3b82f6', animation: 'algo-spin-vuelos 1s linear infinite' }}></span>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-blue)' }}>Configurando algoritmo...</span>
+                  <style>{`@keyframes algo-spin-vuelos { to { transform: rotate(360deg); } }`}</style>
+                </div>
+              ) : vuelosFiltrados.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
+                  <span>⏳ Esperando planificación del GA...</span>
+                </div>
+              ) : (
+                <div style={{ height: totalHeight, paddingTop: offsetY, boxSizing: 'border-box' }}>
+                  {visibleVuelos.map((vuelo, i) => {
+                    const realIdx = startIdx + i;
+                    const salidaHHMM = extraerHHMM(vuelo.salida);
+                    const llegadaHHMM = extraerHHMM(vuelo.llegada);
+                    const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, salidaHHMM);
+                    const claveVuelo = getCancelKey(vuelo);
+                    const esCancelado = sim.cancelledFlights.has(claveVuelo) || canceledLocallyRef.current.has(claveVuelo);
+                    const esCancelling = cancellingFlights.has(claveVuelo);
+                    // Buscar FlightEvent activo para obtener ocupación y detectar sin uso
+                    let pctOcupacion = -1;
+                    let ocupColor = '';
+                    let esSinUso = false;
+                    const simStartOcc = sim.simStartDateRef.current;
+                    if (simStartOcc) {
+                      const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
+                      let d = new Date(simStartOcc); d.setHours(gmtHour, gmtMin, 0, 0);
+                      while (d.getTime() < simStartOcc.getTime()) d.setDate(d.getDate() + 1);
+                      const minInicio = Math.round((d.getTime() - simStartOcc.getTime()) / 60000);
+                      let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
+                      if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
+                      esSinUso = !fe || fe.key.startsWith('unused-');
+                      if (fe && !esSinUso && currentMinSimRef.current >= fe.minutosInicio && currentMinSimRef.current < fe.minutosFin) {
+                        if (fe.capacidadVuelo > 0) {
+                          pctOcupacion = (fe.maletasVuelo / fe.capacidadVuelo) * 100;
+                          ocupColor = pctOcupacion < 50 ? '#22c55e' : pctOcupacion < 80 ? '#f97316' : '#ef4444';
+                        } else {
+                          pctOcupacion = 0;
+                          ocupColor = '#2563eb';
+                        }
+                      }
+                    }
+                    return (
+                      <div
+                        key={`${vuelo.origen}-${vuelo.destino}-${salidaHHMM}-${realIdx}`}
+                        onClick={() => {
+                          const simStart = sim.simStartDateRef.current;
+                          if (!simStart || esCancelado || esCancelling) return;
+                          const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
+                          // setHours(gmtHour, ...) trata GMT como local, igual que rutaAFlightEvents.
+                          // Así minutosInicio % 1440 coincide con SSE flights y el panel muestra
+                          // la hora absoluta (simStart + minutos) en vez de minutos del día.
+                          let d = new Date(simStart); d.setHours(gmtHour, gmtMin, 0, 0);
+                          while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
+                          const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
+                          let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
+                          if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
+                          if (!fe) {
+                            const aOri2 = sim.aeropuertosRef.current.get(vuelo.origen);
+                            const aDes2 = sim.aeropuertosRef.current.get(vuelo.destino);
+                            if (aOri2 && aDes2) {
+                              fe = {
+                                key: `card-${vuelo.origen}-${vuelo.destino}-${salidaHHMM.replace(':', '')}`,
+                                tramoOrden: 1, origenCode: vuelo.origen, destinoCode: vuelo.destino,
+                                planVueloRuta: [vuelo.origen, vuelo.destino], planVueloTipo: 'Directo',
+                                latOrigen: aOri2.latitud, lngOrigen: aOri2.longitud,
+                                latDestino: aDes2.latitud, lngDestino: aDes2.longitud,
+                                minutosInicio: minInicio, minutosFin: minInicio + 120,
+                                maletasVuelo: 0, capacidadVuelo: 0,
+                                ocupacionAlmacenOrigen: 0, capacidadAlmacenOrigen: aOri2.capacidad,
+                                ocupacionAlmacenDestino: 0, capacidadAlmacenDestino: aDes2.capacidad,
+                              };
+                            }
+                          }
+                          if (fe) mostrarPanelAvion(fe);
+                        }}
+                        style={{
+                          backgroundColor: esCancelado ? 'rgba(220,53,69,0.05)' : 'var(--bg-tertiary)',
+                          border: `1px solid ${esCancelado ? 'rgba(220,53,69,0.3)' : 'var(--border-color)'}`,
+                          borderRadius: '6px', padding: '8px', marginBottom: '6px',
+                          cursor: esCancelado || esCancelling ? 'default' : 'pointer',
+                          opacity: esCancelado ? 0.6 : (esCancelling ? 0.4 : 1),
+                          pointerEvents: esCancelling ? 'none' : 'auto',
+                          height: 'auto', boxSizing: 'border-box',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <div style={{ fontSize: '13px', fontWeight: 700, color: esCancelado ? 'var(--danger-red)' : 'var(--accent-blue)' }}>
+                            {codigoVuelo}
+                          </div>
+                          {esCancelado && (
+                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(220,53,69,0.1)', color: 'var(--danger-red)' }}>
+                              Cancelado
+                            </span>
+                          )}
+                          {esSinUso && !esCancelado && (
+                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
+                              Sin uso
+                            </span>
+                          )}
+                          {!esSinUso && !esCancelado && (
+                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+                              En uso
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 500 }}>
+                          {vuelo.origen} → {vuelo.destino}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', flex: 1 }}>
+                            <div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Salida</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{salidaHHMM}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Llegada</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{llegadaHHMM}</div>
+                            </div>
+                            {pctOcupacion >= 0 && (
+                              <div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Ocup.</div>
+                                <div style={{ fontSize: '11px', fontWeight: 700, color: ocupColor }}>{pctOcupacion.toFixed(1)}%</div>
+                              </div>
+                            )}
+                          </div>
+                          {!esCancelado && !esCancelling && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
+                              style={{
+                                padding: '3px 8px', fontSize: '10px',
+                                backgroundColor: 'rgba(220, 53, 69, 0.1)', color: 'var(--danger-red)',
+                                border: '1px solid rgba(220, 53, 69, 0.3)', borderRadius: '4px',
+                                cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Almacenes Panel (overlays on top of Vuelos panel) */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: almacenesPanelOpen ? 'flex' : 'none',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            backgroundColor: 'rgba(255,255,255,0.98)',
+            zIndex: 1,
+          }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Almacenes
+                </h3>
+                <button
+                  onClick={() => setAlmacenesPanelOpen(false)}
+                  style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                Total: {almacenesFiltrados.length} almacenes
+              </div>
+              <button
+                ref={filterAlmButtonRef}
+                onClick={() => { setFiltrosAlmOpen(!filtrosAlmOpen); if (filterAlmButtonRef.current) { const r = filterAlmButtonRef.current.getBoundingClientRect(); setFilterAlmPosition({ top: r.bottom + 4, left: r.left }); } }}
+                style={{
+                  marginTop: '12px', padding: '8px 12px', fontSize: '12px',
+                  backgroundColor: 'var(--accent-blue)', color: 'white',
+                  border: 'none', borderRadius: '6px', cursor: 'pointer',
+                  fontWeight: 600, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', gap: '6px'
+                }}
+              >
+                🔽 Filtrar
+              </button>
+            </div>
+
+            {filtrosAlmOpen && (
+              <div style={{
+                position: 'fixed', top: filterAlmPosition.top, left: filterAlmPosition.left,
+                backgroundColor: 'white', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 999999,
+                padding: '14px', minWidth: '220px',
+                animation: 'fadeIn 0.15s ease'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
+                  <button onClick={() => { setFilterAlmCodigo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
+                    style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
+                    ✕ Borrar
+                  </button>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Código</label>
+                  <select value={filterAlmCodigo} onChange={e => setFilterAlmCodigo(e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
+                    <option value="">Todos</option>
+                    {sim.aeropuertos.map(a => (
+                      <option key={a.codigo} value={a.codigo}>{a.codigo}{a.ciudad ? ` - ${a.ciudad}` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
+                  <select value={sortAlmBy} onChange={e => setSortAlmBy(e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none' }}>
+                    <option value="codigo">Código</option>
+                    <option value="ciudad">Ciudad</option>
+                    <option value="pais">País</option>
+                    <option value="ocupacion">Ocupación</option>
+                    <option value="stock">Stock</option>
+                    <option value="entrantes">Entrantes</option>
+                    <option value="salientes">Salientes</option>
+                    <option value="transito">En tránsito</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => setSortAlmDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
+                  <button onClick={() => setSortAlmDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
                 </div>
               </div>
             )}
-          </div>
-          {/* Virtual Scroll Container */}
-          <div ref={scrollContainerRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '12px', minHeight: 0 }}>
-            {sim.isRunning && sim.iteracion === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                <span style={{ display: 'inline-block', width: '20px', height: '20px', border: '3px solid rgba(59,130,246,0.3)', borderRadius: '50%', borderTopColor: '#3b82f6', animation: 'algo-spin-vuelos 1s linear infinite' }}></span>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-blue)' }}>Configurando algoritmo...</span>
-                <style>{`@keyframes algo-spin-vuelos { to { transform: rotate(360deg); } }`}</style>
-              </div>
-            ) : vuelosFiltrados.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
-                <span>⏳ Esperando planificación del GA...</span>
-              </div>
-            ) : (
-              <div style={{ height: totalHeight, paddingTop: offsetY, boxSizing: 'border-box' }}>
-                {visibleVuelos.map((vuelo, i) => {
-                  const realIdx = startIdx + i;
-                  const salidaHHMM = extraerHHMM(vuelo.salida);
-                  const llegadaHHMM = extraerHHMM(vuelo.llegada);
-                  const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, salidaHHMM);
-                  const claveVuelo = getClaveVuelo(vuelo);
-                  const esCancelado = sim.cancelledFlights.has(claveVuelo) || canceledLocallyRef.current.has(claveVuelo);
-                  const esCancelling = cancellingFlights.has(claveVuelo);
-                  // Buscar FlightEvent activo para obtener ocupación y detectar sin uso
-                  let pctOcupacion = -1;
-                  let ocupColor = '';
-                  let esSinUso = false;
-                  const simStartOcc = sim.simStartDateRef.current;
-                  if (simStartOcc) {
-                    const [hh, mm] = salidaHHMM.split(':').map(Number);
-                    let d = new Date(simStartOcc); d.setHours(hh, mm, 0, 0);
-                    while (d.getTime() < simStartOcc.getTime()) d.setDate(d.getDate() + 1);
-                    const minInicio = Math.round((d.getTime() - simStartOcc.getTime()) / 60000);
-                    let fe = sim.allFlightEvents.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio);
-                    if (!fe) {
-                      for (const ruta of rutasPlanificadasRef.current.values()) {
-                        const tramo = (ruta.tramos || []).find(t => t.origen === vuelo.origen && t.destino === vuelo.destino);
-                        if (tramo) {
-                          fe = sim.allFlightEvents.find(e => e.key.includes(`${ruta.idEnvio}`) && e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino);
-                        if (fe) break;
-                        }
-                      }
-                    }
-                    esSinUso = !fe || fe.key.startsWith('unused-');
-                    if (fe && !esSinUso && currentMinSimRef.current >= minInicio && currentMinSimRef.current < fe.minutosFin) {
-                      if (fe.capacidadVuelo > 0) {
-                        pctOcupacion = (fe.maletasVuelo / fe.capacidadVuelo) * 100;
-                        ocupColor = pctOcupacion < 50 ? '#22c55e' : pctOcupacion < 80 ? '#f97316' : '#ef4444';
-                      } else {
-                        pctOcupacion = 0;
-                        ocupColor = '#2563eb';
-                      }
-                    }
-                  }
-                  return (
-                    <div
-                      key={`${vuelo.origen}-${vuelo.destino}-${salidaHHMM}-${realIdx}`}
-                      onClick={() => {
-                        const simStart = sim.simStartDateRef.current;
-                        if (!simStart || esCancelado || esCancelling) return;
-                        const [hh, mm] = salidaHHMM.split(':').map(Number);
-                        let d = new Date(simStart); d.setHours(hh, mm, 0, 0);
-                        while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
-                        const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
-                        let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio && !e.done);
-                        if (!fe) {
-                          const aOri2 = sim.aeropuertosRef.current.get(vuelo.origen);
-                          const aDes2 = sim.aeropuertosRef.current.get(vuelo.destino);
-                          if (aOri2 && aDes2) {
-                            fe = {
-                              key: `card-${vuelo.origen}-${vuelo.destino}-${salidaHHMM.replace(':', '')}`,
-                              tramoOrden: 1, origenCode: vuelo.origen, destinoCode: vuelo.destino,
-                              planVueloRuta: [vuelo.origen, vuelo.destino], planVueloTipo: 'Directo',
-                              latOrigen: aOri2.latitud, lngOrigen: aOri2.longitud,
-                              latDestino: aDes2.latitud, lngDestino: aDes2.longitud,
-                              minutosInicio: minInicio, minutosFin: minInicio + 120,
-                              maletasVuelo: 0, capacidadVuelo: 0,
-                              ocupacionAlmacenOrigen: 0, capacidadAlmacenOrigen: aOri2.capacidad,
-                              ocupacionAlmacenDestino: 0, capacidadAlmacenDestino: aDes2.capacidad,
-                            };
-                          }
-                        }
-                        if (fe) mostrarPanelAvion(fe);
-                      }}
-                      style={{
-                        backgroundColor: esCancelado ? 'rgba(220,53,69,0.05)' : 'var(--bg-tertiary)',
-                        border: `1px solid ${esCancelado ? 'rgba(220,53,69,0.3)' : 'var(--border-color)'}`,
-                        borderRadius: '6px', padding: '8px', marginBottom: '6px',
-                        cursor: esCancelado || esCancelling ? 'default' : 'pointer',
-                        opacity: esCancelado ? 0.6 : (esCancelling ? 0.4 : 1),
-                        pointerEvents: esCancelling ? 'none' : 'auto',
-                        height: 'auto', boxSizing: 'border-box',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 700, color: esCancelado ? 'var(--danger-red)' : 'var(--accent-blue)' }}>
-                          {codigoVuelo}
-                        </div>
-                        {esCancelado && (
-                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(220,53,69,0.1)', color: 'var(--danger-red)' }}>
-                            Cancelado
-                          </span>
-                        )}
-                        {esSinUso && !esCancelado && (
-                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
-                            Sin uso
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 500 }}>
-                        {vuelo.origen} → {vuelo.destino}
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', flex: 1 }}>
-                          <div>
-                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Salida</div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{salidaHHMM}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Llegada</div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{llegadaHHMM}</div>
-                          </div>
-                          {pctOcupacion >= 0 && (
-                            <div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Ocup.</div>
-                              <div style={{ fontSize: '11px', fontWeight: 700, color: ocupColor }}>{pctOcupacion.toFixed(1)}%</div>
-                            </div>
-                          )}
-                        </div>
-                        {!esCancelado && !esCancelling && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
-                            style={{
-                              padding: '3px 8px', fontSize: '10px',
-                              backgroundColor: 'rgba(220, 53, 69, 0.1)', color: 'var(--danger-red)',
-                              border: '1px solid rgba(220, 53, 69, 0.3)', borderRadius: '4px',
-                              cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
-                            }}
-                          >
-                            Cancelar
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* Almacenes Panel (overlays on top of Vuelos panel) */}
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          display: almacenesPanelOpen ? 'flex' : 'none',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          backgroundColor: 'rgba(255,255,255,0.98)',
-          zIndex: 1,
-        }}>
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Almacenes
-              </h3>
-              <button
-                onClick={() => setAlmacenesPanelOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
-              >
-                ×
-              </button>
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Total: {almacenesFiltrados.length} almacenes
-            </div>
-            <button
-              ref={filterAlmButtonRef}
-              onClick={() => { setFiltrosAlmOpen(!filtrosAlmOpen); if (filterAlmButtonRef.current) { const r = filterAlmButtonRef.current.getBoundingClientRect(); setFilterAlmPosition({ top: r.bottom + 4, left: r.left }); } }}
-              style={{
-                marginTop: '12px', padding: '8px 12px', fontSize: '12px',
-                backgroundColor: 'var(--accent-blue)', color: 'white',
-                border: 'none', borderRadius: '6px', cursor: 'pointer',
-                fontWeight: 600, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', gap: '6px'
-              }}
+            <div ref={scrollContainerAlmRef} style={{ flex: 1, overflowY: 'auto', padding: '12px' }}
+              onScroll={(e) => { setScrollTopAlm(e.currentTarget.scrollTop); if (scrollContainerAlmRef.current) { setContainerHeightAlm(scrollContainerAlmRef.current.clientHeight); } }}
             >
-              🔽 Filtrar
-            </button>
-          </div>
-
-          {filtrosAlmOpen && (
-            <div style={{
-              position: 'fixed', top: filterAlmPosition.top, left: filterAlmPosition.left,
-              backgroundColor: 'white', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 999999,
-              padding: '14px', minWidth: '220px',
-              animation: 'fadeIn 0.15s ease'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmCiudad(''); setFilterAlmPais(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
-                  style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
-                  ✕ Borrar
-                </button>
-              </div>
-              <div style={{ marginBottom: 6 }}>
-                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Código</label>
-                <input value={filterAlmCodigo} onChange={e => setFilterAlmCodigo(e.target.value)}
-                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
-              </div>
-              <div style={{ marginBottom: 6 }}>
-                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ciudad</label>
-                <input value={filterAlmCiudad} onChange={e => setFilterAlmCiudad(e.target.value)}
-                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
-              </div>
-              <div style={{ marginBottom: 8 }}>
-                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>País</label>
-                <input value={filterAlmPais} onChange={e => setFilterAlmPais(e.target.value)}
-                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
-              </div>
-              <div style={{ marginBottom: 8 }}>
-                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
-                <select value={sortAlmBy} onChange={e => setSortAlmBy(e.target.value)}
-                  style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none' }}>
-                  <option value="codigo">Código</option>
-                  <option value="ciudad">Ciudad</option>
-                  <option value="pais">País</option>
-                  <option value="ocupacion">Ocupación</option>
-                  <option value="stock">Stock</option>
-                  <option value="entrantes">Entrantes</option>
-                  <option value="salientes">Salientes</option>
-                  <option value="transito">En tránsito</option>
-                </select>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => setSortAlmDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
-                <button onClick={() => setSortAlmDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
-              </div>
-            </div>
-          )}
-
-          <div ref={scrollContainerAlmRef} style={{ flex: 1, overflowY: 'auto', padding: '12px' }}
-            onScroll={(e) => { setScrollTopAlm(e.currentTarget.scrollTop); if (scrollContainerAlmRef.current) { setContainerHeightAlm(scrollContainerAlmRef.current.clientHeight); } }}
-          >
-            {sim.isRunning && sim.iteracion === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px' }}>
-                <span style={{ display: 'inline-block', width: '20px', height: '20px', border: '3px solid rgba(59,130,246,0.3)', borderRadius: '50%', borderTopColor: '#3b82f6', animation: 'alm-spin 1s linear infinite' }}></span>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-blue)' }}>Configurando algoritmo...</span>
-                <style>{`@keyframes alm-spin { to { transform: rotate(360deg); } }`}</style>
-              </div>
-            ) : almacenesFiltrados.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
-                <span>⏳ Esperando datos de almacenes...</span>
-              </div>
-            ) : (
-              <div style={{ height: totalHeightAlm, paddingTop: offsetYAlm, boxSizing: 'border-box' }}>
-                {visibleAlmacenes.map((alm, i) => {
-                  const estadoColor = alm.pct === 0 ? '#6366f1' : alm.pct < 50 ? '#22c55e' : alm.pct < 80 ? '#f97316' : '#ef4444';
-                  return (
-                    <div
-                      key={alm.codigo}
-                      onClick={() => setSelectedAlmacen(selectedAlmacen === alm.codigo ? null : alm.codigo)}
-                      style={{
-                        padding: '10px',
-                        marginBottom: '8px',
-                        backgroundColor: selectedAlmacen === alm.codigo ? 'rgba(59,130,246,0.06)' : 'var(--bg-tertiary)',
-                        border: `1px solid ${selectedAlmacen === alm.codigo ? 'var(--accent-blue)' : 'var(--border-color)'}`,
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        position: 'relative',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{alm.codigo}</span>
-                          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}</div>
+              {sim.isRunning && sim.iteracion === 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px' }}>
+                  <span style={{ display: 'inline-block', width: '20px', height: '20px', border: '3px solid rgba(59,130,246,0.3)', borderRadius: '50%', borderTopColor: '#3b82f6', animation: 'alm-spin 1s linear infinite' }}></span>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-blue)' }}>Configurando algoritmo...</span>
+                  <style>{`@keyframes alm-spin { to { transform: rotate(360deg); } }`}</style>
+                </div>
+              ) : almacenesFiltrados.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>
+                  <span>⏳ Esperando datos de almacenes...</span>
+                </div>
+              ) : (
+                <div style={{ height: totalHeightAlm, paddingTop: offsetYAlm, boxSizing: 'border-box' }}>
+                  {visibleAlmacenes.map((alm, i) => {
+                    const estadoColor = alm.pct === 0 ? '#6366f1' : alm.pct < 50 ? '#22c55e' : alm.pct < 80 ? '#f97316' : '#ef4444';
+                    return (
+                      <div
+                        key={alm.codigo}
+                        onClick={() => setSelectedAlmacen(selectedAlmacen === alm.codigo ? null : alm.codigo)}
+                        style={{
+                          padding: '10px',
+                          marginBottom: '8px',
+                          backgroundColor: selectedAlmacen === alm.codigo ? 'rgba(59,130,246,0.06)' : 'var(--bg-tertiary)',
+                          border: `1px solid ${selectedAlmacen === alm.codigo ? 'var(--accent-blue)' : 'var(--border-color)'}`,
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          position: 'relative',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{alm.codigo}</span>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}</div>
+                          </div>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: estadoColor }}>{alm.pct.toFixed(0)}%</span>
                         </div>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: estadoColor }}>{alm.pct.toFixed(0)}%</span>
-                      </div>
-                      <div style={{ marginTop: '6px', height: '6px', backgroundColor: 'var(--border-color)', borderRadius: '3px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', backgroundColor: estadoColor, width: `${Math.min(100, alm.pct)}%`, borderRadius: '3px', transition: 'width 0.3s ease' }} />
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
-                        <span>📦 Stock: <strong style={{ color: 'var(--text-primary)' }}>{alm.ocupacion}/{alm.capacidad}</strong></span>
-                        <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#2563eb' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
-                        <span>📤 Salen: <strong style={{ color: '#d97706' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
-                        <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#059669' }}>{alm.transito.maletas}</strong></span>
-                      </div>
-                      {selectedAlmacen === alm.codigo && (
-                        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
-                          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>📋 Envíos</div>
-                          {(() => {
-                            const rutas = Array.from(rutasPlanificadasRef.current.values());
-                            const salientes = rutas.filter(r => (r.tramos || []).some(t => t.origen === alm.codigo));
-                            const entrantes = rutas.filter(r => (r.tramos || []).some(t => t.destino === alm.codigo));
-                            const enTransito = flightEventsRef.current.filter(fe => fe.destinoCode === alm.codigo && fe.active && !fe.done && !fe.key.startsWith('unused-') && fe.maletasVuelo > 0);
-                            return (
-                              <>
-                                {salientes.length > 0 && (
-                                  <div style={{ marginBottom: '4px' }}>
-                                    <span style={{ fontSize: '9px', fontWeight: 600, color: '#d97706' }}>📤 Salen ({salientes.length}):</span>
-                                    {salientes.slice(0, 3).map(r => {
-                                      const tramo = (r.tramos || []).find(t => t.origen === alm.codigo);
-                                      const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
-                                      return (
-                                        <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                          {codUnico} → {r.destino} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
-                                        </div>
-                                      );
-                                    })}
+                        <div style={{ marginTop: '6px', height: '6px', backgroundColor: 'var(--border-color)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', backgroundColor: estadoColor, width: `${Math.min(100, alm.pct)}%`, borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
+                          <span>📦 Stock: <strong style={{ color: 'var(--text-primary)' }}>{alm.ocupacion}/{alm.capacidad}</strong></span>
+                          <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#2563eb' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
+                          <span>📤 Salen: <strong style={{ color: '#d97706' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
+                          <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#059669' }}>{alm.transito.maletas}</strong></span>
+                        </div>
+                        {selectedAlmacen === alm.codigo && (
+                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                            <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>📋 Envíos</div>
+                            {(() => {
+                              const rutas = Array.from(rutasPlanificadasRef.current.values());
+                              const salientes = rutas.filter(r => (r.tramos || []).some(t => t.origen === alm.codigo));
+                              const entrantes = rutas.filter(r => (r.tramos || []).some(t => t.destino === alm.codigo));
+                              const enTransito = flightEventsRef.current.filter(fe => fe.destinoCode === alm.codigo && fe.active && !fe.done && !fe.key.startsWith('unused-') && fe.maletasVuelo > 0);
+                              return (
+                                <>
+                                  {salientes.length > 0 && (
+                                    <div style={{ marginBottom: '4px' }}>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#d97706' }}>📤 Salen ({salientes.length}):</span>
+                                      {salientes.slice(0, 3).map(r => {
+                                        const tramo = (r.tramos || []).find(t => t.origen === alm.codigo);
+                                        const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
+                                        return (
+                                          <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
+                                            {codUnico} → {r.destino} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
+                                          </div>
+                                        );
+                                      })}
                                       {salientes.length > 3 && <div style={{ fontSize: '8px', color: 'var(--text-muted)', paddingLeft: '12px' }}>... y {salientes.length - 3} más</div>}
-                                  </div>
-                                )}
-                                {entrantes.length > 0 && (
-                                  <div style={{ marginBottom: '4px' }}>
-                                    <span style={{ fontSize: '9px', fontWeight: 600, color: '#2563eb' }}>📥 Entran ({entrantes.length}):</span>
-                                    {entrantes.slice(0, 3).map(r => {
-                                      const tramo = (r.tramos || []).find(t => t.destino === alm.codigo);
-                                      const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
-                                      return (
-                                        <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                          {tramo?.origen} → {codUnico} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
-                                        </div>
-                                      );
-                                    })}
+                                    </div>
+                                  )}
+                                  {entrantes.length > 0 && (
+                                    <div style={{ marginBottom: '4px' }}>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#2563eb' }}>📥 Entran ({entrantes.length}):</span>
+                                      {entrantes.slice(0, 3).map(r => {
+                                        const tramo = (r.tramos || []).find(t => t.destino === alm.codigo);
+                                        const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
+                                        return (
+                                          <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
+                                            {tramo?.origen} → {codUnico} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
+                                          </div>
+                                        );
+                                      })}
                                       {entrantes.length > 3 && <div style={{ fontSize: '8px', color: 'var(--text-muted)', paddingLeft: '12px' }}>... y {entrantes.length - 3} más</div>}
-                                  </div>
-                                )}
-                                {enTransito.length > 0 && (
-                                  <div>
-                                    <span style={{ fontSize: '9px', fontWeight: 600, color: '#059669' }}>✈️ En tránsito ({enTransito.length}):</span>
-                                {enTransito.filter(fe => fe.maletasVuelo > 0).map(fe => (
-                                  <div key={fe.key} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                    {fe.origenCode} → ({fe.maletasVuelo} maletas)
-                                  </div>
-                                ))}
-                                  </div>
-                                )}
-                                {salientes.length === 0 && entrantes.length === 0 && enTransito.length === 0 && (
-                                  <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Sin envíos</div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                                    </div>
+                                  )}
+                                  {enTransito.length > 0 && (
+                                    <div>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#059669' }}>✈️ En tránsito ({enTransito.length}):</span>
+                                      {enTransito.filter(fe => fe.maletasVuelo > 0).map(fe => (
+                                        <div key={fe.key} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
+                                          {fe.origenCode} → ({fe.maletasVuelo} maletas)
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {salientes.length === 0 && entrantes.length === 0 && enTransito.length === 0 && (
+                                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Sin envíos</div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
         </div>
       </div>
 
@@ -2756,21 +2780,21 @@ export default function SimulacionPeriodo() {
                 </div>
               ) : (
                 <>
-              <div 
-                ref={logsContainerRef}
-                style={{ maxHeight: 350, overflowY: 'auto' }}
-                onWheel={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setIsLogsPaused(true); } }}
-                onTouchMove={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setIsLogsPaused(true); } }}
-              >
-                {logsPaginados.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
-                {logsPaginados.logs.map((log, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 50 }}>{log.time || '-'}</span>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{log.text}</span>
+                  <div
+                    ref={logsContainerRef}
+                    style={{ maxHeight: 350, overflowY: 'auto' }}
+                    onWheel={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setIsLogsPaused(true); } }}
+                    onTouchMove={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setIsLogsPaused(true); } }}
+                  >
+                    {logsPaginados.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
+                    {logsPaginados.logs.map((log, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 50 }}>{log.time || '-'}</span>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{log.text}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
                 </>
               )}
 

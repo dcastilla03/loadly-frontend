@@ -981,6 +981,7 @@ export default function SimulacionPeriodo() {
       fe.done = true;
     });
     setShowStoppedOverlay(true);
+    setStartDate('');
   }
 
   function handleNuevaSimulacion() {
@@ -989,6 +990,7 @@ export default function SimulacionPeriodo() {
     setConfigWizardStep(1);
     setConfigStartDate('');
     setConfigStartTime('00:00');
+    setStartDate('');
     isInitialized.current = false;
 
     // Reset clock state

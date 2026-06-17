@@ -635,13 +635,14 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   }, [addLog, startDate]);
 
   const detener = useCallback(async () => {
+    setIsRunning(false);
+    addLog('Simulación detenida manualmente', '#f97316');
+    if (esRef.current) { esRef.current.close(); esRef.current = null; }
     try {
       await fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' });
     } catch (error) {
       console.error('Error al detener simulación:', error);
     }
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
-    setIsRunning(false); addLog('Simulación detenida manualmente', '#f97316');
   }, [addLog]);
 
   const totalIterSeguro = Number.isFinite(totalIter) && totalIter > 0 ? totalIter : 30;

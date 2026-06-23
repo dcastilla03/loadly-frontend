@@ -117,8 +117,12 @@ export default function SimulacionPeriodo() {
   const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // Configuration wizard state
-  const [showConfigOverlay, setShowConfigOverlay] = useState(!sim.isRunning);
+  const [showConfigOverlay, setShowConfigOverlay] = useState(
+    typeof window !== 'undefined'
+      ? !new URLSearchParams(window.location.search).has('startDate')
+        && !sessionStorage.getItem('periodoStartDate')
+      : true
+  );
   const [configWizardStep, setConfigWizardStep] = useState(1);
   const [configStartDate, setConfigStartDate] = useState('');
   const [configStartTime, setConfigStartTime] = useState('00:00');
@@ -131,6 +135,21 @@ export default function SimulacionPeriodo() {
   // Al montar, resetear lastFrameTimeRef para evitar salto de tiempo
   useEffect(() => {
     lastFrameTimeRef.current = performance.now();
+  }, []);
+
+  // Al montar:
+  // - Si hay config de Periodo guardada y la sim no está corriendo (page reload), restaurar
+  // - Si NO hay config guardada y una simulación auto-start está activa, detenerla
+  useEffect(() => {
+    const saved = sessionStorage.getItem('periodoStartDate');
+    const hasParams = new URLSearchParams(window.location.search).has('startDate');
+    if (saved && !startDate && !sim.isRunning) {
+      setStartDate(saved);
+      setStartTime(sessionStorage.getItem('periodoStartTime') || '');
+    }
+    if (!saved && sim.isRunning && !hasParams) {
+      sim.detener();
+    }
   }, []);
 
   // Hora real del sistema (momento presente)
@@ -461,10 +480,16 @@ export default function SimulacionPeriodo() {
 
   // Iniciar simulación automáticamente cuando tenemos la fecha y la configuración está completa
   useEffect(() => {
-    if (startDate && !showConfigOverlay && !sim.isRunning) {
+    if (startDate && !showConfigOverlay) {
+      sessionStorage.setItem('periodoStartDate', startDate);
+      if (startTime) sessionStorage.setItem('periodoStartTime', startTime);
+      const url = new URL(window.location.href);
+      url.searchParams.set('startDate', startDate);
+      if (startTime) url.searchParams.set('startTime', startTime);
+      window.history.replaceState(null, '', url.toString());
       sim.iniciar(startDate, startTime || undefined);
     }
-  }, [startDate, startTime, showConfigOverlay, sim.iniciar, sim.isRunning]);
+  }, [startDate, startTime, showConfigOverlay, sim.iniciar]);
 
   // ── Inicializar mapa ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -711,7 +736,7 @@ export default function SimulacionPeriodo() {
     }
 
     function updateAvionPosition(fe: FlightEvent, progress: number, map: any) {
-      if (!Number.isFinite(progress)) return;
+      if (!Number.isFinite(progress) || progress < 0) return;
       if (!fe.svgElement || !fe.airplaneGroup || !fe.airplaneImage) return;
       const path: [number, number][] = (fe as any)._path;
       if (!path || path.length < 2) return;
@@ -773,57 +798,61 @@ export default function SimulacionPeriodo() {
         const map = mapInst.current;
         if (!map) { frameId = requestAnimationFrame(renderLoop); return; }
 
-        const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
-        setSimMinutos(Math.floor(minSim));
+        try {
+          const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
+          setSimMinutos(Math.floor(minSim));
 
-        // Actualizar stopwatch cada frame (usar refs del contexto, no closure obsoleto)
-        if (ctx.clockEnabledRef.current && ctx.stopwatchStartedAtRef.current === null) {
-          ctx.stopwatchStartedAtRef.current = Date.now();
-        }
-        if (ctx.clockEnabledRef.current && ctx.stopwatchStartedAtRef.current != null) {
-          const elapsedSec = Math.floor((Date.now() - ctx.stopwatchStartedAtRef.current) / 1000);
-          const label = `${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`;
-          if (label !== lastStopwatchLabelRef.current) {
-            lastStopwatchLabelRef.current = label;
-            setStopwatch(label);
+          // Actualizar stopwatch cada frame (usar refs del contexto, no closure obsoleto)
+          if (ctx.clockEnabledRef.current && ctx.stopwatchStartedAtRef.current === null) {
+            ctx.stopwatchStartedAtRef.current = Date.now();
           }
-        } else {
-          if (lastStopwatchLabelRef.current !== '') {
-            lastStopwatchLabelRef.current = '';
-            setStopwatch('00:00');
-          }
-        }
-
-        const events = flightEventsRef.current;
-
-        for (const fe of events) {
-          if (fe.done) {
-            if (fe.svgElement) removeAvionRender(fe);
-            continue;
-          }
-
-          if (fe.active && !fe.svgElement) {
-            // No re-spawnear si el vuelo ya llegó (rawProgress >= 1)
-            const dur = fe.minutosFin - fe.minutosInicio;
-            const raw = dur > 0 ? (minSim - fe.minutosInicio) / dur : 1;
-            if (Number.isFinite(raw) && raw < 1) {
-              spawnAvionRender(fe, map);
+          if (ctx.clockEnabledRef.current && ctx.stopwatchStartedAtRef.current != null) {
+            const elapsedSec = Math.floor((Date.now() - ctx.stopwatchStartedAtRef.current) / 1000);
+            const label = `${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`;
+            if (label !== lastStopwatchLabelRef.current) {
+              lastStopwatchLabelRef.current = label;
+              setStopwatch(label);
+            }
+          } else {
+            if (lastStopwatchLabelRef.current !== '') {
+              lastStopwatchLabelRef.current = '';
+              setStopwatch('00:00');
             }
           }
 
-          if (fe.active && fe.svgElement) {
-            const duracion = fe.minutosFin - fe.minutosInicio;
-            if (!Number.isFinite(duracion) || duracion <= 0) {
-              removeAvionRender(fe);
+          const events = flightEventsRef.current;
+
+          for (const fe of events) {
+            if (fe.done) {
+              if (fe.svgElement) removeAvionRender(fe);
               continue;
             }
-            const rawProgress = (minSim - fe.minutosInicio) / duracion;
-            if (!Number.isFinite(rawProgress) || rawProgress >= 1) {
-              removeAvionRender(fe);
-            } else {
-              updateAvionPosition(fe, rawProgress, map);
+
+            if (fe.active && !fe.svgElement) {
+              // No re-spawnear si el vuelo ya llegó (rawProgress >= 1)
+              const dur = fe.minutosFin - fe.minutosInicio;
+              const raw = dur > 0 ? (minSim - fe.minutosInicio) / dur : 1;
+              if (Number.isFinite(raw) && raw < 1) {
+                spawnAvionRender(fe, map);
+              }
+            }
+
+            if (fe.active && fe.svgElement) {
+              const duracion = fe.minutosFin - fe.minutosInicio;
+              if (!Number.isFinite(duracion) || duracion <= 0) {
+                removeAvionRender(fe);
+                continue;
+              }
+              const rawProgress = (minSim - fe.minutosInicio) / duracion;
+              if (!Number.isFinite(rawProgress) || rawProgress >= 1 || rawProgress < 0) {
+                removeAvionRender(fe);
+              } else {
+                updateAvionPosition(fe, rawProgress, map);
+              }
             }
           }
+        } catch (err) {
+          console.error('[renderLoop] Error:', err);
         }
 
         frameId = requestAnimationFrame(renderLoop);
@@ -836,7 +865,7 @@ export default function SimulacionPeriodo() {
           const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
           const duracion = fe.minutosFin - fe.minutosInicio;
           if (duracion > 0) {
-            const progress = Math.min(1, (minSim - fe.minutosInicio) / duracion);
+            const progress = Math.max(0, Math.min(1, (minSim - fe.minutosInicio) / duracion));
             updateAvionPosition(fe, progress, map);
           }
         });
@@ -982,6 +1011,8 @@ export default function SimulacionPeriodo() {
     });
     setShowStoppedOverlay(true);
     setStartDate('');
+    sessionStorage.removeItem('periodoStartDate');
+    sessionStorage.removeItem('periodoStartTime');
   }
 
   function handleNuevaSimulacion() {
@@ -991,6 +1022,8 @@ export default function SimulacionPeriodo() {
     setConfigStartDate('');
     setConfigStartTime('00:00');
     setStartDate('');
+    sessionStorage.removeItem('periodoStartDate');
+    sessionStorage.removeItem('periodoStartTime');
     isInitialized.current = false;
 
     // Reset clock state

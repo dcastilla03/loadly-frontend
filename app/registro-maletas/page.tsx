@@ -1,14 +1,79 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 const API = process.env.NEXT_PUBLIC_API_URL;
+
+interface Aerolinea {
+  id: number;
+  nombre: string;
+}
+
+interface Aeropuerto {
+  idAeropuerto: number;
+  codigo: string;
+  ciudad: string;
+  pais: string;
+  abreviatura: string;
+  continente: string;
+  gmt: number;
+}
 
 export default function RegistroMaletas() {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [aerolineas, setAerolineas] = useState<Aerolinea[]>([]);
+  const [aeropuertos, setAeropuertos] = useState<Aeropuerto[]>([]);
+  const [rol, setRol] = useState<string>('');
+  const [aeropuertoUsuario, setAeropuertoUsuario] = useState<string>('');
+  const [origen, setOrigen] = useState(0);
+  const [destino, setDestino] = useState(0);
+  const [aerolinea, setAerolinea] = useState(0);
+  const [cantidad, setCantidad] = useState(0);
+  const [formMsg, setFormMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        console.log('[RegistroMaletas] user desde localStorage:', user);
+        setRol(user.rol || '');
+        if (user.aeropuerto?.codigo) {
+          setAeropuertoUsuario(user.aeropuerto.codigo);
+        }
+      } catch {}
+    }
+
+    fetch(`${API}/api/aerolineas-cliente`)
+      .then(r => r.json())
+      .then(data => { if (data.exito && Array.isArray(data.datos)) setAerolineas(data.datos); })
+      .catch(() => console.error('Error al cargar aerolíneas'));
+
+    fetch(`${API}/api/aeropuertos`)
+      .then(r => r.json())
+      .then(data => { if (data.exito && Array.isArray(data.datos)) setAeropuertos(data.datos); })
+      .catch(() => console.error('Error al cargar aeropuertos'));
+  }, []);
+
+  const esAdmin = rol.toLowerCase() === 'administrador';
+
+  // Para operador, pre-fijar origen con el ID de su aeropuerto
+  useEffect(() => {
+    if (!esAdmin && aeropuertoUsuario && aeropuertos.length > 0) {
+      const apt = aeropuertos.find(a => a.codigo === aeropuertoUsuario);
+      if (apt) setOrigen(apt.idAeropuerto);
+    }
+  }, [esAdmin, aeropuertoUsuario, aeropuertos]);
+
+  const aeropuertosAgrupados = aeropuertos.reduce<Record<string, Aeropuerto[]>>((acc, a) => {
+    const grupo = a.continente || 'Otros';
+    if (!acc[grupo]) acc[grupo] = [];
+    acc[grupo].push(a);
+    return acc;
+  }, {});
 
   const handleFileSelect = (selectedFiles: FileList) => {
     setFiles(prev => [...prev, ...Array.from(selectedFiles)]);
@@ -59,6 +124,50 @@ export default function RegistroMaletas() {
     }
   };
 
+  const handleRegistrarEnvio = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormMsg(null);
+
+    if (!aerolinea) { setFormMsg({ type: 'error', text: 'Selecciona una aerolínea.' }); return; }
+    if (!origen) { setFormMsg({ type: 'error', text: 'Selecciona un aeropuerto de origen.' }); return; }
+    if (!destino) { setFormMsg({ type: 'error', text: 'Selecciona un aeropuerto de destino.' }); return; }
+    if (origen === destino) { setFormMsg({ type: 'error', text: 'Origen y destino no pueden ser iguales.' }); return; }
+    if (!cantidad || cantidad < 1) { setFormMsg({ type: 'error', text: 'Ingresa una cantidad válida de maletas.' }); return; }
+
+    try {
+      const params = new URLSearchParams();
+      const apt = aeropuertos.find(a => a.idAeropuerto === origen);
+      const gmt = apt?.gmt ?? 0;
+      const now = new Date();
+      const localDate = new Date(now.getTime() + gmt * 3600000);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const fechaLocal =
+        `${localDate.getUTCFullYear()}-${pad(localDate.getUTCMonth() + 1)}-${pad(localDate.getUTCDate())}T${pad(localDate.getUTCHours())}:${pad(localDate.getUTCMinutes())}:${pad(localDate.getUTCSeconds())}`;
+      params.append('fechaRegistro', fechaLocal);
+      params.append('idAeropuertoOrigen', String(origen));
+      params.append('idAeropuertoDestino', String(destino));
+      params.append('cantidadMaletas', String(cantidad));
+      params.append('clienteIdCliente', String(aerolinea));
+
+      const res = await fetch(`${API}/api/envios/registrar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      });
+
+      const data = await res.json();
+      if (res.ok && data.exito) {
+        setFormMsg({ type: 'success', text: data.message || 'Envío registrado exitosamente.' });
+        setAerolinea(0); setDestino(0); setCantidad(0);
+        if (esAdmin) setOrigen(0);
+      } else {
+        setFormMsg({ type: 'error', text: data.message || 'Error al registrar envío.' });
+      }
+    } catch {
+      setFormMsg({ type: 'error', text: 'Error de conexión con el servidor.' });
+    }
+  };
+
   return (
     <div className="main-wrapper">
       <div className="container">
@@ -79,49 +188,43 @@ export default function RegistroMaletas() {
               Completa el siguiente formulario para registrar nuevos envíos en el sistema.
             </p>
 
-            <form id="formRegistroMaletas" className="form-group">
+            <form id="formRegistroMaletas" className="form-group" onSubmit={handleRegistrarEnvio}>
               <div className="form-row">
                 <div>
                   <label htmlFor="aeroline">Aerolínea Cliente <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <select id="aeroline" required>
-                    <option value="">Seleccionar aerolínea...</option>
-                    <option value="LATAM Airlines">LATAM Airlines</option>
-                    <option value="Aeromexico">Aeromexico</option>
-                    <option value="United Airlines">United Airlines</option>
-                    <option value="Lufthansa">Lufthansa</option>
-                    <option value="Singapore Airlines">Singapore Airlines</option>
-                    <option value="Emirates">Emirates</option>
-                    <option value="Air France">Air France</option>
-                    <option value="British Airways">British Airways</option>
+                  <select id="aeroline" required value={aerolinea} onChange={e => setAerolinea(Number(e.target.value))}>
+                    <option value={0}>Seleccionar aerolínea...</option>
+                    {aerolineas.map(a => (
+                      <option key={a.id} value={a.id}>{a.nombre}</option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
                   <label htmlFor="origen">Aeropuerto de Origen <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <select id="origen" required>
-                    <option value="">Seleccionar origen...</option>
-                    <optgroup label="América">
-                      <option value="Lima (Jorge Chávez)">Lima (Jorge Chávez)</option>
-                      <option value="Miami (MIA)">Miami (MIA)</option>
-                      <option value="São Paulo (GIG)">São Paulo (GIG)</option>
-                      <option value="Ciudad de México (MEX)">Ciudad de México (MEX)</option>
-                      <option value="Nueva York (JFK)">Nueva York (JFK)</option>
-                      <option value="Atlanta (ATL)">Atlanta (ATL)</option>
-                    </optgroup>
-                    <optgroup label="Europa">
-                      <option value="Frankfurt (FRA)">Frankfurt (FRA)</option>
-                      <option value="Madrid (MAD)">Madrid (MAD)</option>
-                      <option value="Londres (LHR)">Londres (LHR)</option>
-                      <option value="París (CDG)">París (CDG)</option>
-                      <option value="Ámsterdam (AMS)">Ámsterdam (AMS)</option>
-                    </optgroup>
-                    <optgroup label="Asia">
-                      <option value="Tokio (NRT)">Tokio (NRT)</option>
-                      <option value="Singapur (SIN)">Singapur (SIN)</option>
-                      <option value="Hong Kong (HKG)">Hong Kong (HKG)</option>
-                      <option value="Dubái (DXB)">Dubái (DXB)</option>
-                      <option value="Bangkok (BKK)">Bangkok (BKK)</option>
-                    </optgroup>
+                  <select id="origen" required disabled={!esAdmin} value={origen} onChange={e => setOrigen(Number(e.target.value))}>
+                    {esAdmin ? (
+                      <>
+                        <option value={0}>Seleccionar origen...</option>
+                        {Object.entries(aeropuertosAgrupados).map(([continente, lista]) => (
+                          <optgroup key={continente} label={continente}>
+                            {lista.map(a => (
+                              <option key={a.idAeropuerto} value={a.idAeropuerto}>
+                                {a.ciudad} ({a.codigo})
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        <option value={origen}>
+                          {aeropuertos.find(a => a.idAeropuerto === origen)
+                            ? `${aeropuertos.find(a => a.idAeropuerto === origen)!.ciudad} (${aeropuertos.find(a => a.idAeropuerto === origen)!.codigo})`
+                            : aeropuertoUsuario || 'Cargando...'}
+                        </option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>
@@ -129,41 +232,40 @@ export default function RegistroMaletas() {
               <div className="form-row">
                 <div>
                   <label htmlFor="destino">Aeropuerto de Destino <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <select id="destino" required>
-                    <option value="">Seleccionar destino...</option>
-                    <optgroup label="América">
-                      <option value="Lima (Jorge Chávez)">Lima (Jorge Chávez)</option>
-                      <option value="Miami (MIA)">Miami (MIA)</option>
-                      <option value="São Paulo (GIG)">São Paulo (GIG)</option>
-                      <option value="Ciudad de México (MEX)">Ciudad de México (MEX)</option>
-                      <option value="Nueva York (JFK)">Nueva York (JFK)</option>
-                      <option value="Atlanta (ATL)">Atlanta (ATL)</option>
-                    </optgroup>
-                    <optgroup label="Europa">
-                      <option value="Frankfurt (FRA)">Frankfurt (FRA)</option>
-                      <option value="Madrid (MAD)">Madrid (MAD)</option>
-                      <option value="Londres (LHR)">Londres (LHR)</option>
-                      <option value="París (CDG)">París (CDG)</option>
-                      <option value="Ámsterdam (AMS)">Ámsterdam (AMS)</option>
-                    </optgroup>
-                    <optgroup label="Asia">
-                      <option value="Tokio (NRT)">Tokio (NRT)</option>
-                      <option value="Singapur (SIN)">Singapur (SIN)</option>
-                      <option value="Hong Kong (HKG)">Hong Kong (HKG)</option>
-                      <option value="Dubái (DXB)">Dubái (DXB)</option>
-                      <option value="Bangkok (BKK)">Bangkok (BKK)</option>
-                    </optgroup>
+                  <select id="destino" required value={destino} onChange={e => setDestino(Number(e.target.value))}>
+                    <option value={0}>Seleccionar destino...</option>
+                    {Object.entries(aeropuertosAgrupados).map(([continente, lista]) => (
+                      <optgroup key={continente} label={continente}>
+                        {lista.map(a => (
+                          <option key={a.idAeropuerto} value={a.idAeropuerto}>
+                            {a.ciudad} ({a.codigo})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
 
                 <div>
                   <label htmlFor="cantidad">Cantidad de Maletas <span style={{ color: 'var(--danger-red)' }}>*</span></label>
-                  <input type="number" id="cantidad" min="1" max="400" step="1" placeholder="Ej: 50" required />
+                  <input type="number" id="cantidad" min="1" max="400" step="1" placeholder="Ej: 50" required value={cantidad || ''} onChange={e => setCantidad(Number(e.target.value))} />
                 </div>
               </div>
 
+              {formMsg && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: '8px', marginBottom: '12px',
+                  fontSize: '13px', fontWeight: 500,
+                  backgroundColor: formMsg.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                  color: formMsg.type === 'success' ? '#10b981' : '#ef4444',
+                  border: `1px solid ${formMsg.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                }}>
+                  {formMsg.type === 'success' ? '✓ ' : '✗ '} {formMsg.text}
+                </div>
+              )}
+
               <div className="form-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => { const form = document.getElementById('formRegistroMaletas') as HTMLFormElement; form.reset(); }}>
+                <button type="button" className="btn btn-secondary" onClick={() => { setAerolinea(0); if (esAdmin) setOrigen(0); setDestino(0); setCantidad(0); setFormMsg(null); }}>
                   Limpiar
                 </button>
                 <button type="submit" className="btn btn-primary">

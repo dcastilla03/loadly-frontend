@@ -9,15 +9,21 @@ interface SidebarProps {}
 export const Sidebar: React.FC<SidebarProps> = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedSimulations, setExpandedSimulations] = useState(false);
+  const [user, setUser] = useState<{ nombre: string; correo: string } | null>(null);
   const pathname = usePathname();
 
   useEffect(() => {
     const savedState = localStorage.getItem('sidebarCollapsed') === 'true';
     setCollapsed(savedState);
-    // Actualizar clase en el main-wrapper
     updateMainWrapperClass(savedState);
 
-    // Expandir automáticamente la sección de simulaciones si estamos en una ruta de simulación
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch {}
+    }
+
     const isInSimulationRoute = pathname.startsWith('/operacion-dia-dia') || 
                                 pathname.startsWith('/simulacion-periodo') || 
                                 pathname.startsWith('/simulacion-colapso');
@@ -52,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = () => {
     if (confirm('¿Deseas cerrar sesión?')) {
       localStorage.removeItem('authToken');
       localStorage.removeItem('savedUsername');
+      localStorage.removeItem('user');
       window.location.href = '/login';
     }
   };
@@ -154,11 +161,11 @@ export const Sidebar: React.FC<SidebarProps> = () => {
       </nav>
 
       <div className="sidebar-footer">
-        <div className="profile-section">
+          <div className="profile-section">
           <div className="profile-avatar">👤</div>
           <div className="profile-info">
-            <div className="profile-name">Admin User</div>
-            <div className="profile-email">admin@tasf.com</div>
+            <div className="profile-name">{user?.nombre || 'Usuario'}</div>
+            <div className="profile-email">{user?.correo || ''}</div>
           </div>
         </div>
         <button className="logout-btn" onClick={handleLogout}>

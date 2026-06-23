@@ -27,7 +27,7 @@ interface SimulationContextValue {
 
 const SimulationContext = createContext<SimulationContextValue | null>(null);
 
-export function SimulationProvider({ children, startDate, startTime }: { children: ReactNode; startDate?: string; startTime?: string }) {
+export function SimulationProvider({ children, startDate, startTime, pathname }: { children: ReactNode; startDate?: string; startTime?: string; pathname?: string }) {
   const sim = useSimulacion(startDate || undefined, startTime || undefined);
 
   // ── Refs (persisten mientras el Provider está montado) ──
@@ -125,6 +125,27 @@ export function SimulationProvider({ children, startDate, startTime }: { childre
     addLogBatchRef.current = sim.addLogBatch;
   }, [sim.addLogBatch]);
 
+  // ── Auto-start al ingresar (k=1, sin fin, UTC, con SSE) ──
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (pathname === '/login') return;
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    autoStartedRef.current = true;
+
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(now.getUTCDate()).padStart(2, '0');
+    const h = String(now.getUTCHours()).padStart(2, '0');
+    const min = String(now.getUTCMinutes()).padStart(2, '0');
+    const utcDate = `${y}-${m}-${d}`;
+    const utcTime = `${h}:${min}`;
+
+    sim.iniciar(utcDate, utcTime, 1, true);
+  }, [pathname]);
+
   // ── Control de estado del reloj (CALCULANDO → VISUALIZANDO) ──
   useEffect(() => {
     if (sim.isRunning && sim.iteracion === 0) {
@@ -165,121 +186,125 @@ export function SimulationProvider({ children, startDate, startTime }: { childre
   useEffect(() => {
     let frameId: number;
     function engineLoop() {
-      const now = performance.now();
+      try {
+        const now = performance.now();
 
-      // Actualizar countdown durante CALCULANDO
-      if (clockStateRef.current === 'CALCULANDO' && calcStartedAtRef.current > 0) {
-        const elapsedSec = Math.floor((now - calcStartedAtRef.current) / 1000);
-        configCountdownRef.current = Math.max(0, 60 - elapsedSec);
-      }
-
-      if (clockEnabledRef.current) {
-        const deltaMs = now - (lastFrameTimeRef.current || now);
-        lastFrameTimeRef.current = now;
-        const deltaMinSim = (deltaMs / 1000) * (SIM_CONFIG.K / 60);
-        currentMinSimRef.current += deltaMinSim;
-      } else {
-        lastFrameTimeRef.current = now;
-      }
-
-      const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
-      currentMinSimRef.current = minSim;
-
-      const events = flightEventsRef.current;
-      const simStart = sim.simStartDateRef.current;
-
-      for (const fe of events) {
-        if (fe.done) continue;
-
-        if (!fe.active && minSim >= fe.minutosInicio) {
-          const idEnvio = fe.key.split('-')[0];
-          const depDate = simStart ? new Date(simStart.getTime() + fe.minutosInicio * 60000) : new Date();
-          const apt = sim.aeropuertosRef.current.get(fe.origenCode);
-          const offset = apt?.gmt ?? 0;
-          const gmtHour = depDate.getHours();
-          const gmtMin = depDate.getMinutes();
-          const localHour = ((gmtHour + offset) % 24 + 24) % 24;
-          const hh = String(localHour).padStart(2, '0');
-          const mm = String(gmtMin).padStart(2, '0');
-          const cancelKey = `${fe.origenCode}-${fe.destinoCode}-${hh}:${mm}`;
-          let suprimido = cancelKey && cancelledFlightsRef.current.has(cancelKey);
-          if (!suprimido) {
-            const supInfo = suppressedTramosRef.current.get(idEnvio);
-            if (supInfo && fe.tramoOrden >= supInfo.minTramoOrden) {
-              const m = fe.key.match(/iter(\d+)/);
-              suprimido = !!(m && parseInt(m[1]) === supInfo.iteracionIdx);
-            }
-          }
-          if (suprimido) {
-            fe.done = true;
-          } else {
-            fe.active = true;
-            (fe as any)._activatedThisFrame = true;
-            airportStateRef.current.set(fe.origenCode, {
-              ocupacion: fe.ocupacionAlmacenOrigen,
-              capacidad: fe.capacidadAlmacenOrigen,
-            });
-          }
+        // Actualizar countdown durante CALCULANDO
+        if (clockStateRef.current === 'CALCULANDO' && calcStartedAtRef.current > 0) {
+          const elapsedSec = Math.floor((now - calcStartedAtRef.current) / 1000);
+          configCountdownRef.current = Math.max(0, 60 - elapsedSec);
         }
 
-        if (fe.active) {
-          // Saltar verificación de done en el mismo frame que se activó
-          if ((fe as any)._activatedThisFrame) {
-            (fe as any)._activatedThisFrame = false;
-          } else {
-            const duracion = fe.minutosFin - fe.minutosInicio;
-            if (duracion <= 0 || minSim >= fe.minutosFin) {
+        if (clockEnabledRef.current) {
+          const deltaMs = now - (lastFrameTimeRef.current || now);
+          lastFrameTimeRef.current = now;
+          const deltaMinSim = (deltaMs / 1000) * (SIM_CONFIG.K / 60);
+          currentMinSimRef.current += deltaMinSim;
+        } else {
+          lastFrameTimeRef.current = now;
+        }
+
+        const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
+        currentMinSimRef.current = minSim;
+
+        const events = flightEventsRef.current;
+        const simStart = sim.simStartDateRef.current;
+
+        for (const fe of events) {
+          if (fe.done) continue;
+
+          if (!fe.active && minSim >= fe.minutosInicio) {
+            const idEnvio = fe.key.split('-')[0];
+            const depDate = simStart ? new Date(simStart.getTime() + fe.minutosInicio * 60000) : new Date();
+            const apt = sim.aeropuertosRef.current.get(fe.origenCode);
+            const offset = apt?.gmt ?? 0;
+            const gmtHour = depDate.getHours();
+            const gmtMin = depDate.getMinutes();
+            const localHour = ((gmtHour + offset) % 24 + 24) % 24;
+            const hh = String(localHour).padStart(2, '0');
+            const mm = String(gmtMin).padStart(2, '0');
+            const cancelKey = `${fe.origenCode}-${fe.destinoCode}-${hh}:${mm}`;
+            let suprimido = cancelKey && cancelledFlightsRef.current.has(cancelKey);
+            if (!suprimido) {
+              const supInfo = suppressedTramosRef.current.get(idEnvio);
+              if (supInfo && fe.tramoOrden >= supInfo.minTramoOrden) {
+                const m = fe.key.match(/iter(\d+)/);
+                suprimido = !!(m && parseInt(m[1]) === supInfo.iteracionIdx);
+              }
+            }
+            if (suprimido) {
               fe.done = true;
-              fe.active = false;
-              airportStateRef.current.set(fe.destinoCode, {
-                ocupacion: fe.ocupacionAlmacenDestino,
-                capacidad: fe.capacidadAlmacenDestino,
+            } else {
+              fe.active = true;
+              (fe as any)._activatedThisFrame = true;
+              airportStateRef.current.set(fe.origenCode, {
+                ocupacion: fe.ocupacionAlmacenOrigen,
+                capacidad: fe.capacidadAlmacenOrigen,
               });
-              // Liberar el placeholder (empty flight) correspondiente
-              if (!fe.key.startsWith('unused-')) {
-                const mod1440 = fe.minutosInicio % 1440;
-                for (const placeholder of events) {
-                  if (placeholder.key.startsWith('unused-') && placeholder.done &&
-                      placeholder.origenCode === fe.origenCode &&
-                      placeholder.destinoCode === fe.destinoCode &&
-                      (placeholder.minutosInicio % 1440) === mod1440) {
-                    placeholder.done = false;
-                    // Recalcular próxima salida de este slot horario
-                    const timeOfDay = placeholder.minutosInicio % 1440;
-                    const duracionPlaceholder = placeholder.minutosFin - placeholder.minutosInicio;
-                    const todayDeparture = Math.floor(minSim / 1440) * 1440 + timeOfDay;
-                    if (todayDeparture <= minSim) {
-                      placeholder.minutosInicio = todayDeparture + 1440;
-                    } else {
-                      placeholder.minutosInicio = todayDeparture;
+            }
+          }
+
+          if (fe.active) {
+            // Saltar verificación de done en el mismo frame que se activó
+            if ((fe as any)._activatedThisFrame) {
+              (fe as any)._activatedThisFrame = false;
+            } else {
+              const duracion = fe.minutosFin - fe.minutosInicio;
+              if (duracion <= 0 || minSim >= fe.minutosFin) {
+                fe.done = true;
+                fe.active = false;
+                airportStateRef.current.set(fe.destinoCode, {
+                  ocupacion: fe.ocupacionAlmacenDestino,
+                  capacidad: fe.capacidadAlmacenDestino,
+                });
+                // Liberar el placeholder (empty flight) correspondiente
+                if (!fe.key.startsWith('unused-')) {
+                  const mod1440 = fe.minutosInicio % 1440;
+                  for (const placeholder of events) {
+                    if (placeholder.key.startsWith('unused-') && placeholder.done &&
+                        placeholder.origenCode === fe.origenCode &&
+                        placeholder.destinoCode === fe.destinoCode &&
+                        (placeholder.minutosInicio % 1440) === mod1440) {
+                      placeholder.done = false;
+                      // Recalcular próxima salida de este slot horario
+                      const timeOfDay = placeholder.minutosInicio % 1440;
+                      const duracionPlaceholder = placeholder.minutosFin - placeholder.minutosInicio;
+                      const todayDeparture = Math.floor(minSim / 1440) * 1440 + timeOfDay;
+                      if (todayDeparture <= minSim) {
+                        placeholder.minutosInicio = todayDeparture + 1440;
+                      } else {
+                        placeholder.minutosInicio = todayDeparture;
+                      }
+                      placeholder.minutosFin = placeholder.minutosInicio + duracionPlaceholder;
+                      break;
                     }
-                    placeholder.minutosFin = placeholder.minutosInicio + duracionPlaceholder;
-                    break;
                   }
                 }
               }
             }
           }
         }
-      }
 
-      // ── Disparar LogEvents ──
-      const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
-      for (const le of logEventsRef.current) {
-        if (!le.fired && minSim >= le.minutosDisparo) {
-          if (le.idEnvio && le.tramoOrden !== undefined) {
-            const info = suppressedTramosRef.current.get(le.idEnvio);
-            if (info && le.tramoOrden >= info.minTramoOrden) {
-              le.fired = true;
-              continue;
+        // ── Disparar LogEvents ──
+        const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
+        for (const le of logEventsRef.current) {
+          if (!le.fired && minSim >= le.minutosDisparo) {
+            if (le.idEnvio && le.tramoOrden !== undefined) {
+              const info = suppressedTramosRef.current.get(le.idEnvio);
+              if (info && le.tramoOrden >= info.minTramoOrden) {
+                le.fired = true;
+                continue;
+              }
             }
+            le.fired = true;
+            pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
           }
-          le.fired = true;
-          pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
         }
-      }
-      if (pendingLogs.length > 0) {
-        addLogBatchRef.current(pendingLogs);
+        if (pendingLogs.length > 0) {
+          addLogBatchRef.current(pendingLogs);
+        }
+      } catch (err) {
+        console.error('[engineLoop] Error:', err);
       }
 
       frameId = requestAnimationFrame(engineLoop);

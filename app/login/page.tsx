@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './login.module.css';
 
+const API_URL = 'http://localhost:8080';
+
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -12,7 +14,6 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const router = useRouter();
 
-  // Cargar username guardado si existe
   useEffect(() => {
     const savedUsername = localStorage.getItem('savedUsername');
     if (savedUsername) {
@@ -27,18 +28,44 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      // Validación de credenciales (admin/admin para desarrollo)
-      if (username === 'admin' && password === 'admin') {
-        localStorage.setItem('authToken', 'demo-token-' + Date.now());
-        if (rememberMe) {
-          localStorage.setItem('savedUsername', username);
-        }
-        router.push('/');
-      } else {
-        setError('Usuario o contraseña incorrecto');
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ correo: username, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.exito) {
+        setError(data.mensaje || 'Usuario o contraseña incorrecto');
+        return;
       }
+
+      const user = data.datos;
+      if (user?.token) {
+        localStorage.setItem('authToken', user.token);
+      }
+      if (user) {
+        localStorage.setItem('user', JSON.stringify({
+          correo: user.correo,
+          nombre: user.nombre,
+          rol: user.rol,
+          idCliente: user.idCliente,
+          aeropuertoIdAeropuerto: user.aeropuertoIdAeropuerto,
+          aeropuerto: user.aeropuerto || null,
+        }));
+      }
+
+      if (rememberMe) {
+        localStorage.setItem('savedUsername', username);
+      } else {
+        localStorage.removeItem('savedUsername');
+      }
+
+      router.push('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al iniciar sesión');
+      setError('No se pudo conectar con el servidor');
     } finally {
       setIsLoading(false);
     }
@@ -46,14 +73,11 @@ export default function LoginPage() {
 
   return (
     <div className={styles.loginContainer}>
-      {/* Fondo decorativo */}
       <div className={styles.backgroundGradient}></div>
       <div className={styles.floatingShape1}></div>
       <div className={styles.floatingShape2}></div>
 
-      {/* Contenedor del formulario */}
       <div className={styles.loginBox}>
-        {/* Header con logo */}
         <div className={styles.logoSection}>
           <div className={styles.logoWrapper}>
             <img src="/logo.svg" alt="Loadly Logo" className={styles.logo} />
@@ -62,12 +86,10 @@ export default function LoginPage() {
           <p className={styles.subtitle}>Sistema de Gestión de Envíos</p>
         </div>
 
-        {/* Banner de Desarrollo Simple */}
         <div className={styles.devBanner}>
-          <small className={styles.devLabel}>Desarrollo - Usuario: <strong>admin</strong> | Contraseña: <strong>admin</strong></small>
+          <small className={styles.devLabel}>Desarrollo - Correo: <strong>admin@tasf.com</strong> | Contraseña: <strong>admin</strong></small>
         </div>
 
-        {/* Formulario */}
         <form onSubmit={handleSubmit} className={styles.form}>
           {error && (
             <div className={styles.errorMessage}>
@@ -76,15 +98,14 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Campo Usuario */}
           <div className={styles.formGroup}>
             <label htmlFor="username" className={styles.label}>
-              Usuario
+              Correo
             </label>
             <input
               id="username"
-              type="text"
-              placeholder="Ingresa tu usuario"
+              type="email"
+              placeholder="Ingresa tu correo"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={isLoading}
@@ -93,7 +114,6 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Campo Contraseña */}
           <div className={styles.formGroup}>
             <label htmlFor="password" className={styles.label}>
               Contraseña
@@ -110,7 +130,6 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Checkbox Recordarme */}
           <div className={styles.checkboxGroup}>
             <input
               id="rememberMe"
@@ -125,7 +144,6 @@ export default function LoginPage() {
             </label>
           </div>
 
-          {/* Botón Iniciar Sesión */}
           <button
             type="submit"
             disabled={isLoading}
@@ -144,7 +162,6 @@ export default function LoginPage() {
             )}
           </button>
 
-          {/* Enlace de ayuda */}
           <div className={styles.helpText}>
             <p className={styles.helpInfo}>
               ¿Problemas para acceder?{' '}
@@ -155,7 +172,6 @@ export default function LoginPage() {
           </div>
         </form>
 
-        {/* Footer */}
         <div className={styles.footer}>
           <p className={styles.footerText}>
             © 2026 Loadly. Todos los derechos reservados.

@@ -140,7 +140,7 @@ export default function RootLayout({
           {pathname !== '/login' && <Sidebar />}
 
           {/* SimulationProvider mantiene la simulación activa al navegar entre páginas */}
-          <SimulationProvider startDate={startDate} startTime={startTime}>
+          <SimulationProvider startDate={startDate} startTime={startTime} pathname={pathname}>
           {/* Contenido Principal */}
           {children}
           </SimulationProvider>

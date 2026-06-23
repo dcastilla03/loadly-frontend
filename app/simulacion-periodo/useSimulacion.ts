@@ -323,6 +323,35 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   // Mantener ref al día para evitar closures obsoletas en el handler SSE
   useEffect(() => { allFlightEventsRef.current = allFlightEvents; }, [allFlightEvents]);
 
+  // Cargar aeropuertos al montar (independiente de iniciar)
+  useEffect(() => {
+    if (aeropuertosRef.current.size === 0) {
+      (async () => {
+        try {
+          const res = await fetch(`${API}/api/aeropuertos`);
+          if (res.ok) {
+            const response = await res.json();
+            const data = response.datos || [];
+            const mapeados: AeropuertoSim[] = (Array.isArray(data) ? data : []).map((a: any) => ({
+              codigo: a.codigo,
+              ciudad: a.ciudad,
+              pais: a.pais,
+              latitud: a.latitud,
+              longitud: a.longitud,
+              continente: a.continente || '',
+              capacidad: a.capacidad || 500,
+              gmt: a.gmt ?? 0,
+            }));
+            setAeropuertos(mapeados);
+            aeropuertosRef.current = new Map(mapeados.map((a) => [a.codigo, a]));
+          }
+        } catch (err) {
+          console.error('Error cargando aeropuertos:', err);
+        }
+      })();
+    }
+  }, []);
+
   // Fecha de inicio de la simulación (para calcular minutos relativos)
   const simStartDateRef = useRef<Date | null>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -389,7 +418,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     });
   }, []);
 
-  const iniciar = useCallback((customStartDate?: string, customStartTime?: string) => {
+  const iniciar = useCallback((customStartDate?: string, customStartTime?: string, customK?: number, sinFin?: boolean) => {
     if (esRef.current) esRef.current.close();
     setIsRunning(true);
     setAllFlightEvents([]);
@@ -436,11 +465,11 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       addLog(`🌐 Aeropuertos cargados: ${aeropuertosRef.current.size}`, '#6366f1', null);
     }
 
-    addLog('✅ Simulación iniciada — Período 5 días', '#22c55e', null);
+    addLog('✅ Simulación iniciada', '#22c55e', null);
 
     // Calcular fechas de inicio y fin
     let inicio = '20270102-00-00';
-    let fin = '20270107-00-00';
+    let fin = '';
     let simStart = new Date(2027, 0, 2, 0, 0, 0, 0);
 
     const sd = customStartDate || startDate;
@@ -465,12 +494,17 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       const endMonth = String(endDateObj.getMonth() + 1).padStart(2, '0');
       const endDay = String(endDateObj.getDate()).padStart(2, '0');
       inicio = startFormatted;
-      fin = `${endYear}${endMonth}${endDay}-${String(endDateObj.getHours()).padStart(2, '0')}-${String(endDateObj.getMinutes()).padStart(2, '0')}`;
+      if (!sinFin) {
+        fin = `${endYear}${endMonth}${endDay}-${String(endDateObj.getHours()).padStart(2, '0')}-${String(endDateObj.getMinutes()).padStart(2, '0')}`;
+      }
     }
 
     simStartDateRef.current = simStart;
 
-    const url = `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${SIM_CONFIG.K}&tamano=10`;
+    const kVal = customK ?? SIM_CONFIG.K;
+    const url = sinFin
+      ? `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
+      : `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
     const es = new EventSource(url);
     esRef.current = es;
 
@@ -626,11 +660,17 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       });
     });
 
-    es.onerror = (err) => {
-      console.error('[SSE] Error de conexión:', err);
-      addLog('Error de conexión SSE', '#ef4444');
-      setIsRunning(false);
-      es.close();
+    const sseErrorLoggedRef = { current: false };
+    es.onerror = () => {
+      if (!sseErrorLoggedRef.current) {
+        console.warn('[SSE] Error de conexión — reintentando automáticamente...');
+        addLog('⚠️ Error de conexión SSE — reintentando...', '#f97316');
+        sseErrorLoggedRef.current = true;
+      }
+      // NO cerrar ni detener — el navegador reintenta automáticamente
+    };
+    es.onopen = () => {
+      sseErrorLoggedRef.current = false;
     };
   }, [addLog, startDate]);
 

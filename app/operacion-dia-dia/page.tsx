@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { useSimulationContext } from '../SimulationContext';
-import { FlightEvent, LogEvent, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha } from '../simulacion-periodo/useSimulacion';
+import { FlightEvent, LogEvent, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha, useSimulacion, SIM_CONFIG } from '../simulacion-periodo/useSimulacion';
 
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
@@ -58,9 +57,8 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
       hour = h || 0;
       minute = m || 0;
     }
-    const date = new Date(year, month - 1, day, hour, minute);
-    date.setMinutes(date.getMinutes() + minutos);
-    const shifted = new Date(date.getTime() + gmt * 3600000);
+    const ts = Date.UTC(year, month - 1, day, hour, minute) + minutos * 60000 + gmt * 3600000;
+    const shifted = new Date(ts);
     const dd = String(shifted.getUTCDate()).padStart(2, '0');
     const mm = String(shifted.getUTCMonth() + 1).padStart(2, '0');
     const yyyy = shifted.getUTCFullYear();
@@ -70,6 +68,22 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
   } catch {
     return 'DD/MM/AAAA HH:MM';
   }
+}
+
+function logTimeToLocal(logTime: string | null, simStartDate: Date | null, gmt: number): string {
+  if (!logTime || !simStartDate) return logTime || '-';
+  const m = logTime.match(/Día (\d+) (\d{2}):(\d{2})/);
+  if (!m) return logTime;
+  const totalMin = (parseInt(m[1]) - 1) * 1440 + parseInt(m[2]) * 60 + parseInt(m[3]);
+  const startOffset = simStartDate.getUTCHours() * 60 + simStartDate.getUTCMinutes();
+  const justMin = totalMin - startOffset;
+  const localDate = new Date(simStartDate.getTime() + justMin * 60000 + gmt * 3600000);
+  const dd = String(localDate.getUTCDate()).padStart(2, '0');
+  const mm = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = localDate.getUTCFullYear();
+  const hh = String(localDate.getUTCHours()).padStart(2, '0');
+  const mi = String(localDate.getUTCMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
 }
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
@@ -87,24 +101,203 @@ export default function SimulacionPeriodo() {
   const markersRef = useRef<any[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
-  const { sim, flightEventsRef, airportStateRef, cancelledFlightsRef, suppressedTramosRef, logEventsRef, addLogRef, addLogBatchRef, emptyFlightsAddedRef, canceledLocallyRef, currentMinSimRef, clockStateRef, lastFrameTimeRef, lastIteracionRef, clockEnabledRef, panelFlightKeyRef, calcStartedAtRef, configCountdownRef, stopwatchStartedAtRef } = useSimulationContext();
+  const sim = useSimulacion();
   const user = typeof window !== 'undefined' ? (() => { try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; } })() : null;
+
+  // ── Refs locales (independientes de Periodo) ──
+  const flightEventsRef = useRef<FlightEvent[]>([]);
+  const airportStateRef = useRef<Map<string, { ocupacion: number; capacidad: number }>>(new Map());
+  const cancelledFlightsRef = useRef<Set<string>>(new Set());
+  const suppressedTramosRef = useRef<Map<string, { minTramoOrden: number; iteracionIdx: number }>>(new Map());
+  const logEventsRef = useRef<LogEvent[]>([]);
+  const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => {});
+  const addLogBatchRef = useRef<(entries: Array<{ text: string; color: string; minutosDisparo: number }>) => void>(() => {});
+  const emptyFlightsAddedRef = useRef<Set<string>>(new Set());
+  const canceledLocallyRef = useRef<Set<string>>(new Set());
+  const currentMinSimRef = useRef<number>(0);
+  const clockStateRef = useRef<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
+  const lastFrameTimeRef = useRef<number>(0);
+  const clockEnabledRef = useRef<boolean>(false);
+  const panelFlightKeyRef = useRef<string | null>(null);
+  const calcStartedAtRef = useRef<number>(0);
+  const configCountdownRef = useRef<number>(60);
+  const stopwatchStartedAtRef = useRef<number | null>(null);
+
+  // ── Sincronizar flightEvents del hook → ref local ──
+  useEffect(() => {
+    const existingKeys = new Set(flightEventsRef.current.map(e => e.key));
+    const nuevos = sim.allFlightEvents.filter(e => !existingKeys.has(e.key));
+    if (nuevos.length > 0) {
+      flightEventsRef.current = [...flightEventsRef.current, ...nuevos];
+    }
+  }, [sim.allFlightEvents]);
+
+  // ── Sincronizar logEvents del hook → ref local ──
+  useEffect(() => {
+    if (sim.allLogEvents.length === 0) { logEventsRef.current = []; return; }
+    const nuevos = sim.allLogEvents.slice(logEventsRef.current.length);
+    if (nuevos.length > 0) {
+      logEventsRef.current = [...logEventsRef.current, ...nuevos];
+    }
+  }, [sim.allLogEvents]);
+
+  // ── Sincronizar cancelledFlights → ref local ──
+  useEffect(() => {
+    cancelledFlightsRef.current = sim.cancelledFlights;
+  }, [sim.cancelledFlights]);
+
+  // ── Sincronizar suppressedTramos → ref local ──
+  useEffect(() => {
+    suppressedTramosRef.current = sim.suppressedTramos;
+    if (sim.suppressedTramos.size === 0) return;
+    sim.suppressedTramos.forEach((info, idEnvio) => {
+      for (const fe of flightEventsRef.current) {
+        const feIdEnvio = fe.key.split('-')[0];
+        if (feIdEnvio !== idEnvio || fe.tramoOrden < info.minTramoOrden || fe.active) continue;
+        const m = fe.key.match(/iter(\d+)/);
+        if (m && parseInt(m[1]) === info.iteracionIdx) { fe.done = true; }
+      }
+      for (const le of logEventsRef.current) {
+        if (le.idEnvio === idEnvio && le.tramoOrden !== undefined && le.tramoOrden >= info.minTramoOrden) {
+          le.fired = true;
+        }
+      }
+    });
+  }, [sim.suppressedTramos]);
+
+  // ── Mantener addLogRef / addLogBatchRef ──
+  useEffect(() => { addLogRef.current = sim.addLog; }, [sim.addLog]);
+  useEffect(() => { addLogBatchRef.current = sim.addLogBatch; }, [sim.addLogBatch]);
+
+  // ── Auto-start (k=1, sin fin, UTC) ──
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    autoStartedRef.current = true;
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(now.getUTCDate()).padStart(2, '0');
+    const h = String(now.getUTCHours()).padStart(2, '0');
+    const min = String(now.getUTCMinutes()).padStart(2, '0');
+    sim.iniciar(`${y}-${m}-${d}`, `${h}:${min}`, 1, true);
+  }, []);
+
+  // ── Control de estado del reloj (CALCULANDO → VISUALIZANDO) ──
+  useEffect(() => {
+    if (sim.isRunning && sim.iteracion === 0) {
+      clockEnabledRef.current = false;
+      currentMinSimRef.current = 0;
+      lastFrameTimeRef.current = 0;
+      clockStateRef.current = 'CALCULANDO';
+      calcStartedAtRef.current = performance.now();
+      configCountdownRef.current = 60;
+      flightEventsRef.current = [];
+      logEventsRef.current = [];
+      cancelledFlightsRef.current = new Set();
+      suppressedTramosRef.current = new Map();
+    }
+    if (sim.iteracion > 0 && !clockEnabledRef.current) {
+      clockEnabledRef.current = true;
+      clockStateRef.current = 'VISUALIZANDO';
+      lastFrameTimeRef.current = performance.now();
+      calcStartedAtRef.current = 0;
+      configCountdownRef.current = 0;
+      if (stopwatchStartedAtRef.current === null) stopwatchStartedAtRef.current = Date.now();
+    }
+    if (sim.isRunning && sim.iteracion > 0 && stopwatchStartedAtRef.current === null) {
+      stopwatchStartedAtRef.current = Date.now();
+    }
+    if (!sim.isRunning) { clockEnabledRef.current = false; stopwatchStartedAtRef.current = null; }
+  }, [sim.isRunning, sim.iteracion]);
+
+  // ── Motor de simulación independiente ──
+  useEffect(() => {
+    let frameId: number;
+    function engineLoop() {
+      try {
+        const now = performance.now();
+        if (clockStateRef.current === 'CALCULANDO' && calcStartedAtRef.current > 0) {
+          configCountdownRef.current = Math.max(0, 60 - Math.floor((now - calcStartedAtRef.current) / 1000));
+        }
+        if (clockEnabledRef.current) {
+          const deltaMs = now - (lastFrameTimeRef.current || now);
+          lastFrameTimeRef.current = now;
+          currentMinSimRef.current += (deltaMs / 1000) * (SIM_CONFIG.K / 60);
+        } else {
+          lastFrameTimeRef.current = now;
+        }
+        const minSim = Math.min(7200, currentMinSimRef.current);
+        currentMinSimRef.current = minSim;
+        const events = flightEventsRef.current;
+        const simStart = sim.simStartDateRef.current;
+        for (const fe of events) {
+          if (fe.done) continue;
+          if (!fe.active && minSim >= fe.minutosInicio) {
+            const apt = sim.aeropuertosRef.current.get(fe.origenCode);
+            const offset = apt?.gmt ?? 0;
+            const depDate = simStart ? new Date(simStart.getTime() + fe.minutosInicio * 60000) : new Date();
+            const gmtHour = depDate.getHours();
+            const gmtMin = depDate.getMinutes();
+            const localHour = ((gmtHour + offset) % 24 + 24) % 24;
+            const cancelKey = `${fe.origenCode}-${fe.destinoCode}-${String(localHour).padStart(2,'0')}:${String(gmtMin).padStart(2,'0')}`;
+            let suprimido = cancelledFlightsRef.current.has(cancelKey);
+            if (!suprimido) {
+              const supInfo = suppressedTramosRef.current.get(fe.key.split('-')[0]);
+              const m = fe.key.match(/iter(\d+)/);
+              if (supInfo && fe.tramoOrden >= supInfo.minTramoOrden && m && parseInt(m[1]) === supInfo.iteracionIdx) suprimido = true;
+            }
+            if (suprimido) { fe.done = true; } else {
+              fe.active = true; (fe as any)._activatedThisFrame = true;
+              airportStateRef.current.set(fe.origenCode, { ocupacion: fe.ocupacionAlmacenOrigen, capacidad: fe.capacidadAlmacenOrigen });
+            }
+          }
+          if (fe.active) {
+            if ((fe as any)._activatedThisFrame) { (fe as any)._activatedThisFrame = false; } else if (fe.minutosFin - fe.minutosInicio <= 0 || minSim >= fe.minutosFin) {
+              fe.done = true; fe.active = false;
+              airportStateRef.current.set(fe.destinoCode, { ocupacion: fe.ocupacionAlmacenDestino, capacidad: fe.capacidadAlmacenDestino });
+              if (!fe.key.startsWith('unused-')) {
+                const mod1440 = fe.minutosInicio % 1440;
+                for (const p of events) {
+                  if (p.key.startsWith('unused-') && p.done && p.origenCode === fe.origenCode && p.destinoCode === fe.destinoCode && (p.minutosInicio % 1440) === mod1440) {
+                    const origDur = p.minutosFin - p.minutosInicio;
+                    const tod = Math.floor(minSim / 1440) * 1440 + p.minutosInicio % 1440;
+                    p.minutosInicio = tod <= minSim ? tod + 1440 : tod;
+                    p.minutosFin = p.minutosInicio + origDur;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+        const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
+        for (const le of logEventsRef.current) {
+          if (!le.fired && minSim >= le.minutosDisparo) {
+            const info = suppressedTramosRef.current.get(le.idEnvio || '');
+            if (le.idEnvio && le.tramoOrden !== undefined && info && le.tramoOrden >= info.minTramoOrden) { le.fired = true; continue; }
+            le.fired = true;
+            pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
+          }
+        }
+        if (pendingLogs.length > 0) addLogBatchRef.current(pendingLogs);
+      } catch (err) { console.error('[engineLoop] Error:', err); }
+      frameId = requestAnimationFrame(engineLoop);
+    }
+    engineLoop();
+    return () => cancelAnimationFrame(frameId);
+  }, []);
 
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [flightPanelOpen, setFlightPanelOpen] = useState(false);
   const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  // Simulation stopped overlay state
   const [showStoppedOverlay, setShowStoppedOverlay] = useState(false);
-
-  // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(() => Math.floor(currentMinSimRef.current));
 
-  // Al montar, resetear lastFrameTimeRef para evitar salto de tiempo
-  useEffect(() => {
-    lastFrameTimeRef.current = performance.now();
-  }, []);
+  useEffect(() => { lastFrameTimeRef.current = performance.now(); }, []);
 
   const [gmtOffset, setGmtOffset] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
@@ -160,7 +353,7 @@ export default function SimulacionPeriodo() {
     }
   }, []);
 
-  // sim se obtiene de SimulationContext (arriba vía useSimulationContext)
+  // sim se obtiene de useSimulacion() local (independiente de Periodo)
 
   // Cronómetro de tiempo real transcurrido (stopwatch) — se actualiza en el render loop
   const [stopwatch, setStopwatch] = useState('00:00');
@@ -472,7 +665,7 @@ export default function SimulacionPeriodo() {
 
 
   // ── Loop de renderizado en mapa (solo SVG, sin lógica de tiempo) ────────
-  // El motor de simulación (tiempo + ciclo de vida FlightEvents) corre en SimulationContext
+  // El motor de simulación local gestiona tiempo + ciclo de vida FlightEvents
   useEffect(() => {
     let frameId: number;
     let checkInterval: ReturnType<typeof setInterval> | null = null;
@@ -1237,18 +1430,19 @@ export default function SimulacionPeriodo() {
       return `${d}/${m}/${y} ${hh}:${mm}`;
     };
 
-    const parseDateStr = (dateStr: string): Date => {
-      if (!dateStr) return new Date();
+    const parseDateStr = (dateStr: string): number => {
+      if (!dateStr) return Date.now();
+      let y: number, m: number, d: number, h = 0, mi = 0;
       if (dateStr.includes('-')) {
         const [dp, tp] = dateStr.split(' ');
-        const [y, m, d] = dp.split('-').map(Number);
-        const [h, mi] = tp?.split(':').map(Number) || [0, 0];
-        return new Date(y, m - 1, d, h, mi);
+        [y, m, d] = dp.split('-').map(Number);
+        if (tp) { [h, mi] = tp.split(':').map(Number); }
+      } else {
+        const p = dateStr.split(' ');
+        [d, m, y] = p[0].split('/').map(Number);
+        if (p[1]) { [h, mi] = p[1].split(':').map(Number); }
       }
-      const p = dateStr.split(' ');
-      const [d, m, y] = p[0].split('/').map(Number);
-      const [h, mi] = p[1]?.split(':').map(Number) || [0, 0];
-      return new Date(y, m - 1, d, h, mi);
+      return Date.UTC(y, m - 1, d, h, mi);
     };
 
     // ── Build Plan de Viaje tramos ──
@@ -1256,22 +1450,17 @@ export default function SimulacionPeriodo() {
       const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
       const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
       const isLast = index === (rc.tramos?.length ?? 0) - 1;
-      const simStart = new Date(startDate || '2027-01-02');
-      const stp = (startTime || '00:00').split(':').map(Number);
-      simStart.setHours(stp[0], stp[1], 0, 0);
-      let cursorDate = rc.fechaRegistro ? parseDateStr(rc.fechaRegistro) : simStart;
+      let cursorTs = rc.fechaRegistro ? parseDateStr(rc.fechaRegistro) : (sim.simStartDateRef.current?.getTime() || Date.now());
       const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
       const saleP = saleTime.split(':').map(Number);
-      let saleDate = new Date(cursorDate);
-      saleDate.setHours(saleP[0], saleP[1], 0, 0);
-      if (saleDate.getTime() < cursorDate.getTime()) saleDate.setDate(saleDate.getDate() + 1);
+      let saleTs = new Date(cursorTs).setUTCHours(saleP[0], saleP[1], 0, 0);
+      if (saleTs < cursorTs) saleTs += 86400000;
       const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
       const llegaP = llegaTime.split(':').map(Number);
-      let llegaDate = new Date(saleDate);
-      llegaDate.setHours(llegaP[0], llegaP[1], 0, 0);
-      if (llegaDate.getTime() < saleDate.getTime()) llegaDate.setDate(llegaDate.getDate() + 1);
-      const saleD = formatDateTime(saleDate, gmtOffset);
-      const llegaD = formatDateTime(llegaDate, gmtOffset);
+      let llegaTs = new Date(saleTs).setUTCHours(llegaP[0], llegaP[1], 0, 0);
+      if (llegaTs < saleTs) llegaTs += 86400000;
+      const saleD = formatDateTime(new Date(saleTs), gmtOffset);
+      const llegaD = formatDateTime(new Date(llegaTs), gmtOffset);
       return `
         <div style="background:#f9fafb;padding:12px;border-radius:10px;margin-bottom:${isLast ? '0' : '12px'};position:relative;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -1315,8 +1504,8 @@ export default function SimulacionPeriodo() {
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">PLAN DE VIAJE</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRegistro || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRecojo || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRegistro ? formatDateTime(new Date(parseDateStr(rc.fechaRegistro)), gmtOffset) : '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRecojo ? formatDateTime(new Date(parseDateStr(rc.fechaRecojo)), gmtOffset) : '-'}</div></div>
           </div>
           <div style="margin-bottom:8px;"><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Ruta</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionOrigen} → ${ubicacionDestino}</div></div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
@@ -1533,8 +1722,8 @@ export default function SimulacionPeriodo() {
   // ── Barra de progreso del cronómetro ─────────────────────────────────────
   const pct = Math.round(sim.progreso);
   const simStartDateObj = sim.simStartDateRef.current;
-  const simDateStr = simStartDateObj ? `${simStartDateObj.getFullYear()}-${String(simStartDateObj.getMonth() + 1).padStart(2, '0')}-${String(simStartDateObj.getDate()).padStart(2, '0')}` : null;
-  const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getHours()).padStart(2, '0')}:${String(simStartDateObj.getMinutes()).padStart(2, '0')}` : null;
+  const simDateStr = simStartDateObj ? `${simStartDateObj.getUTCFullYear()}-${String(simStartDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(simStartDateObj.getUTCDate()).padStart(2, '0')}` : null;
+  const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getUTCHours()).padStart(2, '0')}:${String(simStartDateObj.getUTCMinutes()).padStart(2, '0')}` : null;
   const simTimeLabel = formatSimTime(simMinutos, simDateStr, simTimeStr);
 
   // ── Filtros + Virtual Scroll para el panel de vuelos ──────────────────────
@@ -2343,7 +2532,7 @@ export default function SimulacionPeriodo() {
                   {logsPaginados.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
                   {logsPaginados.logs.map((log, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 50 }}>{log.time || '-'}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 85 }}>{logTimeToLocal(log.time, sim.simStartDateRef.current, gmtOffset) || '-'}</span>
                         <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
                         <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{log.text}</span>
                       </div>

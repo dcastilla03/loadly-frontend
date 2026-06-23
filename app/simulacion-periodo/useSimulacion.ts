@@ -116,17 +116,15 @@ function horaAMinutos(hora: string): number {
 /** Extrae la fecha de una cadena formato "yyyy-MM-dd HH:mm" o "DD/MM/YYYY HH:MM" */
 export function extraerFecha(fechaStr: string): Date {
   if (fechaStr.includes('-')) {
-    // Formato "yyyy-MM-dd HH:mm"
     const [datePart, timePart] = fechaStr.split(' ');
     const [year, month, day] = datePart.split('-').map(Number);
     const [hour, min] = timePart?.split(':').map(Number) || [0, 0];
-    return new Date(year, month - 1, day, hour, min, 0, 0);
+    return new Date(Date.UTC(year, month - 1, day, hour, min));
   } else {
-    // Formato "DD/MM/YYYY HH:MM"
     const parts = fechaStr.split(' ');
     const [day, month, year] = parts[0].split('/').map(Number);
     const [hour, min] = parts[1]?.split(':').map(Number) || [0, 0];
-    return new Date(year, month - 1, day, hour, min, 0, 0);
+    return new Date(Date.UTC(year, month - 1, day, hour, min));
   }
 }
 
@@ -167,18 +165,18 @@ function rutaAFlightEvents(
 
     const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
     const saleParts = saleTime.split(':').map(Number);
-    let saleDate = new Date(cursorDate);
-    saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
+    let saleDate = new Date(cursorDate.getTime());
+    saleDate.setUTCHours(saleParts[0], saleParts[1], 0, 0);
     if (saleDate.getTime() < cursorDate.getTime()) {
-      saleDate.setDate(saleDate.getDate() + 1);
+      saleDate = new Date(saleDate.getTime() + 24 * 60 * 60 * 1000);
     }
 
     const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
     const llegaParts = llegaTime.split(':').map(Number);
-    let llegaDate = new Date(saleDate);
-    llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
+    let llegaDate = new Date(saleDate.getTime());
+    llegaDate.setUTCHours(llegaParts[0], llegaParts[1], 0, 0);
     if (llegaDate.getTime() < saleDate.getTime()) {
-      llegaDate.setDate(llegaDate.getDate() + 1);
+      llegaDate = new Date(llegaDate.getTime() + 24 * 60 * 60 * 1000);
     }
 
     const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
@@ -257,18 +255,18 @@ function buildLogEvents(
   for (const tramo of tramos) {
     const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
     const saleParts = saleTime.split(':').map(Number);
-    let saleDate = new Date(cursorDate);
-    saleDate.setHours(saleParts[0], saleParts[1], 0, 0);
+    let saleDate = new Date(cursorDate.getTime());
+    saleDate.setUTCHours(saleParts[0], saleParts[1], 0, 0);
     if (saleDate.getTime() < cursorDate.getTime()) {
-      saleDate.setDate(saleDate.getDate() + 1);
+      saleDate = new Date(saleDate.getTime() + 24 * 60 * 60 * 1000);
     }
 
     const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
     const llegaParts = llegaTime.split(':').map(Number);
-    let llegaDate = new Date(saleDate);
-    llegaDate.setHours(llegaParts[0], llegaParts[1], 0, 0);
+    let llegaDate = new Date(saleDate.getTime());
+    llegaDate.setUTCHours(llegaParts[0], llegaParts[1], 0, 0);
     if (llegaDate.getTime() < saleDate.getTime()) {
-      llegaDate.setDate(llegaDate.getDate() + 1);
+      llegaDate = new Date(llegaDate.getTime() + 24 * 60 * 60 * 1000);
     }
 
     const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
@@ -371,7 +369,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       // Convertir minutos simulados a formato "Día X — HH:MM" considerando la hora de inicio
       const simStart = simStartDateRef.current;
       if (simStart) {
-        const totalMinutos = simStart.getHours() * 60 + simStart.getMinutes() + minutosSimulados;
+        const totalMinutos = simStart.getUTCHours() * 60 + simStart.getUTCMinutes() + minutosSimulados;
         const dia = Math.floor(totalMinutos / (24 * 60)) + 1;
         const minDelDia = totalMinutos % (24 * 60);
         const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
@@ -397,7 +395,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
         let t: string | null = null;
         if (typeof entry.minutosDisparo === 'number') {
           if (simStart) {
-            const totalMinutos = simStart.getHours() * 60 + simStart.getMinutes() + entry.minutosDisparo;
+            const totalMinutos = simStart.getUTCHours() * 60 + simStart.getUTCMinutes() + entry.minutosDisparo;
             const dia = Math.floor(totalMinutos / (24 * 60)) + 1;
             const minDelDia = totalMinutos % (24 * 60);
             const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
@@ -419,6 +417,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   }, []);
 
   const iniciar = useCallback((customStartDate?: string, customStartTime?: string, customK?: number, sinFin?: boolean) => {
+    if (customK !== undefined) { SIM_CONFIG.K = customK; }
     if (esRef.current) esRef.current.close();
     setIsRunning(true);
     setAllFlightEvents([]);
@@ -470,7 +469,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     // Calcular fechas de inicio y fin
     let inicio = '20270102-00-00';
     let fin = '';
-    let simStart = new Date(2027, 0, 2, 0, 0, 0, 0);
+    let simStart = new Date(Date.UTC(2027, 0, 2, 0, 0));
 
     const sd = customStartDate || startDate;
     const st = customStartTime || startTime;
@@ -485,17 +484,16 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       }
 
       const startFormatted = `${year}${month}${day}-${String(hour).padStart(2, '0')}-${String(minute).padStart(2, '0')}`;
-      const startDateObj = new Date(Number(year), Number(month) - 1, Number(day), hour, minute, 0, 0);
+      const startDateObj = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), hour, minute));
       simStart = startDateObj;
 
-      const endDateObj = new Date(startDateObj);
-      endDateObj.setDate(endDateObj.getDate() + 5);
-      const endYear = endDateObj.getFullYear();
-      const endMonth = String(endDateObj.getMonth() + 1).padStart(2, '0');
-      const endDay = String(endDateObj.getDate()).padStart(2, '0');
+      const endDateObj = new Date(startDateObj.getTime() + 5 * 24 * 60 * 60 * 1000);
+      const endYear = endDateObj.getUTCFullYear();
+      const endMonth = String(endDateObj.getUTCMonth() + 1).padStart(2, '0');
+      const endDay = String(endDateObj.getUTCDate()).padStart(2, '0');
       inicio = startFormatted;
       if (!sinFin) {
-        fin = `${endYear}${endMonth}${endDay}-${String(endDateObj.getHours()).padStart(2, '0')}-${String(endDateObj.getMinutes()).padStart(2, '0')}`;
+        fin = `${endYear}${endMonth}${endDay}-${String(endDateObj.getUTCHours()).padStart(2, '0')}-${String(endDateObj.getUTCMinutes()).padStart(2, '0')}`;
       }
     }
 

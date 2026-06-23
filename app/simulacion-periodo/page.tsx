@@ -51,10 +51,7 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
   if (!startDate) return 'DD/MM/AAAA HH:MM';
 
   try {
-    // Parse startDate format "YYYY-MM-DD"
     const [year, month, day] = startDate.split('-').map(Number);
-
-    // Parse startTime format "HH:MM"
     let hour = 0, minute = 0;
     if (startTime) {
       const [h, m] = startTime.split(':').map(Number);
@@ -62,17 +59,14 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
       minute = m || 0;
     }
 
-    const date = new Date(year, month - 1, day, hour, minute);
+    const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+    date.setTime(date.getTime() + minutos * 60000);
 
-    // Add simulated minutes
-    date.setMinutes(date.getMinutes() + minutos);
-
-    // Format as DD/MM/AAAA HH:MM
-    const dd = String(date.getDate()).padStart(2, '0');
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const yyyy = date.getFullYear();
-    const hh = String(date.getHours()).padStart(2, '0');
-    const mi = String(date.getMinutes()).padStart(2, '0');
+    const dd = String(date.getUTCDate()).padStart(2, '0');
+    const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const yyyy = date.getUTCFullYear();
+    const hh = String(date.getUTCHours()).padStart(2, '0');
+    const mi = String(date.getUTCMinutes()).padStart(2, '0');
     return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
   } catch (e) {
     return 'DD/MM/AAAA HH:MM';
@@ -266,18 +260,25 @@ export default function SimulacionPeriodo() {
     const [lha, lma] = (flight.horaLlegada || '00:00').split(':').map(Number);
     const gmtHa = ((lha - gmtD) % 24 + 24) % 24;
 
-    let saleDate = new Date(simStartDate);
-    saleDate.setHours(gmtH, lm, 0, 0);
-    while (saleDate.getTime() < simStartDate.getTime()) {
-      saleDate.setDate(saleDate.getDate() + 1);
+    let saleDate = new Date(simStartDate.getTime());
+    saleDate.setUTCHours(gmtH, lm, 0, 0);
+    let saleTs = saleDate.getTime();
+    const startTs = simStartDate.getTime();
+    while (saleTs < startTs) {
+      saleTs += 24 * 60 * 60 * 1000;
     }
+    saleDate = new Date(saleTs);
 
     let llegaDate = new Date(saleDate);
-    llegaDate.setHours(gmtHa, lma, 0, 0);
-    if (llegaDate.getTime() <= saleDate.getTime()) llegaDate.setDate(llegaDate.getDate() + 1);
+    llegaDate.setUTCHours(gmtHa, lma, 0, 0);
+    let llegaTs = llegaDate.getTime();
+    while (llegaTs <= saleTs) {
+      llegaTs += 24 * 60 * 60 * 1000;
+    }
+    llegaDate = new Date(llegaTs);
 
-    const minutosInicio = Math.round((saleDate.getTime() - simStartDate.getTime()) / 60000);
-    const minutosFin = Math.round((llegaDate.getTime() - simStartDate.getTime()) / 60000);
+    const minutosInicio = Math.round((saleTs - startTs) / 60000);
+    const minutosFin = Math.round((llegaTs - startTs) / 60000);
 
     if (minutosInicio < 0 || minutosInicio > TOTAL_MINUTOS_SIM) return null;
 
@@ -348,6 +349,7 @@ export default function SimulacionPeriodo() {
 
     // Add new empty flights for truly unused API flights
     const added: FlightEvent[] = [];
+    const removedKeys = new Set<string>();
     for (const flight of apiFlights) {
       if (flight.cancelado) continue;
       const infoOri = aeropuertoInfoRef.current.get(flight.idAeropuertoOrigen);
@@ -362,8 +364,12 @@ export default function SimulacionPeriodo() {
       if (allUsedKeys.has(`${origen}-${destino}-${gmtTime}`)) continue;
 
       const feKey = `unused-${origen}-${destino}-${String(gmtH).padStart(2, '0')}${String(lm).padStart(2, '0')}`;
-      if (emptyFlightsAddedRef.current.has(feKey)) continue;
-      if (flightEventsRef.current.find(e => e.key === feKey)) continue;
+      const existingFe = flightEventsRef.current.find(e => e.key === feKey);
+      if (existingFe) {
+        if (!existingFe.done) continue;
+        removedKeys.add(feKey);
+        emptyFlightsAddedRef.current.delete(feKey);
+      }
 
       const fe = crearEmptyFlightEvent(flight, simStart);
       if (fe) {
@@ -371,10 +377,13 @@ export default function SimulacionPeriodo() {
         emptyFlightsAddedRef.current.add(feKey);
       }
     }
-    if (added.length > 0) {
-      flightEventsRef.current = [...flightEventsRef.current, ...added];
+    if (added.length > 0 || removedKeys.size > 0) {
+      flightEventsRef.current = [
+        ...flightEventsRef.current.filter(e => !removedKeys.has(e.key)),
+        ...added,
+      ];
     }
-  }, [apiFlights, sim.allFlightEvents, sim.simStartDateRef.current]);
+  }, [apiFlights, sim.allFlightEvents, sim.aeropuertos]);
 
   useEffect(() => {
     const API = process.env.NEXT_PUBLIC_API_URL;
@@ -487,7 +496,7 @@ export default function SimulacionPeriodo() {
       url.searchParams.set('startDate', startDate);
       if (startTime) url.searchParams.set('startTime', startTime);
       window.history.replaceState(null, '', url.toString());
-      sim.iniciar(startDate, startTime || undefined);
+      sim.iniciar(startDate, startTime || undefined, 120, undefined);
     }
   }, [startDate, startTime, showConfigOverlay, sim.iniciar]);
 
@@ -1723,8 +1732,8 @@ export default function SimulacionPeriodo() {
   // ── Barra de progreso del cronómetro ─────────────────────────────────────
   const pct = Math.round(sim.progreso);
   const simStartDateObj = sim.simStartDateRef.current;
-  const simDateStr = simStartDateObj ? `${simStartDateObj.getFullYear()}-${String(simStartDateObj.getMonth() + 1).padStart(2, '0')}-${String(simStartDateObj.getDate()).padStart(2, '0')}` : null;
-  const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getHours()).padStart(2, '0')}:${String(simStartDateObj.getMinutes()).padStart(2, '0')}` : null;
+  const simDateStr = simStartDateObj ? `${simStartDateObj.getUTCFullYear()}-${String(simStartDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(simStartDateObj.getUTCDate()).padStart(2, '0')}` : null;
+  const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getUTCHours()).padStart(2, '0')}:${String(simStartDateObj.getUTCMinutes()).padStart(2, '0')}` : null;
   const simTimeLabel = formatSimTime(simMinutos, simDateStr, simTimeStr);
 
   // ── Filtros + Virtual Scroll para el panel de vuelos ──────────────────────

@@ -136,14 +136,11 @@ export default function RegistroMaletas() {
 
     try {
       const params = new URLSearchParams();
-      const apt = aeropuertos.find(a => a.idAeropuerto === origen);
-      const gmt = apt?.gmt ?? 0;
       const now = new Date();
-      const localDate = new Date(now.getTime() + gmt * 3600000);
       const pad = (n: number) => String(n).padStart(2, '0');
-      const fechaLocal =
-        `${localDate.getUTCFullYear()}-${pad(localDate.getUTCMonth() + 1)}-${pad(localDate.getUTCDate())}T${pad(localDate.getUTCHours())}:${pad(localDate.getUTCMinutes())}:${pad(localDate.getUTCSeconds())}`;
-      params.append('fechaRegistro', fechaLocal);
+      const fechaUTC =
+        `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+      params.append('fechaRegistro', fechaUTC);
       params.append('idAeropuertoOrigen', String(origen));
       params.append('idAeropuertoDestino', String(destino));
       params.append('cantidadMaletas', String(cantidad));

@@ -125,26 +125,8 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
     addLogBatchRef.current = sim.addLogBatch;
   }, [sim.addLogBatch]);
 
-  // ── Auto-start al ingresar (k=1, sin fin, UTC, con SSE) ──
-  const autoStartedRef = useRef(false);
-  useEffect(() => {
-    if (autoStartedRef.current) return;
-    if (pathname === '/login') return;
-    const token = localStorage.getItem('authToken');
-    if (!token) return;
-    autoStartedRef.current = true;
-
-    const now = new Date();
-    const y = now.getUTCFullYear();
-    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(now.getUTCDate()).padStart(2, '0');
-    const h = String(now.getUTCHours()).padStart(2, '0');
-    const min = String(now.getUTCMinutes()).padStart(2, '0');
-    const utcDate = `${y}-${m}-${d}`;
-    const utcTime = `${h}:${min}`;
-
-    sim.iniciar(utcDate, utcTime, 1, true);
-  }, [pathname]);
+  // NOTA: El auto-start (k=1, sin fin, UTC) está ahora en operacion-dia-dia/page.tsx
+  // para mantener la simulación de Día a Día independiente de Periodo.
 
   // ── Control de estado del reloj (CALCULANDO → VISUALIZANDO) ──
   useEffect(() => {
@@ -155,6 +137,12 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
       clockStateRef.current = 'CALCULANDO';
       calcStartedAtRef.current = performance.now();
       configCountdownRef.current = 60;
+      // Limpiar eventos de una simulación anterior (ej. Día a Día) para evitar
+      // conflictos de keys que impedirían que los nuevos eventos lleguen al ref.
+      flightEventsRef.current = [];
+      logEventsRef.current = [];
+      cancelledFlightsRef.current = new Set();
+      suppressedTramosRef.current = new Map();
     }
 
     if (sim.iteracion > 0 && !clockEnabledRef.current) {

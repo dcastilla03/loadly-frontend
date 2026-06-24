@@ -1018,6 +1018,18 @@ export default function SimulacionPeriodo() {
       fe.active = false;
       fe.done = true;
     });
+    ctx.flightEventsRef.current = [];
+    ctx.airportStateRef.current.clear();
+    const mapAny = mapInst.current as any;
+    if (mapAny && mapAny._actualizarIconoAlmacen) {
+      markersRef.current.forEach(m => mapAny._actualizarIconoAlmacen(m, 0));
+    }
+    ctx.logEventsRef.current = [];
+    ctx.cancelledFlightsRef.current.clear();
+    ctx.suppressedTramosRef.current.clear();
+    ctx.emptyFlightsAddedRef.current.clear();
+    ctx.canceledLocallyRef.current.clear();
+    ctx.currentMinSimRef.current = 0;
     setShowStoppedOverlay(true);
     setStartDate('');
     sessionStorage.removeItem('periodoStartDate');
@@ -1131,11 +1143,11 @@ export default function SimulacionPeriodo() {
     const simStart = sim.simStartDateRef.current;
     if (!simStart) { console.warn('[cancelarVuelo] simStartDateRef.current es null', vuelo); setCancellingFlights(prev => { const newSet = new Set(prev); newSet.delete(claveVuelo); return newSet; }); return; }
     const relojDate = new Date(simStart.getTime() + Math.floor(currentMinSimRef.current) * 60000);
-    const y = relojDate.getFullYear();
-    const M = String(relojDate.getMonth() + 1).padStart(2, '0');
-    const d = String(relojDate.getDate()).padStart(2, '0');
-    const h = String(relojDate.getHours()).padStart(2, '0');
-    const m = String(relojDate.getMinutes()).padStart(2, '0');
+    const y = relojDate.getUTCFullYear();
+    const M = String(relojDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(relojDate.getUTCDate()).padStart(2, '0');
+    const h = String(relojDate.getUTCHours()).padStart(2, '0');
+    const m = String(relojDate.getUTCMinutes()).padStart(2, '0');
     const reloj = `${y}${M}${d}-${h}-${m}`;
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -1211,19 +1223,19 @@ export default function SimulacionPeriodo() {
     const simStartDate = sim.simStartDateRef.current;
     if (!simStartDate) return;
     let startDateStr = startDate;
-    startDateStr = `${simStartDate.getFullYear()}-${String(simStartDate.getMonth() + 1).padStart(2, '0')}-${String(simStartDate.getDate()).padStart(2, '0')}`;
+    startDateStr = `${simStartDate.getUTCFullYear()}-${String(simStartDate.getUTCMonth() + 1).padStart(2, '0')}-${String(simStartDate.getUTCDate()).padStart(2, '0')}`;
     const depDate = new Date(simStartDate.getTime() + fe.minutosInicio * 60000);
     const arrDate = new Date(simStartDate.getTime() + fe.minutosFin * 60000);
-    const depHH = String(depDate.getHours()).padStart(2, '0');
-    const depMi = String(depDate.getMinutes()).padStart(2, '0');
-    const arrHH = String(arrDate.getHours()).padStart(2, '0');
-    const arrMi = String(arrDate.getMinutes()).padStart(2, '0');
-    const depDD = String(depDate.getDate()).padStart(2, '0');
-    const depMM = String(depDate.getMonth() + 1).padStart(2, '0');
-    const depYYYY = depDate.getFullYear();
-    const arrDD = String(arrDate.getDate()).padStart(2, '0');
-    const arrMM = String(arrDate.getMonth() + 1).padStart(2, '0');
-    const arrYYYY = arrDate.getFullYear();
+    const depHH = String(depDate.getUTCHours()).padStart(2, '0');
+    const depMi = String(depDate.getUTCMinutes()).padStart(2, '0');
+    const arrHH = String(arrDate.getUTCHours()).padStart(2, '0');
+    const arrMi = String(arrDate.getUTCMinutes()).padStart(2, '0');
+    const depDD = String(depDate.getUTCDate()).padStart(2, '0');
+    const depMM = String(depDate.getUTCMonth() + 1).padStart(2, '0');
+    const depYYYY = depDate.getUTCFullYear();
+    const arrDD = String(arrDate.getUTCDate()).padStart(2, '0');
+    const arrMM = String(arrDate.getUTCMonth() + 1).padStart(2, '0');
+    const arrYYYY = arrDate.getUTCFullYear();
     const horaSalida = `${depDD}/${depMM}/${depYYYY} ${depHH}:${depMi}`;
     const horaLlegada = `${arrDD}/${arrMM}/${arrYYYY} ${arrHH}:${arrMi}`;
 
@@ -1428,11 +1440,11 @@ export default function SimulacionPeriodo() {
     const tipoRuta = (rc.tramos?.length ?? 0) <= 1 ? 'Directo' : 'Con Escala';
 
     const formatDateTime = (date: Date) => {
-      const d = String(date.getDate()).padStart(2, '0');
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const y = date.getFullYear();
-      const hh = String(date.getHours()).padStart(2, '0');
-      const mm = String(date.getMinutes()).padStart(2, '0');
+      const d = String(date.getUTCDate()).padStart(2, '0');
+      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const y = date.getUTCFullYear();
+      const hh = String(date.getUTCHours()).padStart(2, '0');
+      const mm = String(date.getUTCMinutes()).padStart(2, '0');
       return `${d}/${m}/${y} ${hh}:${mm}`;
     };
 
@@ -1442,12 +1454,12 @@ export default function SimulacionPeriodo() {
         const [dp, tp] = dateStr.split(' ');
         const [y, m, d] = dp.split('-').map(Number);
         const [h, mi] = tp?.split(':').map(Number) || [0, 0];
-        return new Date(y, m - 1, d, h, mi);
+        return new Date(Date.UTC(y, m - 1, d, h, mi));
       }
       const p = dateStr.split(' ');
       const [d, m, y] = p[0].split('/').map(Number);
       const [h, mi] = p[1]?.split(':').map(Number) || [0, 0];
-      return new Date(y, m - 1, d, h, mi);
+      return new Date(Date.UTC(y, m - 1, d, h, mi));
     };
 
     // ── Build Plan de Viaje tramos ──
@@ -1455,20 +1467,22 @@ export default function SimulacionPeriodo() {
       const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
       const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
       const isLast = index === (rc.tramos?.length ?? 0) - 1;
-      const simStart = new Date(startDate || '2027-01-02');
-      const stp = (startTime || '00:00').split(':').map(Number);
-      simStart.setHours(stp[0], stp[1], 0, 0);
-      let cursorDate = rc.fechaRegistro ? parseDateStr(rc.fechaRegistro) : simStart;
+      let cursorDate = rc.fechaRegistro ? parseDateStr(rc.fechaRegistro) : null;
+      if (!cursorDate) {
+        const [sy, sm, sd] = (startDate || '2027-01-02').split('-').map(Number);
+        const stp = (startTime || '00:00').split(':').map(Number);
+        cursorDate = new Date(Date.UTC(sy, sm - 1, sd, stp[0], stp[1]));
+      }
       const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
       const saleP = saleTime.split(':').map(Number);
       let saleDate = new Date(cursorDate);
-      saleDate.setHours(saleP[0], saleP[1], 0, 0);
-      if (saleDate.getTime() < cursorDate.getTime()) saleDate.setDate(saleDate.getDate() + 1);
+      saleDate.setUTCHours(saleP[0], saleP[1], 0, 0);
+      if (saleDate.getTime() < cursorDate.getTime()) saleDate.setUTCDate(saleDate.getUTCDate() + 1);
       const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
       const llegaP = llegaTime.split(':').map(Number);
       let llegaDate = new Date(saleDate);
-      llegaDate.setHours(llegaP[0], llegaP[1], 0, 0);
-      if (llegaDate.getTime() < saleDate.getTime()) llegaDate.setDate(llegaDate.getDate() + 1);
+      llegaDate.setUTCHours(llegaP[0], llegaP[1], 0, 0);
+      if (llegaDate.getTime() < saleDate.getTime()) llegaDate.setUTCDate(llegaDate.getUTCDate() + 1);
       const saleD = formatDateTime(saleDate);
       const llegaD = formatDateTime(llegaDate);
       return `
@@ -1766,8 +1780,8 @@ export default function SimulacionPeriodo() {
         const getOcup = (v: typeof a) => {
           if (!simStart) return -1;
           const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
-          let d = new Date(simStart); d.setHours(hh, mm, 0, 0);
-          while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
+          let d = new Date(simStart); d.setUTCHours(hh, mm, 0, 0);
+          while (d.getTime() < simStart.getTime()) d.setUTCDate(d.getUTCDate() + 1);
           const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
           const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && (e.minutosInicio % 1440) === (minInicio % 1440));
           if (!fe || fe.key.startsWith('unused-')) return -1;
@@ -2030,10 +2044,11 @@ export default function SimulacionPeriodo() {
                         <small style={{ color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fecha y Hora de Inicio</small>
                         <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>
                           {configStartDate ? (() => {
-                            const date = new Date(configStartDate + 'T00:00:00');
-                            const day = String(date.getDate()).padStart(2, '0');
-                            const month = String(date.getMonth() + 1).padStart(2, '0');
-                            const year = date.getFullYear();
+                            const [cY, cM, cD] = configStartDate.split('-').map(Number);
+                            const date = new Date(Date.UTC(cY, cM - 1, cD));
+                            const day = String(date.getUTCDate()).padStart(2, '0');
+                            const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+                            const year = date.getUTCFullYear();
                             const time = configStartTime || '00:00';
                             return `${day}/${month}/${year} ${time}`;
                           })() : '-'}
@@ -2446,8 +2461,8 @@ export default function SimulacionPeriodo() {
                     const simStartOcc = sim.simStartDateRef.current;
                     if (simStartOcc) {
                       const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
-                      let d = new Date(simStartOcc); d.setHours(gmtHour, gmtMin, 0, 0);
-                      while (d.getTime() < simStartOcc.getTime()) d.setDate(d.getDate() + 1);
+                      let d = new Date(simStartOcc); d.setUTCHours(gmtHour, gmtMin, 0, 0);
+                      while (d.getTime() < simStartOcc.getTime()) d.setUTCDate(d.getUTCDate() + 1);
                       const minInicio = Math.round((d.getTime() - simStartOcc.getTime()) / 60000);
                       let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
                       if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
@@ -2469,11 +2484,9 @@ export default function SimulacionPeriodo() {
                           const simStart = sim.simStartDateRef.current;
                           if (!simStart || esCancelado || esCancelling) return;
                           const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
-                          // setHours(gmtHour, ...) trata GMT como local, igual que rutaAFlightEvents.
-                          // Así minutosInicio % 1440 coincide con SSE flights y el panel muestra
-                          // la hora absoluta (simStart + minutos) en vez de minutos del día.
-                          let d = new Date(simStart); d.setHours(gmtHour, gmtMin, 0, 0);
-                          while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
+                          // setUTCHours para mantener todo en UTC
+                          let d = new Date(simStart); d.setUTCHours(gmtHour, gmtMin, 0, 0);
+                          while (d.getTime() < simStart.getTime()) d.setUTCDate(d.getUTCDate() + 1);
                           const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
                           let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
                           if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);

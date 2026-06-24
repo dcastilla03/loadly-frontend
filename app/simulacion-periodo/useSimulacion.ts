@@ -676,6 +676,14 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setIsRunning(false);
     addLog('Simulación detenida manualmente', '#f97316');
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    rutasPlanificadasRef.current.clear();
+    rutasPorCodigoUnicoRef.current.clear();
+    allFlightEventsRef.current = [];
+    setAllFlightEvents([]);
+    setAllLogEvents([]);
+    setCancelledFlights(new Set());
+    setSuppressedTramos(new Map());
+    setResumen(null);
     try {
       await fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' });
     } catch (error) {

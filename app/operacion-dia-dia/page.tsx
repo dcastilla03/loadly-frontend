@@ -123,21 +123,32 @@ export default function SimulacionPeriodo() {
   const configCountdownRef = useRef<number>(60);
   const stopwatchStartedAtRef = useRef<number | null>(null);
 
-  // ── Sincronizar flightEvents del hook → ref local ──
+  // ── Sincronizar flightEvents del hook → ref local (corrigiendo GMT) ──
   useEffect(() => {
     const existingKeys = new Set(flightEventsRef.current.map(e => e.key));
     const nuevos = sim.allFlightEvents.filter(e => !existingKeys.has(e.key));
     if (nuevos.length > 0) {
-      flightEventsRef.current = [...flightEventsRef.current, ...nuevos];
+      const corrected = nuevos.map(fe => {
+        const apt = sim.aeropuertosRef.current.get(fe.origenCode);
+        const gmtO = apt?.gmt ?? 0;
+        return { ...fe, minutosInicio: fe.minutosInicio + gmtO * 60, minutosFin: fe.minutosFin + gmtO * 60 };
+      });
+      flightEventsRef.current = [...flightEventsRef.current, ...corrected];
     }
   }, [sim.allFlightEvents]);
 
-  // ── Sincronizar logEvents del hook → ref local ──
+  // ── Sincronizar logEvents del hook → ref local (corrigiendo GMT) ──
   useEffect(() => {
     if (sim.allLogEvents.length === 0) { logEventsRef.current = []; return; }
     const nuevos = sim.allLogEvents.slice(logEventsRef.current.length);
     if (nuevos.length > 0) {
-      logEventsRef.current = [...logEventsRef.current, ...nuevos];
+      const corrected = nuevos.map(le => {
+        const ruta = sim.rutasPlanificadasRef.current.get(le.idEnvio || '');
+        const apt = ruta ? sim.aeropuertosRef.current.get(ruta.origen) : null;
+        const gmtO = apt?.gmt ?? 0;
+        return { ...le, minutosDisparo: le.minutosDisparo + gmtO * 60 };
+      });
+      logEventsRef.current = [...logEventsRef.current, ...corrected];
     }
   }, [sim.allLogEvents]);
 
@@ -1724,7 +1735,7 @@ export default function SimulacionPeriodo() {
   const simStartDateObj = sim.simStartDateRef.current;
   const simDateStr = simStartDateObj ? `${simStartDateObj.getUTCFullYear()}-${String(simStartDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(simStartDateObj.getUTCDate()).padStart(2, '0')}` : null;
   const simTimeStr = simStartDateObj ? `${String(simStartDateObj.getUTCHours()).padStart(2, '0')}:${String(simStartDateObj.getUTCMinutes()).padStart(2, '0')}` : null;
-  const simTimeLabel = formatSimTime(simMinutos, simDateStr, simTimeStr);
+  const simTimeLabel = formatSimTime(simMinutos, simDateStr, simTimeStr, gmtOffset);
 
   // ── Filtros + Virtual Scroll para el panel de vuelos ──────────────────────
   const ITEM_HEIGHT = 90;

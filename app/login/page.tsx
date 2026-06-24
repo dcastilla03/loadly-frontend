@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './login.module.css';
 
-const API_URL = 'http://localhost:8080';
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');

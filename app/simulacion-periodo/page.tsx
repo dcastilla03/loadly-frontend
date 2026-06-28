@@ -4,6 +4,29 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useSimulacion, FlightEvent, LogEvent, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha } from './useSimulacion';
 import { useSimulationContext } from '../SimulationContext';
 
+// ─── helper: forzar español en style OpenFreeMap ───────────────────────────
+function forceSpanish(style: any): any {
+  function walk(v: any): any {
+    if (Array.isArray(v)) {
+      if (v.length >= 2 && v[0] === 'get' && typeof v[1] === 'string') {
+        if (v[1] === 'name_en' || v[1] === 'name:latin') return ['get', 'name:es'];
+        if (v[1] === 'name:nonlatin') return ['get', 'name'];
+      }
+      if (v[0] === 'case' && Array.isArray(v[1]) && v[1][0] === 'has' && v[1][1] === 'name:nonlatin') {
+        return ['coalesce', ['get', 'name:es'], ['get', 'name']];
+      }
+      return v.map(walk);
+    }
+    if (v !== null && typeof v === 'object') {
+      const r: Record<string, any> = {};
+      for (const [k, val] of Object.entries(v)) r[k] = walk(val);
+      return r;
+    }
+    return v;
+  }
+  return walk(style);
+}
+
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
 function getAirplaneSVG(pct: number, isEmpty?: boolean): string {
@@ -71,6 +94,16 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
   } catch (e) {
     return 'DD/MM/AAAA HH:MM';
   }
+}
+
+/** Formatea minutos simulados transcurridos como duración "Xd Yh Zm" */
+function formatDuration(minutos: number): string {
+  const d = Math.floor(minutos / (24 * 60));
+  const h = Math.floor((minutos % (24 * 60)) / 60);
+  const m = Math.floor(minutos % 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
@@ -146,14 +179,32 @@ export default function SimulacionPeriodo() {
     }
   }, []);
 
-  // Hora real del sistema (momento presente)
-  const [horaActual, setHoraActual] = useState('');
+  // Fecha-hora real del sistema en zona horaria del usuario — copiado de Día a Día
+  const [gmtOffset, setGmtOffset] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      const g = u?.aeropuerto?.gmt;
+      return typeof g === 'number' && !isNaN(g) ? g : 0;
+    } catch { return 0; }
+  });
+  const [realTimeLabel, setRealTimeLabel] = useState('');
   useEffect(() => {
-    const tick = () => setHoraActual(new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    const tick = () => {
+      const now = new Date();
+      const local = new Date(now.getTime() + gmtOffset * 3600000);
+      const dd = String(local.getUTCDate()).padStart(2, '0');
+      const mm = String(local.getUTCMonth() + 1).padStart(2, '0');
+      const yyyy = local.getUTCFullYear();
+      const hh = String(local.getUTCHours()).padStart(2, '0');
+      const mi = String(local.getUTCMinutes()).padStart(2, '0');
+      const ss = String(local.getUTCSeconds()).padStart(2, '0');
+      setRealTimeLabel(`${dd}/${mm}/${yyyy} ${hh}:${mi}:${ss}`);
+    };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [gmtOffset]);
 
   const isInitialized = useRef(false);
 
@@ -518,11 +569,15 @@ export default function SimulacionPeriodo() {
           worldCopyJump: false,
         }).setView([20, 0], 2);
         L.control.zoom({ zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(map);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-          attribution: '© CartoDB',
-          maxZoom: 19,
-          subdomains: 'abcd',
-          noWrap: true,
+        const styleUrl = 'https://tiles.openfreemap.org/styles/bright';
+        const styleResp = await fetch(styleUrl);
+        const styleSpec = await styleResp.json();
+        const spanishStyle = forceSpanish(styleSpec);
+        require('maplibre-gl/dist/maplibre-gl.css');
+        require('@maplibre/maplibre-gl-leaflet');
+        L.maplibreGL({
+          style: spanishStyle,
+          attribution: '<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
         mapInst.current = map;
         setMapReady(true);
@@ -819,7 +874,9 @@ export default function SimulacionPeriodo() {
           }
           if (ctx.clockEnabledRef.current && ctx.stopwatchStartedAtRef.current != null) {
             const elapsedSec = Math.floor((Date.now() - ctx.stopwatchStartedAtRef.current) / 1000);
-            const label = `${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`;
+            const mins = Math.floor(elapsedSec / 60);
+            const secs = elapsedSec % 60;
+            const label = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
             if (label !== lastStopwatchLabelRef.current) {
               lastStopwatchLabelRef.current = label;
               setStopwatch(label);
@@ -2196,9 +2253,12 @@ export default function SimulacionPeriodo() {
           <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
             <div style={{ pointerEvents: 'auto', padding: '8px 12px' }}>
               <div style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)' }}>
-                <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  Simulación — Período 5 Días
-                  <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+                  <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    Simulación — Período 5 Días
+                    <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }} />
+                  </h1>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#f97316', marginTop: 1 }}>Día {sim.diaActual}/5</div>
                   <style>{`
                   /* LED apagado (inicial) */
                   .led-off {
@@ -2227,23 +2287,33 @@ export default function SimulacionPeriodo() {
                     filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25));
                   }
                 `}</style>
-                </h1>
+                </div>
                 <div style={{ height: 20, width: 1, backgroundColor: 'var(--border-color)' }} />
 
-                {/* Reloj simulado */}
                 <div>
                   <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Simulado</small>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 2, whiteSpace: 'nowrap' }}>{simTimeLabel.split(' ')[0]} ⏱ {simTimeLabel.split(' ')[1]}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 2, whiteSpace: 'nowrap' }}>{simTimeLabel}</div>
+                </div>
+
+                <div>
+                  <div style={{ lineHeight: 1.15 }}>
+                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10, display: 'block' }}>Tiempo Transcurrido</small>
+                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 8, display: 'block', opacity: 0.7 }}>Simulado</small>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', marginTop: 2, whiteSpace: 'nowrap' }}>+{formatDuration(simMinutos)}</div>
                 </div>
 
                 <div>
                   <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Actual</small>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })} ⏱ {stopwatch}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>{realTimeLabel}</div>
                 </div>
 
                 <div>
-                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Día</small>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#f97316', marginTop: 2 }}>{sim.diaActual}/5</div>
+                  <div style={{ lineHeight: 1.15 }}>
+                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10, display: 'block' }}>Tiempo Transcurrido</small>
+                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 8, display: 'block', opacity: 0.7 }}>Actual</small>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>+{stopwatch}</div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8 }}>

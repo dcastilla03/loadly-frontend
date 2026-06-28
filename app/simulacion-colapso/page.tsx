@@ -8,6 +8,28 @@ declare global {
   }
 }
 
+function forceSpanish(style: any): any {
+  function walk(v: any): any {
+    if (Array.isArray(v)) {
+      if (v.length >= 2 && v[0] === 'get' && typeof v[1] === 'string') {
+        if (v[1] === 'name_en' || v[1] === 'name:latin') return ['get', 'name:es'];
+        if (v[1] === 'name:nonlatin') return ['get', 'name'];
+      }
+      if (v[0] === 'case' && Array.isArray(v[1]) && v[1][0] === 'has' && v[1][1] === 'name:nonlatin') {
+        return ['coalesce', ['get', 'name:es'], ['get', 'name']];
+      }
+      return v.map(walk);
+    }
+    if (v !== null && typeof v === 'object') {
+      const r: Record<string, any> = {};
+      for (const [k, val] of Object.entries(v)) r[k] = walk(val);
+      return r;
+    }
+    return v;
+  }
+  return walk(style);
+}
+
 const ROUTES = [
   { name: 'São Paulo → Miami', origin: [-23.55, -46.63], destination: [25.76, -80.19], color: '#2564eb' },
   { name: 'Buenos Aires → Miami', origin: [-34.60, -58.38], destination: [25.76, -80.19], color: '#10b981' },
@@ -76,13 +98,15 @@ export default function SimulacionColapso() {
       }).setView([20, 0], 2);
       L.control.zoom({ zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(map);
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© CartoDB',
-        maxZoom: 19,
-        minZoom: 3,
-        subdomains: 'abcd',
-        noWrap: true,
-        bounds: [[-85.05112878, -180], [85.05112878, 180]]
+      const styleUrl = 'https://tiles.openfreemap.org/styles/bright';
+      const styleResp = await fetch(styleUrl);
+      const styleSpec = await styleResp.json();
+      const spanishStyle = forceSpanish(styleSpec);
+      require('maplibre-gl/dist/maplibre-gl.css');
+      require('@maplibre/maplibre-gl-leaflet');
+      (L as any).maplibreGL({
+        style: spanishStyle,
+        attribution: '<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       }).addTo(map);
 
       // Marcar punto de colapso

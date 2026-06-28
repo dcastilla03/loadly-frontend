@@ -510,12 +510,14 @@ export default function SimulacionPeriodo() {
         const L = require('leaflet');
         require('leaflet/dist/leaflet.css');
         const map = L.map(mapRef.current, {
+          zoomControl: false,
           maxBounds: [[-85, -180], [85, 180]],
           maxBoundsViscosity: 1.0,
           minZoom: 3,
           maxZoom: 19,
           worldCopyJump: false,
         }).setView([20, 0], 2);
+        L.control.zoom({ zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(map);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
           attribution: '© CartoDB',
           maxZoom: 19,

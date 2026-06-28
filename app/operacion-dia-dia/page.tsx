@@ -70,22 +70,6 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
   }
 }
 
-function logTimeToLocal(logTime: string | null, simStartDate: Date | null, gmt: number): string {
-  if (!logTime || !simStartDate) return logTime || '-';
-  const m = logTime.match(/Día (\d+) (\d{2}):(\d{2})/);
-  if (!m) return logTime;
-  const totalMin = (parseInt(m[1]) - 1) * 1440 + parseInt(m[2]) * 60 + parseInt(m[3]);
-  const startOffset = simStartDate.getUTCHours() * 60 + simStartDate.getUTCMinutes();
-  const justMin = totalMin - startOffset;
-  const localDate = new Date(simStartDate.getTime() + justMin * 60000 + gmt * 3600000);
-  const dd = String(localDate.getUTCDate()).padStart(2, '0');
-  const mm = String(localDate.getUTCMonth() + 1).padStart(2, '0');
-  const yyyy = localDate.getUTCFullYear();
-  const hh = String(localDate.getUTCHours()).padStart(2, '0');
-  const mi = String(localDate.getUTCMinutes()).padStart(2, '0');
-  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
-}
-
 // ─── Constantes ──────────────────────────────────────────────────────────────
 /** Segundos reales por iteración (30s algoritmo + 5s margen) */
 const SEGS_POR_ITER = 35;
@@ -112,6 +96,20 @@ export default function SimulacionPeriodo() {
   const logEventsRef = useRef<LogEvent[]>([]);
   const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => {});
   const addLogBatchRef = useRef<(entries: Array<{ text: string; color: string; minutosDisparo: number }>) => void>(() => {});
+  const [localLogs, setLocalLogs] = useState<Array<{ time: string | null; text: string; color: string }>>([]);
+
+  function actualizarOcupacionAlmacen(codigo: string, delta: number) {
+    const state = airportStateRef.current.get(codigo);
+    if (!state) return;
+    state.ocupacion = Math.max(0, state.ocupacion + delta);
+    const marker = markersRef.current.find((m: any) => m.airportCode === codigo);
+    const actualizar = (mapInst.current as any)?._actualizarIconoAlmacen;
+    if (marker && actualizar) {
+      const pct = state.capacidad > 0 ? (state.ocupacion / state.capacidad) * 100 : 0;
+      actualizar(marker, pct);
+    }
+  }
+
   const emptyFlightsAddedRef = useRef<Set<string>>(new Set());
   const canceledLocallyRef = useRef<Set<string>>(new Set());
   const currentMinSimRef = useRef<number>(0);
@@ -123,32 +121,21 @@ export default function SimulacionPeriodo() {
   const configCountdownRef = useRef<number>(60);
   const stopwatchStartedAtRef = useRef<number | null>(null);
 
-  // ── Sincronizar flightEvents del hook → ref local (corrigiendo GMT) ──
+  // ── Sincronizar flightEvents del hook → ref local ──
   useEffect(() => {
     const existingKeys = new Set(flightEventsRef.current.map(e => e.key));
     const nuevos = sim.allFlightEvents.filter(e => !existingKeys.has(e.key));
     if (nuevos.length > 0) {
-      const corrected = nuevos.map(fe => {
-        const apt = sim.aeropuertosRef.current.get(fe.origenCode);
-        const gmtO = apt?.gmt ?? 0;
-        return { ...fe, minutosInicio: fe.minutosInicio + gmtO * 60, minutosFin: fe.minutosFin + gmtO * 60 };
-      });
-      flightEventsRef.current = [...flightEventsRef.current, ...corrected];
+      flightEventsRef.current = [...flightEventsRef.current, ...nuevos];
     }
   }, [sim.allFlightEvents]);
 
-  // ── Sincronizar logEvents del hook → ref local (corrigiendo GMT) ──
+  // ── Sincronizar logEvents del hook → ref local ──
   useEffect(() => {
     if (sim.allLogEvents.length === 0) { logEventsRef.current = []; return; }
     const nuevos = sim.allLogEvents.slice(logEventsRef.current.length);
     if (nuevos.length > 0) {
-      const corrected = nuevos.map(le => {
-        const ruta = sim.rutasPlanificadasRef.current.get(le.idEnvio || '');
-        const apt = ruta ? sim.aeropuertosRef.current.get(ruta.origen) : null;
-        const gmtO = apt?.gmt ?? 0;
-        return { ...le, minutosDisparo: le.minutosDisparo + gmtO * 60 };
-      });
-      logEventsRef.current = [...logEventsRef.current, ...corrected];
+      logEventsRef.current = [...logEventsRef.current, ...nuevos];
     }
   }, [sim.allLogEvents]);
 
@@ -176,9 +163,8 @@ export default function SimulacionPeriodo() {
     });
   }, [sim.suppressedTramos]);
 
-  // ── Mantener addLogRef / addLogBatchRef ──
+  // ── Mantener addLogRef ──
   useEffect(() => { addLogRef.current = sim.addLog; }, [sim.addLog]);
-  useEffect(() => { addLogBatchRef.current = sim.addLogBatch; }, [sim.addLogBatch]);
 
   // ── Auto-start (k=1, sin fin, UTC) ──
   const autoStartedRef = useRef(false);
@@ -262,13 +248,11 @@ export default function SimulacionPeriodo() {
             }
             if (suprimido) { fe.done = true; } else {
               fe.active = true; (fe as any)._activatedThisFrame = true;
-              airportStateRef.current.set(fe.origenCode, { ocupacion: fe.ocupacionAlmacenOrigen, capacidad: fe.capacidadAlmacenOrigen });
             }
           }
           if (fe.active) {
             if ((fe as any)._activatedThisFrame) { (fe as any)._activatedThisFrame = false; } else if (fe.minutosFin - fe.minutosInicio <= 0 || minSim >= fe.minutosFin) {
               fe.done = true; fe.active = false;
-              airportStateRef.current.set(fe.destinoCode, { ocupacion: fe.ocupacionAlmacenDestino, capacidad: fe.capacidadAlmacenDestino });
               if (!fe.key.startsWith('unused-')) {
                 const mod1440 = fe.minutosInicio % 1440;
                 for (const p of events) {
@@ -290,6 +274,22 @@ export default function SimulacionPeriodo() {
             const info = suppressedTramosRef.current.get(le.idEnvio || '');
             if (le.idEnvio && le.tramoOrden !== undefined && info && le.tramoOrden >= info.minTramoOrden) { le.fired = true; continue; }
             le.fired = true;
+            if (le.idEnvio) {
+              const ruta = rutasPlanificadasRef.current.get(le.idEnvio);
+              if (ruta) {
+                if (le.color === '#22c55e') {
+                  actualizarOcupacionAlmacen(ruta.origen, ruta.maletas);
+                } else if (le.color === '#3b82f6' && le.tramoOrden !== undefined) {
+                  const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
+                  if (tramo) actualizarOcupacionAlmacen(tramo.origen, -tramo.maletasVuelo);
+                } else if (le.color === '#8b5cf6' && le.tramoOrden !== undefined) {
+                  const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
+                  if (tramo) actualizarOcupacionAlmacen(tramo.destino, tramo.maletasVuelo);
+                } else if (le.color === '#f59e0b') {
+                  actualizarOcupacionAlmacen(ruta.destino, -ruta.maletas);
+                }
+              }
+            }
             pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
           }
         }
@@ -303,6 +303,7 @@ export default function SimulacionPeriodo() {
 
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [flightPanelOpen, setFlightPanelOpen] = useState(false);
+  const [enviosPanelOpen, setEnviosPanelOpen] = useState(false);
   const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showStoppedOverlay, setShowStoppedOverlay] = useState(false);
@@ -329,6 +330,28 @@ export default function SimulacionPeriodo() {
       }
     } catch {}
   }, [sim.aeropuertos]);
+  // ── addLogBatch local: formatea DD/MM/AAAA HH:MM directo ──
+  useEffect(() => {
+    addLogBatchRef.current = (entries) => {
+      const formatted = entries.map(e => {
+        const simStart = sim.simStartDateRef.current;
+        let time: string | null = null;
+        if (simStart && typeof e.minutosDisparo === 'number') {
+          const d = new Date(simStart.getTime() + e.minutosDisparo * 60000 + gmtOffset * 3600000);
+          time = `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+        }
+        let text = e.text;
+        const salidaMatch = text.match(/Salida (\d{2}):(\d{2})/);
+        if (salidaMatch) {
+          const utcH = parseInt(salidaMatch[1]);
+          const localH = ((utcH + gmtOffset) % 24 + 24) % 24;
+          text = text.replace(salidaMatch[0], `Salida ${String(localH).padStart(2, '0')}:${salidaMatch[2]}`);
+        }
+        return { time, text, color: e.color };
+      });
+      setLocalLogs(prev => [...formatted, ...prev].slice(0, 100));
+    };
+  }, [gmtOffset]);
   const [horaActual, setHoraActual] = useState('');
   useEffect(() => {
     const tick = () => {
@@ -390,13 +413,13 @@ export default function SimulacionPeriodo() {
   useEffect(() => {
     const mapContainer = document.querySelector('.map-container') as HTMLElement;
     if (mapContainer) {
-      if (flightPanelOpen || almacenesPanelOpen) {
+      if (flightPanelOpen || enviosPanelOpen || almacenesPanelOpen) {
         mapContainer.classList.add('flight-panel-open');
       } else {
         mapContainer.classList.remove('flight-panel-open');
       }
     }
-  }, [flightPanelOpen, almacenesPanelOpen]);
+  }, [flightPanelOpen, enviosPanelOpen, almacenesPanelOpen]);
   const rutasPlanificadasRef = sim.rutasPlanificadasRef;
 
   // States for flight filters and virtual scroll
@@ -464,8 +487,26 @@ export default function SimulacionPeriodo() {
   // sin dependencia temporal ni deduplicación.
   // Convierte horaSalida (local) → GMT para compatibilidad con getClaveVuelo.
   const vuelosGlobales = useMemo(() => {
-    return [] as { origen: string; destino: string; salida: string; llegada: string }[];
-  }, []);
+    const map = new Map<string, { origen: string; destino: string; salida: string; llegada: string }>();
+    const simStart = sim.simStartDateRef.current;
+    const eventos = sim.allFlightEvents;
+    for (const fe of eventos) {
+      if (fe.key.startsWith('unused-') || fe.key.startsWith('card-') || fe.done) continue;
+      const clave = `${fe.origenCode}-${fe.destinoCode}-${fe.minutosInicio}`;
+      if (map.has(clave)) continue;
+      const depDate = simStart ? new Date(simStart.getTime() + fe.minutosInicio * 60000) : new Date();
+      const arrDate = simStart ? new Date(simStart.getTime() + fe.minutosFin * 60000) : new Date();
+      const depSh = new Date(depDate.getTime() + gmtOffset * 3600000);
+      const arrSh = new Date(arrDate.getTime() + gmtOffset * 3600000);
+      map.set(clave, {
+        origen: fe.origenCode,
+        destino: fe.destinoCode,
+        salida: `${String(depSh.getUTCHours()).padStart(2, '0')}:${String(depSh.getUTCMinutes()).padStart(2, '0')}`,
+        llegada: `${String(arrSh.getUTCHours()).padStart(2, '0')}:${String(arrSh.getUTCMinutes()).padStart(2, '0')}`,
+      });
+    }
+    return Array.from(map.values());
+  }, [sim.allFlightEvents, gmtOffset]);
 
   // Unique origins and destinations from the global flight list
   const origenesUnicos = useMemo(() => {
@@ -505,9 +546,9 @@ export default function SimulacionPeriodo() {
 
   // Todos los logs según el modo
   const logsPaginados = useMemo(() => {
-    const source = isLogsPaused ? pausedLogs : sim.logs;
+    const source = isLogsPaused ? pausedLogs : [...localLogs, ...sim.logs];
     return { logs: source, totalCount: source.length };
-  }, [isLogsPaused, sim.logs, pausedLogs]);
+  }, [isLogsPaused, sim.logs, pausedLogs, localLogs]);
 
   // ── Inicializar mapa ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -519,12 +560,14 @@ export default function SimulacionPeriodo() {
         const L = require('leaflet');
         require('leaflet/dist/leaflet.css');
         const map = L.map(mapRef.current, {
+          zoomControl: false,
           maxBounds: [[-85, -180], [85, 180]],
           maxBoundsViscosity: 1.0,
           minZoom: 3,
           maxZoom: 19,
           worldCopyJump: false,
         }).setView([20, 0], 2);
+        L.control.zoom({ zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(map);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
           attribution: '© CartoDB',
           maxZoom: 19,
@@ -724,12 +767,6 @@ export default function SimulacionPeriodo() {
         mostrarPanelAvion(fe);
       });
 
-      // Actualizar icono almacén de origen
-      const origPct = fe.capacidadAlmacenOrigen > 0 ? (fe.ocupacionAlmacenOrigen / fe.capacidadAlmacenOrigen) * 100 : 0;
-      const origMarker = markersRef.current.find((m: any) => m.airportCode === fe.origenCode);
-      const mapAny = mapInst.current as any;
-      if (origMarker && mapAny._actualizarIconoAlmacen) mapAny._actualizarIconoAlmacen(origMarker, origPct);
-
       (fe as any)._path = path;
       (fe as any)._lastColorBucket = -1;
     }
@@ -746,11 +783,6 @@ export default function SimulacionPeriodo() {
         cerrarPanelAvion(fe.key);
       }
 
-      // Actualizar icono almacén de destino
-      const destPct = fe.capacidadAlmacenDestino > 0 ? (fe.ocupacionAlmacenDestino / fe.capacidadAlmacenDestino) * 100 : 0;
-      const destMarker = markersRef.current.find((m: any) => m.airportCode === fe.destinoCode);
-      const mapAny = mapInst.current as any;
-      if (destMarker && mapAny._actualizarIconoAlmacen) mapAny._actualizarIconoAlmacen(destMarker, destPct);
     }
 
     function updateAvionPosition(fe: FlightEvent, progress: number, map: any) {
@@ -1241,38 +1273,40 @@ export default function SimulacionPeriodo() {
     const salidaHHMM = horaSalida.split(' ')[1] || '00:00';
     const codigoVueloPanel = generarCodigoVuelo(fe.origenCode, fe.destinoCode, salidaHHMM);
 
-    // Buscar envíos relacionados (misma ruta por idEnvio)
-    const enviosRelacionados: { codigo: string; label: string }[] = [];
-    if (!isEmptyFlight) {
-      let currentIdEnvio = fe.key.split('-')[0];
-      // Si es key sintético (card-), buscar el idEnvio real desde rutasPlanificadasRef
-      if (fe.key.startsWith('card-')) {
-        const timeSlot = fe.minutosInicio % 1440;
-        for (const ruta of rutasPlanificadasRef.current.values()) {
-          for (const tramo of ruta.tramos || []) {
-            const [th, tm] = (tramo.sale || '00:00').split(':').map(Number);
-            if ((th * 60 + tm) === timeSlot && tramo.origen === fe.origenCode && tramo.destino === fe.destinoCode) {
-              currentIdEnvio = ruta.idEnvio;
-              break;
+    // Total de maletas en este vuelo (suma de todos los envíos que comparten el mismo tramo)
+    let totalMaletasVuelo = 0;
+    // Buscar envíos relacionados (mismo vuelo) desde los datos de ruta planificada
+    const enviosRelacionados: { codigoRastreo: string; idEnvio: string; label: string }[] = [];
+    console.log(`[DEBUG PANEL ENTRY] isEmpty=${isEmptyFlight} isCard=${fe.key.startsWith('card-')} fe.key=${fe.key} routes=${rutasPlanificadasRef.current.size}`);
+    if (!isEmptyFlight && !fe.key.startsWith('card-')) {
+      const envioId = fe.key.split('-')[0];
+      const rutaClickeada = rutasPlanificadasRef.current.get(envioId);
+      console.log(`[DEBUG PANEL ENTRY] envioId=${envioId} rutaClickeada=${!!rutaClickeada} tramos=${rutaClickeada?.tramos?.length}`);
+      if (rutaClickeada && rutaClickeada.tramos) {
+        const tramoClickeado = rutaClickeada.tramos.find(
+          t => t.origen === fe.origenCode && t.destino === fe.destinoCode
+        );
+        if (tramoClickeado) {
+          const saleTarget = tramoClickeado.sale;
+          const codigosVistos = new Set<string>();
+          for (const [idEnvio, ruta] of rutasPlanificadasRef.current.entries()) {
+            const coincidencia = (ruta.tramos || []).find(
+              t => t.origen === fe.origenCode && t.destino === fe.destinoCode && t.sale === saleTarget
+            );
+            if (coincidencia && !codigosVistos.has(idEnvio)) {
+              codigosVistos.add(idEnvio);
+              totalMaletasVuelo += coincidencia.maletasVuelo;
+              enviosRelacionados.push({
+                codigoRastreo: `${idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`,
+                idEnvio,
+                label: `${ruta.origen} → ${ruta.destino}${(ruta.tramos?.length ?? 0) > 1 ? ` (${ruta.tramos.length} tramos)` : ''}`
+              });
             }
           }
-          if (currentIdEnvio !== fe.key.split('-')[0]) break;
         }
       }
-      const prefix = currentIdEnvio + '-';
-      const codigosVistos = new Set<string>();
-      flightEventsRef.current.forEach(e => {
-        if (e.key.startsWith('unused-') || e.key.startsWith('card-')) return;
-        if (e.key.startsWith(prefix) && e.key !== fe.key) {
-          if (!codigosVistos.has(currentIdEnvio)) {
-            codigosVistos.add(currentIdEnvio);
-            const ruta = rutasPlanificadasRef.current.get(currentIdEnvio);
-            const label = ruta ? `${ruta.origen} → ${ruta.destino}${(ruta.tramos?.length ?? 0) > 1 ? ` (${ruta.tramos.length} tramos)` : ''}` : currentIdEnvio;
-            enviosRelacionados.push({ codigo: currentIdEnvio, label });
-          }
-        }
-      });
     }
+    console.log(`[DEBUG PANEL] fe=${fe.origenCode}→${fe.destinoCode} minInicio=${fe.minutosInicio} totalMaletas=${totalMaletasVuelo} relacionados=${enviosRelacionados.length}`);
 
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
@@ -1324,7 +1358,7 @@ export default function SimulacionPeriodo() {
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
         <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">MALETAS</div>
-        <div style="font-size:12px;color:#1f2937;font-weight:700;">${isEmptyFlight ? '0 / ' + fe.capacidadVuelo + ' maletas (vuelo vacío)' : fe.maletasVuelo + ' / ' + fe.capacidadVuelo + ' maletas'}</div>
+        <div style="font-size:12px;color:#1f2937;font-weight:700;">${isEmptyFlight ? '0 / ' + fe.capacidadVuelo + ' maletas (vuelo vacío)' : totalMaletasVuelo + ' / ' + fe.capacidadVuelo + ' maletas'}</div>
       </div>
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
@@ -1335,8 +1369,8 @@ export default function SimulacionPeriodo() {
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-top:10px;">
         <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">ENVÍOS RELACIONADOS</div>
         ${enviosRelacionados.map((env, i) => `
-        <div id="relEnvio_${i}" data-codigo="${env.codigo}" style="padding:6px 8px;background:white;border-radius:6px;cursor:pointer;margin-bottom:4px;border:1px solid var(--border-color,#e5e7eb);display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:12px;font-weight:600;color:var(--accent-blue,#2563eb);">${env.codigo}</span>
+        <div id="relEnvio_${i}" data-codigo="${env.codigoRastreo}" style="padding:6px 8px;background:white;border-radius:6px;cursor:pointer;margin-bottom:4px;border:1px solid var(--border-color,#e5e7eb);display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;font-weight:600;color:var(--accent-blue,#2563eb);">${env.codigoRastreo}</span>
           <span style="font-size:10px;color:#6b7280;">${env.label}</span>
         </div>`).join('')}
       </div>` : ''}
@@ -1347,7 +1381,7 @@ export default function SimulacionPeriodo() {
       const el = document.getElementById(`relEnvio_${i}`);
       if (el) {
         el.addEventListener('click', () => {
-          const envioFe = flightEventsRef.current.find(e => e.key.startsWith(env.codigo));
+          const envioFe = flightEventsRef.current.find(e => e.key.startsWith(env.idEnvio));
           if (envioFe) mostrarPanelEnvio(envioFe);
         });
       }
@@ -1556,10 +1590,17 @@ export default function SimulacionPeriodo() {
       tramos.forEach((tramo, idx) => {
         const saleTime = (tramo.sale || '').split(' ')[1] || '';
         const llegaTime = (tramo.llega || '').split(' ')[1] || '';
+        const _fmtLocal = (t: string) => {
+          if (!t) return t;
+          const p = t.split(':').map(Number);
+          if (p.length < 2) return t;
+          const h = ((p[0] + gmtOffset) % 24 + 24) % 24;
+          return `${String(h).padStart(2, '0')}:${String(p[1]).padStart(2, '0')}`;
+        };
         // El origen de este tramo recibe su Sale (sobrescribe si es intermedio con Sale previo)
-        if (aeropuertosRuta[idx]) aeropuertosRuta[idx].sale = saleTime;
+        if (aeropuertosRuta[idx]) aeropuertosRuta[idx].sale = _fmtLocal(saleTime);
         // El destino de este tramo recibe su Llega
-        if (aeropuertosRuta[idx + 1]) aeropuertosRuta[idx + 1].llega = llegaTime;
+        if (aeropuertosRuta[idx + 1]) aeropuertosRuta[idx + 1].llega = _fmtLocal(llegaTime);
       });
 
       // Marcar según estado del vuelo
@@ -2003,11 +2044,15 @@ export default function SimulacionPeriodo() {
                     style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
                     🔍 Buscar envío
                   </button>
-                  <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) setAlmacenesPanelOpen(false); }}
+                  <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) { setAlmacenesPanelOpen(false); setEnviosPanelOpen(false); } }}
                     style={{ padding: '7px 12px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
                     ✈️ Vuelos
                   </button>
-                  <button onClick={() => { setAlmacenesPanelOpen(!almacenesPanelOpen); if (!almacenesPanelOpen) setFlightPanelOpen(false); }}
+                  <button onClick={() => { setEnviosPanelOpen(!enviosPanelOpen); if (!enviosPanelOpen) { setFlightPanelOpen(false); setAlmacenesPanelOpen(false); } }}
+                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: enviosPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                    📦 Envíos
+                  </button>
+                  <button onClick={() => { setAlmacenesPanelOpen(!almacenesPanelOpen); if (!almacenesPanelOpen) { setFlightPanelOpen(false); setEnviosPanelOpen(false); } }}
                     style={{ padding: '7px 12px', fontSize: 11, backgroundColor: almacenesPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
                     🏭 Almacenes
                   </button>
@@ -2040,9 +2085,9 @@ export default function SimulacionPeriodo() {
           </div>
         </div>
 
-        {/* Panel Lateral Compartido — Vuelos / Almacenes */}
+        {/* Panel Lateral Compartido — Vuelos / Envíos / Almacenes */}
         <div style={{
-          width: (flightPanelOpen || almacenesPanelOpen) ? '280px' : '0',
+          width: (flightPanelOpen || enviosPanelOpen || almacenesPanelOpen) ? '280px' : '0',
           flexShrink: 0,
           position: 'relative',
           overflow: 'hidden',
@@ -2050,7 +2095,7 @@ export default function SimulacionPeriodo() {
           transition: 'width 0.35s ease',
           height: '100%',
           backgroundColor: 'rgba(255,255,255,0.98)',
-          boxShadow: (flightPanelOpen || almacenesPanelOpen) ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
+          boxShadow: (flightPanelOpen || enviosPanelOpen || almacenesPanelOpen) ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
         }}>
 
           {/* Vuelos Disponibles */}
@@ -2192,14 +2237,27 @@ export default function SimulacionPeriodo() {
                           const simStart = sim.simStartDateRef.current;
                           if (!simStart || esCancelado || esCancelling) return;
                           const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
-                          // setHours(gmtHour, ...) trata GMT como local, igual que rutaAFlightEvents.
-                          // Así minutosInicio % 1440 coincide con SSE flights y el panel muestra
-                          // la hora absoluta (simStart + minutos) en vez de minutos del día.
                           let d = new Date(simStart); d.setHours(gmtHour, gmtMin, 0, 0);
                           while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
                           const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
                           let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
                           if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
+                          console.log(`[DEBUG VUELOS] vuelo=${vuelo.origen}→${vuelo.destino} salida=${salidaHHMM} minInicio=${minInicio}`, fe ? `feKey=${fe.key} capac=${fe.capacidadVuelo}` : 'SIN FE (card)');
+                          console.log(`[DEBUG VUELOS] rutasPlanificadas=${rutasPlanificadasRef.current.size} flightEvents=${flightEventsRef.current.length}`);
+                          if (fe) {
+                            const envId = fe.key.split('-')[0];
+                            const ruta = rutasPlanificadasRef.current.get(envId);
+                            const tramo = ruta?.tramos?.find(t => t.origen === vuelo.origen && t.destino === vuelo.destino);
+                            console.log(`[DEBUG VUELOS] envioId=${envId} ruta=${!!ruta} tramo=${!!tramo} sale=${tramo?.sale}`);
+                            if (tramo) {
+                              let matchCount = 0;
+                              for (const [, r] of rutasPlanificadasRef.current.entries()) {
+                                const t = (r.tramos || []).find(t2 => t2.origen === vuelo.origen && t2.destino === vuelo.destino && t2.sale === tramo.sale);
+                                if (t) matchCount++;
+                              }
+                              console.log(`[DEBUG VUELOS] enviosRelacionadosQueCoinciden=${matchCount}`);
+                            }
+                          }
                           if (!fe) {
                             const aOri2 = sim.aeropuertosRef.current.get(vuelo.origen);
                             const aDes2 = sim.aeropuertosRef.current.get(vuelo.destino);
@@ -2292,14 +2350,78 @@ export default function SimulacionPeriodo() {
             </div>
           </div>
 
-          {/* Almacenes Panel (overlays on top of Vuelos panel) */}
+          {/* Envíos Planificados Panel (overlays on top of Vuelos panel) */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: enviosPanelOpen ? 'flex' : 'none',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            backgroundColor: 'rgba(255,255,255,0.98)',
+            zIndex: 1,
+          }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Envíos Planificados
+                </h3>
+                <button
+                  onClick={() => setEnviosPanelOpen(false)}
+                  style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                Total: {rutasPlanificadasRef.current.size} envíos
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+              {rutasPlanificadasRef.current.size === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px', fontSize: '13px' }}>
+                  ⏳ Esperando planificación del GA...
+                </div>
+              ) : (
+                [...rutasPlanificadasRef.current.entries()].reverse().map(([idEnvio, ruta]) => {
+                  const codigoRastreo = `${idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+                  const tipoRuta = (ruta.tramos?.length ?? 0) <= 1 ? 'Directo' : `${ruta.tramos?.length} tramos`;
+                  return (
+                    <div
+                      key={idEnvio}
+                      onClick={() => {
+                        const envioFe = flightEventsRef.current.find(e => e.key.startsWith(idEnvio + '-'));
+                        if (envioFe) mostrarPanelEnvio(envioFe);
+                      }}
+                      style={{
+                        padding: '10px', backgroundColor: 'var(--bg-tertiary)',
+                        border: '1px solid var(--border-color)', borderRadius: '6px',
+                        marginBottom: '6px', cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-blue)' }}>{codigoRastreo}</span>
+                        <span style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', background: '#f3f4f6', padding: '2px 8px', borderRadius: '999px' }}>{ruta.maletas} maletas</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#374151', fontWeight: 600 }}>
+                        {ruta.origen} → {ruta.destino}
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#9ca3af', marginTop: '2px' }}>
+                        {tipoRuta}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Almacenes Panel (overlays on top of Vuelos/Envíos panel) */}
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
             display: almacenesPanelOpen ? 'flex' : 'none',
             flexDirection: 'column',
             overflow: 'hidden',
             backgroundColor: 'rgba(255,255,255,0.98)',
-            zIndex: 1,
+            zIndex: 2,
           }}>
             <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2543,7 +2665,7 @@ export default function SimulacionPeriodo() {
                   {logsPaginados.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
                   {logsPaginados.logs.map((log, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 85 }}>{logTimeToLocal(log.time, sim.simStartDateRef.current, gmtOffset) || '-'}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 85 }}>{log.time || '-'}</span>
                         <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
                         <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{log.text}</span>
                       </div>

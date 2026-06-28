@@ -226,6 +226,17 @@ function buildLogEvents(
   const tramos = ruta.tramos ?? [];
   const totalTramos = tramos.length;
 
+  // ── DEBUG: datos crudos del backend ─────────────────────────────────────
+  const _saleRaw = tramos[0]?.sale || '';
+  const _minutosReg = ruta.fechaRegistro
+    ? fechaHoraAMinutosDesdeInicio(ruta.fechaRegistro, simStartDate)
+    : 0;
+  console.log(
+    `[buildLogEvents] fechaRegistro="${ruta.fechaRegistro}"  tramo[0].sale="${_saleRaw}"  ` +
+    `simStart="${simStartDate.toISOString()}"  minutosDisparo=${_minutosReg}  ` +
+    `fechaRegistro→simStart diff ms=${ruta.fechaRegistro ? (extraerFecha(ruta.fechaRegistro).getTime() - simStartDate.getTime()) : 'N/A'}`
+  );
+
   // ── Evento 1: Envío registrado (a la hora de fechaRegistro) ─────────────
   const minutosRegistro = ruta.fechaRegistro
     ? fechaHoraAMinutosDesdeInicio(ruta.fechaRegistro, simStartDate)
@@ -363,26 +374,13 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const realStartTimeRef = useRef<number | null>(null);
 
   const addLog = useCallback((text: string, color: string, minutosSimulados?: number | null) => {
-    // Si minutosSimulados es undefined/null, no mostrar hora (eventos antes del cronómetro)
     let t: string | null = null;
     if (typeof minutosSimulados === 'number') {
-      // Convertir minutos simulados a formato "Día X — HH:MM" considerando la hora de inicio
-      const simStart = simStartDateRef.current;
-      if (simStart) {
-        const totalMinutos = simStart.getUTCHours() * 60 + simStart.getUTCMinutes() + minutosSimulados;
-        const dia = Math.floor(totalMinutos / (24 * 60)) + 1;
-        const minDelDia = totalMinutos % (24 * 60);
-        const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
-        const mm = String(minDelDia % 60).padStart(2, '0');
-        t = `Día ${dia} ${hh}:${mm}`;
-      } else {
-        // Fallback si no hay fecha de inicio
-        const dia = Math.floor(minutosSimulados / (24 * 60)) + 1;
-        const minDelDia = minutosSimulados % (24 * 60);
-        const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
-        const mm = String(minDelDia % 60).padStart(2, '0');
-        t = `Día ${dia} ${hh}:${mm}`;
-      }
+      const dia = Math.floor(minutosSimulados / (24 * 60)) + 1;
+      const minDelDia = minutosSimulados % (24 * 60);
+      const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
+      const mm = String(minDelDia % 60).padStart(2, '0');
+      t = `Día ${dia} ${hh}:${mm}`;
     }
     setLogs(prev => [{ time: t, text, color }, ...prev].slice(0, 100));
   }, []);
@@ -390,25 +388,15 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const addLogBatch = useCallback((entries: Array<{ text: string; color: string; minutosDisparo: number }>) => {
     setLogs(prev => {
       let updated = [...prev];
-      const simStart = simStartDateRef.current;
       for (const entry of entries) {
         let t: string | null = null;
         if (typeof entry.minutosDisparo === 'number') {
-          if (simStart) {
-            const totalMinutos = simStart.getUTCHours() * 60 + simStart.getUTCMinutes() + entry.minutosDisparo;
-            const dia = Math.floor(totalMinutos / (24 * 60)) + 1;
-            const minDelDia = totalMinutos % (24 * 60);
-            const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
-            const mm = String(minDelDia % 60).padStart(2, '0');
-            t = `Día ${dia} ${hh}:${mm}`;
-          } else {
-            // Fallback si no hay fecha de inicio
-            const dia = Math.floor(entry.minutosDisparo / (24 * 60)) + 1;
-            const minDelDia = entry.minutosDisparo % (24 * 60);
-            const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
-            const mm = String(minDelDia % 60).padStart(2, '0');
-            t = `Día ${dia} ${hh}:${mm}`;
-          }
+          const dia = Math.floor(entry.minutosDisparo / (24 * 60)) + 1;
+          const minDelDia = entry.minutosDisparo % (24 * 60);
+          const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
+          const mm = String(minDelDia % 60).padStart(2, '0');
+          t = `Día ${dia} ${hh}:${mm}`;
+          console.log(`[addLogBatch] minutosDisparo=${entry.minutosDisparo} → t="${t}"  text="${entry.text.slice(0, 80)}"`);
         }
         updated = [{ time: t, text: entry.text, color: entry.color }, ...updated];
       }

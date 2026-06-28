@@ -67,12 +67,14 @@ export default function SimulacionColapso() {
       if (mapInstanceRef.current) return;
 
       let map = L.map(mapContainerRef.current!, {
+        zoomControl: false,
         maxBounds: [[-85.05112878, -180], [85.05112878, 180]],
         maxBoundsViscosity: 1.0,
         minZoom: 3,
         maxZoom: 19,
         worldCopyJump: false
       }).setView([20, 0], 2);
+      L.control.zoom({ zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(map);
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© CartoDB',

@@ -18,6 +18,18 @@ interface Aeropuerto {
   gmt: number;
 }
 
+interface EnvioDTO {
+  idEnvio: string;
+  fechaRegistro: string;
+  fechaLimiteEntrega: string | null;
+  idAeropuertoOrigen: number;
+  idAeropuertoDestino: number;
+  cantidadMaletas: number;
+  clienteIdCliente: number;
+  planificado: boolean;
+  idArchivo: number | null;
+}
+
 export default function RegistroMaletas() {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -32,7 +44,24 @@ export default function RegistroMaletas() {
   const [aerolinea, setAerolinea] = useState(0);
   const [cantidad, setCantidad] = useState(0);
   const [formMsg, setFormMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [envios, setEnvios] = useState<EnvioDTO[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchEnvios = async () => {
+    try {
+      const r = await fetch(`${API}/api/envios`);
+      const data = await r.json();
+      if (data.exito && Array.isArray(data.datos)) {
+        setEnvios(data.datos);
+      }
+    } catch (e) {
+      console.error('Error al cargar envíos:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchEnvios();
+  }, []);
 
   useEffect(() => {
     const userStr = localStorage.getItem('user');
@@ -56,6 +85,8 @@ export default function RegistroMaletas() {
       .then(r => r.json())
       .then(data => { if (data.exito && Array.isArray(data.datos)) setAeropuertos(data.datos); })
       .catch(() => console.error('Error al cargar aeropuertos'));
+
+    fetchEnvios();
   }, []);
 
   const esAdmin = rol.toLowerCase() === 'administrador';
@@ -114,6 +145,7 @@ export default function RegistroMaletas() {
       if (res.ok) {
         setMessage({ type: 'success', text: data.message || 'Archivos subidos exitosamente.' });
         setFiles([]);
+        fetchEnvios();
       } else {
         setMessage({ type: 'error', text: data.message || 'Error al subir archivos.' });
       }
@@ -157,6 +189,7 @@ export default function RegistroMaletas() {
         setFormMsg({ type: 'success', text: data.message || 'Envío registrado exitosamente.' });
         setAerolinea(0); setDestino(0); setCantidad(0);
         if (esAdmin) setOrigen(0);
+        fetchEnvios();
       } else {
         setFormMsg({ type: 'error', text: data.message || 'Error al registrar envío.' });
       }
@@ -397,7 +430,32 @@ export default function RegistroMaletas() {
                   <th style={{ textAlign: 'center' }}>Acciones</th>
                 </tr>
               </thead>
-              <tbody id="maletasRegistrosTabla" />
+              <tbody>
+                {envios.length === 0 ? (
+                  <tr><td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: 14 }}>No hay envíos registrados aún.</td></tr>
+                ) : (
+                  envios.map(env => {
+                    const aeroLinea = aerolineas.find(a => a.id === env.clienteIdCliente);
+                    const aeroOrig = aeropuertos.find(a => a.idAeropuerto === env.idAeropuertoOrigen);
+                    const aeroDest = aeropuertos.find(a => a.idAeropuerto === env.idAeropuertoDestino);
+                    const fecha = env.fechaRegistro ? new Date(env.fechaRegistro).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+                    return (
+                      <tr key={env.idEnvio}>
+                        <td style={{ textAlign: 'center' }}>{aeroLinea?.nombre || env.clienteIdCliente}</td>
+                        <td style={{ textAlign: 'center' }}>{aeroOrig ? `${aeroOrig.ciudad} (${aeroOrig.codigo})` : env.idAeropuertoOrigen}</td>
+                        <td style={{ textAlign: 'center' }}>{aeroDest ? `${aeroDest.ciudad} (${aeroDest.codigo})` : env.idAeropuertoDestino}</td>
+                        <td style={{ textAlign: 'center' }}>{env.cantidadMaletas}</td>
+                        <td style={{ textAlign: 'center' }}>{fecha}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, backgroundColor: env.planificado ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', color: env.planificado ? '#10b981' : '#f59e0b' }}>
+                            {env.planificado ? 'Planificado' : 'Pendiente'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
             </table>
           </div>
 
@@ -405,15 +463,15 @@ export default function RegistroMaletas() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginTop: '24px' }}>
             <div className="stat-card">
               <h3>Total Registrado</h3>
-              <div className="value" id="totalMaletas">0</div>
+              <div className="value">{envios.length}</div>
             </div>
             <div className="stat-card">
               <h3>Últimas 24h</h3>
-              <div className="value" id="ultimas24h">0</div>
+              <div className="value">{envios.filter(e => e.fechaRegistro && Date.now() - new Date(e.fechaRegistro).getTime() < 86400000).length}</div>
             </div>
             <div className="stat-card">
-              <h3>En Procesamiento</h3>
-              <div className="value">0</div>
+              <h3>Planificados</h3>
+              <div className="value">{envios.filter(e => e.planificado).length}</div>
             </div>
           </div>
         </div>

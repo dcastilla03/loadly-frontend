@@ -395,12 +395,22 @@ export function useSimulacion(startDate?: string, startTime?: string) {
         let t: string | null = null;
         if (typeof entry.minutosDisparo === 'number') {
           const m = Math.max(0, entry.minutosDisparo);
-          const dia = Math.floor(m / (24 * 60)) + 1;
-          const minDelDia = m % (24 * 60);
-          const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
-          const mm = String(minDelDia % 60).padStart(2, '0');
-          t = `Día ${dia} ${hh}:${mm}`;
-          // console.log(`[addLogBatch] minutosDisparo=${entry.minutosDisparo} → t="${t}"  text="${entry.text.slice(0, 80)}"`);
+          const simStart = simStartDateRef.current;
+          if (simStart) {
+            const date = new Date(simStart.getTime() + m * 60000);
+            const dd = String(date.getUTCDate()).padStart(2, '0');
+            const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+            const yyyy = date.getUTCFullYear();
+            const hh = String(date.getUTCHours()).padStart(2, '0');
+            const mi = String(date.getUTCMinutes()).padStart(2, '0');
+            t = `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+          } else {
+            const dia = Math.floor(m / (24 * 60)) + 1;
+            const minDelDia = m % (24 * 60);
+            const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
+            const mm = String(minDelDia % 60).padStart(2, '0');
+            t = `Día ${dia} ${hh}:${mm}`;
+          }
         }
         updated = [{ time: t, text: entry.text, color: entry.color }, ...updated];
       }

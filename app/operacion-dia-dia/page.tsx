@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { FlightEvent, LogEvent, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha, useSimulacion, SIM_CONFIG } from '../simulacion-periodo/useSimulacion';
 
 // ─── helper: forzar español en style OpenFreeMap ───────────────────────────
@@ -566,6 +566,22 @@ export default function SimulacionPeriodo() {
   const [isLogsPaused, setIsLogsPaused] = useState(false);
   const [pausedLogs, setPausedLogs] = useState<LogEntry[]>([]);
   const logsContainerRef = useRef<HTMLDivElement>(null);
+  const [isMapLogsOpen, setIsMapLogsOpen] = useState(false);
+  const [isMapLogsPaused, setIsMapLogsPaused] = useState(false);
+  const [pausedMapLogs, setPausedMapLogs] = useState<LogEntry[]>([]);
+  const mapLogsContainerRef = useRef<HTMLDivElement>(null);
+  const [isGlobalIndicatorsOpen, setIsGlobalIndicatorsOpen] = useState(false);
+  const mapRegistroPanelRef = useRef<HTMLDivElement>(null);
+  const [mapRegistroHeight, setMapRegistroHeight] = useState(37);
+
+  useLayoutEffect(() => {
+    if (mapRegistroPanelRef.current && isMapLogsOpen) {
+      const h = mapRegistroPanelRef.current.getBoundingClientRect().height;
+      if (Math.abs(h - mapRegistroHeight) > 1) {
+        setMapRegistroHeight(h);
+      }
+    }
+  });
 
   // Todos los logs según el modo
   const logsPaginados = useMemo(() => {
@@ -2111,6 +2127,97 @@ export default function SimulacionPeriodo() {
             </div>
           </div>
 
+          {/* Panel colapsable de Indicadores globales en el mapa */}
+          <div style={{ position: 'absolute', bottom: isMapLogsOpen ? 125 + mapRegistroHeight + 5 : 167, left: 12, zIndex: 999997, width: isGlobalIndicatorsOpen ? 380 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'bottom 0.2s ease, width 0.2s ease' }}>
+            <div
+              onClick={() => setIsGlobalIndicatorsOpen(!isGlobalIndicatorsOpen)}
+              style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📊 Indicadores globales</span>
+              <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{isGlobalIndicatorsOpen ? '▲' : '▼'}</span>
+            </div>
+            {isGlobalIndicatorsOpen && (
+              <div style={{ borderTop: '1px solid #e5e7eb', padding: '8px 10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+                  {[{ title: 'Vuelos operando', value: metricas.vuelosOperando, color: 'var(--accent-blue)' },
+                    { title: 'Maletas en tránsito', value: metricas.maletasEnTransito, color: '#22c55e' },
+                    { title: 'Almacenes con carga', value: metricas.almacenesConCarga, color: '#f97316' },
+                    { title: 'Entregas exitosas', value: metricas.entregasExitosas, color: '#10b981' },
+                  ].map(c => (
+                    <div key={c.title} style={{ textAlign: 'center', padding: '6px 4px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6 }}>
+                      <div style={{ fontSize: 9, color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 2, textTransform: 'uppercase' }}>{c.title}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: c.color }}>{c.value.toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  {[{ label: 'Ocupación Almacenes', value: `${metricas.ocupacionPromedio.toFixed(1)}%`, sv: metricas.ocupacionPromedio },
+                    { label: 'Tiempo Promedio', value: `${metricas.tiempoPromedio.toFixed(0)} min` },
+                    { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(1)}%`, sv: metricas.ocupacionAviones },
+                    { label: 'Entregas Retrasadas', value: '0' },
+                  ].map(m => {
+                    const sc = m.sv !== undefined ? (m.sv < 50 ? '#22c55e' : m.sv < 80 ? '#f97316' : '#ef4444') : undefined;
+                    return (
+                      <div key={m.label} style={{ padding: '6px 8px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6, borderLeft: sc ? `3px solid ${sc}` : undefined }}>
+                        <div style={{ fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>{m.label}</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: sc || 'var(--accent-blue)', marginTop: 2 }}>{m.value}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Panel colapsable de Registro de Eventos en el mapa */}
+          <div ref={mapRegistroPanelRef} style={{ position: 'absolute', bottom: 125, left: 12, zIndex: 999997, width: isMapLogsOpen ? 380 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
+            <div
+              onClick={() => { if (!isMapLogsOpen) setIsMapLogsOpen(true); }}
+              style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📋 Registro de Eventos</span>
+              {isMapLogsOpen ? (
+                <button onClick={(e) => { e.stopPropagation(); setIsMapLogsOpen(false); }} style={{ background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', color: '#6b7280', padding: '0 0 0 8px', lineHeight: 1 }}>▲</button>
+              ) : (
+                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{[...localLogs, ...sim.logs].length >= 100 ? '+100' : [...localLogs, ...sim.logs].length} ▼</span>
+              )}
+            </div>
+            {isMapLogsOpen && (
+              <div>
+                <div style={{ maxHeight: 240, overflowY: 'auto', borderTop: '1px solid #e5e7eb', padding: '8px 14px' }} ref={mapLogsContainerRef}
+                  onWheel={(e) => { e.stopPropagation(); if (!isMapLogsPaused) { setPausedMapLogs([...localLogs, ...sim.logs]); setIsMapLogsPaused(true); } }}
+                  onTouchMove={(e) => { e.stopPropagation(); if (!isMapLogsPaused) { setPausedMapLogs([...localLogs, ...sim.logs]); setIsMapLogsPaused(true); } }}
+                >
+                  {(isMapLogsPaused ? pausedMapLogs : [...localLogs, ...sim.logs]).length === 0 ? (
+                    <p style={{ color: '#9ca3af', fontSize: 12, margin: 0 }}>Inicia la simulación para ver eventos...</p>
+                  ) : (
+                    (isMapLogsPaused ? pausedMapLogs : [...localLogs, ...sim.logs]).map((log, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid #f3f4f6' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', minWidth: 48, flexShrink: 0 }}>{log.time || '-'}</span>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: '#374151' }}>{log.text}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {isMapLogsPaused && (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 14px', borderTop: '1px solid #e5e7eb' }}>
+                    <button
+                      onClick={() => { setIsMapLogsPaused(false); if (mapLogsContainerRef.current) mapLogsContainerRef.current.scrollTop = 0; }}
+                      style={{
+                        padding: '6px 14px', fontSize: 11, backgroundColor: '#2563eb', color: 'white',
+                        border: 'none', borderRadius: 16, cursor: 'pointer', fontWeight: 600,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 4
+                      }}
+                    >
+                      ▶ Reanudar flujo en vivo
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Leyenda de colores */}
           <div style={{ position: 'absolute', bottom: 25, left: 12, backgroundColor: 'rgba(255,255,255,0.92)', padding: '10px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', zIndex: 999997 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 6, textTransform: 'uppercase' }}>Ocupación de Vuelos</div>
@@ -2126,14 +2233,7 @@ export default function SimulacionPeriodo() {
             ))}
           </div>
 
-          {/* Botón scroll hacia estadísticas */}
-          <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 999999 }}>
-            <button onClick={() => document.getElementById('statsSection')?.scrollIntoView({ behavior: 'smooth' })}
-              style={{ background: 'var(--accent-blue)', border: 'none', color: 'white', width: 50, height: 50, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: '0 4px 12px rgba(37,100,235,0.3)' }}>
-              <img src="/down.svg" alt="↓" style={{ width: 28, height: 28 }} />
-            </button>
           </div>
-        </div>
 
         {/* Panel Lateral Compartido — Vuelos / Envíos / Almacenes */}
         <div style={{
@@ -2690,112 +2790,6 @@ export default function SimulacionPeriodo() {
         </div>
       </div>
 
-      {/* Sección de Estadísticas */}
-      <div id="statsSection" style={{ paddingTop: 40, paddingBottom: 40, backgroundColor: 'white' }}>
-        <div className="container">
-          <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 24, color: 'var(--text-primary)' }}>📊 Resultados en Tiempo Real</h2>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
-            <StatCard title="Vuelos operando" value={metricas.vuelosOperando} color="var(--accent-blue)" />
-            <StatCard title="Maletas en tránsito" value={metricas.maletasEnTransito} color="#22c55e" />
-            <StatCard title="Almacenes con carga" value={metricas.almacenesConCarga} color="#f97316" />
-            <StatCard title="Entregas exitosas" value={metricas.entregasExitosas} color="#10b981" />
-          </div>
-
-          {sim.resumen && (
-            <div className="card" style={{ marginBottom: 24, borderLeft: '4px solid #22c55e' }}>
-              <h3 style={{ color: '#22c55e', marginBottom: 16 }}>✅ Resumen Final del Algoritmo Genético</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
-                <MetricBox label="Consumo Prom. SLA" value={`${sim.resumen.consumoPromedioSLA.toFixed(1)}%`} />
-                <MetricBox label="Ocupación Vuelos" value={`${sim.resumen.ocupacionPromedioVuelos.toFixed(1)}%`} />
-                <MetricBox label="Ocupación Almacenes" value={`${sim.resumen.ocupacionPromedioAlmacenes.toFixed(1)}%`} />
-                <MetricBox label="Función Objetivo" value={`${sim.resumen.funcionObjetivo.toFixed(2)}%`} />
-              </div>
-              <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
-                Tiempo de ejecución real: <strong>{sim.resumen.tiempoEjecucionRealSegundos.toFixed(1)}s</strong> |{' '}
-                Total envíos: <strong>{sim.resumen.totalEnviosPlanificados}</strong> |{' '}
-                Total maletas: <strong>{sim.resumen.totalMaletasPlanificadas}</strong>
-              </div>
-            </div>
-          )}
-
-          {sim.colapso && (
-            <div className="card" style={{ marginBottom: 24, borderLeft: '4px solid #ef4444', backgroundColor: '#fef2f2' }}>
-              <h3 style={{ color: '#ef4444', marginBottom: 8 }}>⚠️ COLAPSO DETECTADO</h3>
-              <p style={{ margin: 0, fontSize: 14 }}><strong>Tipo:</strong> {sim.colapso.tipoError}</p>
-              <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Envío:</strong> {sim.colapso.idEnvioCausante} | <strong>Ruta:</strong> {sim.colapso.rutaCausante}</p>
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>{sim.colapso.detalle}</p>
-            </div>
-          )}
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-            <div className="card" style={{ position: 'relative' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>📋 Registro de Eventos</h3>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
-                  {logsPaginados.totalCount} registros
-                </span>
-              </div>
-
-              <>
-                <div
-                  ref={logsContainerRef}
-                  style={{ maxHeight: 350, overflowY: 'auto' }}
-                  onWheel={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setIsLogsPaused(true); } }}
-                  onTouchMove={(e) => { e.stopPropagation(); if (!isLogsPaused) { setPausedLogs(sim.logs); setIsLogsPaused(true); } }}
-                >
-                  {logsPaginados.logs.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver eventos...</p>}
-                  {logsPaginados.logs.map((log, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', minWidth: 85 }}>{log.time || '-'}</span>
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
-                        <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{log.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-
-              {/* Botón Reanudar */}
-              {isLogsPaused && (
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
-                  <button
-                    onClick={() => { setIsLogsPaused(false); if (logsContainerRef.current) logsContainerRef.current.scrollTop = 0; }}
-                    style={{
-                      padding: '8px 16px',
-                      fontSize: 12,
-                      backgroundColor: 'var(--accent-blue)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: 20,
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6
-                    }}
-                  >
-                    ▶ Reanudar flujo en vivo
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="card">
-              <h3 style={{ marginBottom: 16, fontSize: 16, fontWeight: 700, color: 'var(--accent-blue)' }}>ℹ️ Métricas</h3>
-              {sim.isRunning && sim.iteracion > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <MetricBox label="Ocupación Almacenes" value={`${metricas.ocupacionPromedio.toFixed(1)}%`} semaphoreValue={metricas.ocupacionPromedio} />
-                  <MetricBox label="Tiempo Promedio" value={`${metricas.tiempoPromedio.toFixed(0)} min`} />
-                  <MetricBox label="Ocupación de Aviones" value={`${metricas.ocupacionAviones.toFixed(1)}%`} semaphoreValue={metricas.ocupacionAviones} />
-                  <MetricBox label="Entregas Retrasadas" value="0" />
-                </div>
-              ) : (
-                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Inicia la simulación para ver métricas...</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

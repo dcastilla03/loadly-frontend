@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { useSimulacion, FlightEvent, LogEvent, LogEntry, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha } from './useSimulacion';
+import { useSimulacion, FlightEvent, LogEvent, LogEntry, BackendRutaPlanificada, fechaHoraAMinutosDesdeInicio, horaConMinutosDelDia, extraerFecha } from './useSimulacion';
 import { useSimulationContext } from '../SimulationContext';
 
 // ─── helper: forzar español en style OpenFreeMap ───────────────────────────
@@ -157,6 +157,10 @@ export default function SimulacionPeriodo() {
   const [configStartTime, setConfigStartTime] = useState('00:00');
   // Simulation stopped overlay state
   const [showStoppedOverlay, setShowStoppedOverlay] = useState(false);
+  const autoStartedOnceRef = useRef(false);
+  const [showFinishedOverlay, setShowFinishedOverlay] = useState(false);
+  const [ultimaPlanificacion, setUltimaPlanificacion] = useState<BackendRutaPlanificada[]>([]);
+  const finishedHandledRef = useRef(false);
 
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(() => Math.floor(currentMinSimRef.current));
@@ -560,7 +564,8 @@ export default function SimulacionPeriodo() {
 
   // Iniciar simulación automáticamente cuando tenemos la fecha y la configuración está completa
   useEffect(() => {
-    if (startDate && !showConfigOverlay) {
+    if (startDate && !showConfigOverlay && !autoStartedOnceRef.current) {
+      autoStartedOnceRef.current = true;
       sessionStorage.setItem('periodoStartDate', startDate);
       if (startTime) sessionStorage.setItem('periodoStartTime', startTime);
       const url = new URL(window.location.href);
@@ -570,6 +575,28 @@ export default function SimulacionPeriodo() {
       sim.iniciar(startDate, startTime || undefined, 120, undefined);
     }
   }, [startDate, startTime, showConfigOverlay, sim.iniciar]);
+
+  // Mostrar overlay de finalización cuando RESUMEN_FINAL es recibido
+  useEffect(() => {
+    if (sim.resumen && !sim.isRunning && !finishedHandledRef.current) {
+      finishedHandledRef.current = true;
+      setUltimaPlanificacion(Array.from(sim.rutasPlanificadasRef.current.values()));
+      setShowFinishedOverlay(true);
+    }
+  }, [sim.resumen, sim.isRunning, sim.rutasPlanificadasRef]);
+
+  // Debug: testFinishedOverlay() desde consola para ver el panel sin esperar 5 días
+  useEffect(() => {
+    (window as any).testFinishedOverlay = () => {
+      setUltimaPlanificacion([
+        { idEnvio: 'ENV001', idCliente: 'CLI001', origen: 'LIM', destino: 'CUZ', maletas: 5, fechaRegistro: '15/03/2027 08:30', fechaRecojo: '15/03/2027 12:30', duracion: '4h 00m', sla: 'Cumplido', tramos: [] },
+        { idEnvio: 'ENV002', idCliente: 'CLI002', origen: 'AQP', destino: 'LIM', maletas: 3, fechaRegistro: '15/03/2027 09:00', fechaRecojo: '', duracion: '2h 00m', sla: 'Pendiente', tramos: [] },
+        { idEnvio: 'ENV003', idCliente: 'CLI003', origen: 'CUZ', destino: 'IQT', maletas: 8, fechaRegistro: '15/03/2027 10:15', fechaRecojo: '15/03/2027 16:45', duracion: '6h 30m', sla: 'Cumplido', tramos: [] },
+      ]);
+      setShowFinishedOverlay(true);
+    };
+    return () => { delete (window as any).testFinishedOverlay; };
+  }, []);
 
   // ── Inicializar mapa ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -1127,6 +1154,7 @@ export default function SimulacionPeriodo() {
 
   function handleNuevaSimulacion() {
     setShowStoppedOverlay(false);
+    setShowFinishedOverlay(false);
     setShowConfigOverlay(true);
     setConfigWizardStep(1);
     setConfigStartDate('');
@@ -1135,6 +1163,8 @@ export default function SimulacionPeriodo() {
     sessionStorage.removeItem('periodoStartDate');
     sessionStorage.removeItem('periodoStartTime');
     isInitialized.current = false;
+    autoStartedOnceRef.current = false;
+    finishedHandledRef.current = false;
 
     // Reset clock state
     ctx.clockEnabledRef.current = false;
@@ -1160,6 +1190,23 @@ export default function SimulacionPeriodo() {
     cancelledFlightsRef.current = new Set();
     suppressedTramosRef.current = new Map();
     emptyFlightsAddedRef.current = new Set();
+  }
+
+  function descargarCSV() {
+    if (ultimaPlanificacion.length === 0) return;
+    const header = 'idEnvio,idCliente,origen,destino,maletas,fechaRegistro,fechaRecojo,duracion,sla';
+    const rows = ultimaPlanificacion.map(r =>
+      [r.idEnvio, r.idCliente || '', r.origen, r.destino, r.maletas, r.fechaRegistro, r.fechaRecojo || '', r.duracion, r.sla].join(',')
+    );
+    const csv = '\uFEFF' + header + '\n' + rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'planificacion.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
   }
 
   function mostrarNotificacion(mensaje: string, color: string) {
@@ -2322,6 +2369,142 @@ export default function SimulacionPeriodo() {
                     }}
                   >
                     Nueva Simulación
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Simulation Finished Overlay */}
+          {showFinishedOverlay && (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              zIndex: 9999999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <div style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                maxWidth: '650px',
+                width: '90%',
+                maxHeight: '80vh',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '28px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+              }}>
+                <div style={{ fontSize: '28px', marginBottom: '8px', textAlign: 'center' }}>🏁</div>
+                <h2 style={{ margin: '0 0 4px 0', fontSize: '22px', color: '#1f2937', fontWeight: 700, textAlign: 'center' }}>
+                  Simulación Terminada
+                </h2>
+                <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6b7280', textAlign: 'center' }}>
+                  Los 5 días de simulación han finalizado. Última planificación generada:
+                </p>
+
+                {/* Resumen stats */}
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {sim.resumen && (
+                    <>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#f0fdf4', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                        <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Envíos</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#16a34a' }}>{sim.resumen.totalEnviosPlanificados}</div>
+                      </div>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#eff6ff', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                        <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Maletas</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#2563eb' }}>{sim.resumen.totalMaletasPlanificadas}</div>
+                      </div>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#fefce8', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                        <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Ocup. Vuelos</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#ca8a04' }}>{sim.resumen.ocupacionPromedioVuelos.toFixed(1)}%</div>
+                      </div>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#fef2f2', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                        <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Ocup. Almacenes</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#dc2626' }}>{sim.resumen.ocupacionPromedioAlmacenes.toFixed(1)}%</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Tabla de última planificación */}
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginBottom: '16px', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: 'var(--bg-tertiary)', position: 'sticky', top: 0 }}>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-color)' }}>Envío</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-color)' }}>Origen</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-color)' }}>Destino</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-color)' }}>Maletas</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-color)' }}>Registro</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-color)' }}>SLA</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ultimaPlanificacion.map((r, i) => (
+                        <tr key={r.idEnvio + '-' + i} style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: i % 2 === 0 ? 'white' : 'var(--bg-tertiary)' }}>
+                          <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: '11px' }}>{r.idEnvio}</td>
+                          <td style={{ padding: '6px 10px' }}>{r.origen}</td>
+                          <td style={{ padding: '6px 10px' }}>{r.destino}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600 }}>{r.maletas}</td>
+                          <td style={{ padding: '6px 10px', fontSize: '11px', whiteSpace: 'nowrap' }}>{r.fechaRegistro}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                            <span style={{
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              backgroundColor: r.sla === 'Cumplido' ? '#dcfce7' : '#fef3c7',
+                              color: r.sla === 'Cumplido' ? '#16a34a' : '#d97706'
+                            }}>
+                              {r.sla}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Botones */}
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                  <button
+                    onClick={descargarCSV}
+                    style={{
+                      padding: '10px 20px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: '#059669',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    📥 Descargar resumen
+                  </button>
+                  <button
+                    onClick={handleNuevaSimulacion}
+                    style={{
+                      padding: '10px 20px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: 'var(--accent-blue)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Nueva iteración
                   </button>
                 </div>
               </div>

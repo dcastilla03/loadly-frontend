@@ -76,7 +76,7 @@ interface BackendVueloPlanificado {
   capacidadAlmacenDestino: number;
 }
 
-interface BackendRutaPlanificada {
+export interface BackendRutaPlanificada {
   idEnvio: string;
   idCliente?: string;
   origen: string;
@@ -371,6 +371,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const rutasPlanificadasRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
   const rutasPorCodigoUnicoRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
   const allFlightEventsRef = useRef<FlightEvent[]>([]);
+  const simulacionFinalizadaRef = useRef(false);
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
@@ -432,6 +433,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     realStartTimeRef.current = performance.now();
     rutasPlanificadasRef.current.clear();
     rutasPorCodigoUnicoRef.current.clear();
+    simulacionFinalizadaRef.current = false;
 
     // Cargar aeropuertos si aún no están disponibles
     if (aeropuertosRef.current.size === 0) {
@@ -629,6 +631,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
         }
 
       } else if (tipo === 'RESUMEN_FINAL') {
+        simulacionFinalizadaRef.current = true;
         if (d.resumenFinal) setResumen(d.resumenFinal);
         setIsRunning(false);
         addLog('🏁 Simulación finalizada correctamente', '#22c55e');
@@ -666,6 +669,10 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
     const sseErrorLoggedRef = { current: false };
     es.onerror = () => {
+      if (simulacionFinalizadaRef.current) {
+        es.close();
+        return;
+      }
       if (!sseErrorLoggedRef.current) {
         console.warn('[SSE] Error de conexión — reintentando automáticamente...');
         addLog('⚠️ Error de conexión SSE — reintentando...', '#f97316');

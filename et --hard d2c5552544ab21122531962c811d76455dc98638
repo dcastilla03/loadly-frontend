@@ -1,0 +1,439 @@
+[33mcommit d3f0ee6797c02640ee94bb4987db8ac892b39035[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Merge: a36205d 6e4aabd
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Jun 29 13:42:09 2026 -0500
+
+    corrección bluce
+
+[33mcommit a36205d3144996742320b481b3e9bcc3834e813f[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Jun 29 13:35:14 2026 -0500
+
+    corrección bluce
+
+[33mcommit 6e4aabd1e37689b5384d8ce6f7f58a310a14005d[m
+Author: Marcos Kevin Israel Limo Sanchez <134731874+IsraeLss07@users.noreply.github.com>
+Date:   Mon Jun 29 12:26:25 2026 -0500
+
+    cambios en simulacion para aceptar mas de un navegador
+
+[33mcommit d2c5552544ab21122531962c811d76455dc98638[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Jun 29 04:48:20 2026 -0500
+
+    avance 4
+
+[33mcommit 224126e657bf0ef28b03ba3676522c8e1a55a97e[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Jun 29 03:20:02 2026 -0500
+
+    avance 3
+
+[33mcommit 5bf51568f95e56ee533ce5cf3a55d999623bbe33[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sun Jun 28 18:36:07 2026 -0500
+
+    avance 2
+
+[33mcommit 20aea70633b31e7171ac94e4031e87360731b048[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sun Jun 28 15:21:40 2026 -0500
+
+    avance 1
+
+[33mcommit 96832ca0d59ff625369d951b1e5f6a569d8368c0[m
+Author: marioSaico <mssopro2005@gmail.com>
+Date:   Tue Jun 23 22:50:51 2026 -0500
+
+    feat: Usar la variable del .env.local para el login
+
+[33mcommit 65120ceac144153f7e3ca91890962f6e84f92d37[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 23 20:51:52 2026 -0500
+
+    correccione
+
+[33mcommit 9c556613695c9bc0c0405898866825dd4f6609f3[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 23 17:19:00 2026 -0500
+
+    OPDIA
+
+[33mcommit 66da803594861f67262c27677c0759e87d1c669d[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 23 12:46:40 2026 -0500
+
+    front MOMENTANEO ESTA MAL
+
+[33mcommit c8b061daed64df1c14a696e88ab66a4fab4d7851[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Wed Jun 17 14:55:45 2026 -0500
+
+    Correciones finales
+
+[33mcommit a78a60f362cde2ef42674370edfbef8fde2847ac[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 16 03:03:38 2026 -0500
+
+    Correcciones
+
+[33mcommit 5de7088610358b8d525ff8e31e385710520a5d59[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Jun 15 18:07:31 2026 -0500
+
+    implementación de simulación en 2do plano
+
+[33mcommit 2f78f1ad1373bc2b13b032be7f4308bd5b29c1e7[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Jun 15 01:07:30 2026 -0500
+
+    almacenes
+
+[33mcommit 2f8fb0a9af2e463447392fa5ca01d5121d3d484c[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sun Jun 14 23:27:49 2026 -0500
+
+    mimi cambios
+
+[33mcommit 98df14b528a091e865080c86a2c3b6b69a5adfdd[m
+Author: marioSaico <mssopro2005@gmail.com>
+Date:   Sat Jun 13 22:14:18 2026 -0500
+
+    feat: Correcion de cargar-carpeta
+
+[33mcommit e232fb24de5bffd72f47855bc2af9866c2f54430[m
+Author: marioSaico <mssopro2005@gmail.com>
+Date:   Sat Jun 13 21:46:20 2026 -0500
+
+    feat: Correcion de cargar-carpeta
+
+[33mcommit 4aeb396437473d2a4c1334fed596a6948f459f1f[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sat Jun 13 13:52:01 2026 -0500
+
+    last
+
+[33mcommit b5c97c782d5a1a9117122f5da5138bc14f8d74a2[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sat Jun 13 13:43:37 2026 -0500
+
+    last check
+
+[33mcommit 111193547d53b395fa79902c55c1a2942debbea7[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sat Jun 13 12:48:17 2026 -0500
+
+    Detalles esteticos
+
+[33mcommit ad55372827e179bf478b547486568048a45709fc[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sat Jun 13 00:06:38 2026 -0500
+
+    Extras
+
+[33mcommit 25299689673fbe0fb39bce66b0404c6534107194[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Fri Jun 12 02:02:45 2026 -0500
+
+    detalles
+
+[33mcommit aefb3deb814ff608c292562669b4cb40df4afaf4[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Thu Jun 11 23:43:15 2026 -0500
+
+    correccion cancelaciones
+
+[33mcommit 3e0afc937a529c1651ae7053d39736b1ab31cd49[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Thu Jun 11 18:48:56 2026 -0500
+
+    cambios de listado
+
+[33mcommit 7638bc4d570d7c4598b88162c18c6e9d1c81d8e6[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 9 01:06:03 2026 -0500
+
+    parte 2 correccion
+
+[33mcommit afb087debabfa84820ab46d7865a7c8158a50611[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Jun 8 23:59:19 2026 -0500
+
+    parte 1
+
+[33mcommit a026462b929baa41a60fe36518c52e22874917ae[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sat Jun 6 11:55:13 2026 -0500
+
+    lista vuelos y cancelaciones (solo visual)
+
+[33mcommit be288a3e8012f28b6daf1ac3750fff1bccbebb48[m
+Author: marioSaico <mssopro2005@gmail.com>
+Date:   Wed Jun 3 01:58:35 2026 -0500
+
+    feat: Cambio del parametro Sa de 3 minutos a 2 minutos
+
+[33mcommit 1fb4396fd16444aff8b6245f4735cf281a418908[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 2 18:04:33 2026 -0500
+
+    nada
+
+[33mcommit df80763779ad99cd57fae0adc114cfccab338eb6[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 2 17:10:46 2026 -0500
+
+    ultimas correcciones
+
+[33mcommit 7773b84314e9481562833893370d8d463e692796[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 2 16:01:36 2026 -0500
+
+    updt panel viaje
+
+[33mcommit 24f9f36eec64c4d7f0d4dfeaae0000d587c95eca[m
+Author: marioSaico <mssopro2005@gmail.com>
+Date:   Tue Jun 2 14:21:10 2026 -0500
+
+    feat: Actualziacion de Api de cargar envios
+
+[33mcommit e12424bc5288390cd075237a9bd5b6025b8ab15b[m
+Merge: b594358 8d52361
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 2 12:18:22 2026 -0500
+
+    Merge branch 'DocckerRama'
+
+[33mcommit b594358b50c075f6afdb8a882f0cf791b4501ea1[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue Jun 2 11:45:30 2026 -0500
+
+    final
+
+[33mcommit 8d5236127b3ce182bba6d63372495c7807ab729f[m[33m ([m[1;31morigin/DocckerRama[m[33m, [m[1;32mDocckerRama[m[33m)[m
+Author: Marcos Kevin Israel Limo Sanchez <134731874+IsraeLss07@users.noreply.github.com>
+Date:   Mon Jun 1 23:49:39 2026 -0500
+
+    Configuraciones docker
+
+[33mcommit eec9bf5949245245360f907e726a42b37b93cdcb[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sun May 31 12:07:11 2026 -0500
+
+    Modificaciones
+
+[33mcommit db2107f1d4f07a461fa6354610e2c869052be3dd[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sat May 30 14:58:59 2026 -0500
+
+    FINAL
+
+[33mcommit 54c8cc38b94f1198d97b1c4a022d8eb61bb3b99f[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue May 26 22:36:10 2026 -0500
+
+    salvacion
+
+[33mcommit 8a510c5e0f6558c01533d5fbebc064b71c84ce36[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue May 26 22:05:20 2026 -0500
+
+    updt2
+
+[33mcommit b09a1d1db0970f77843559fcae10566f7ef75069[m[33m ([m[1;32mfeature/diego[m[33m)[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue May 26 15:09:51 2026 -0500
+
+    update
+
+[33mcommit 88325f1cad77ac3dbade327769a7f3cd0e86e5e7[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon May 25 13:56:17 2026 -0500
+
+    update
+
+[33mcommit d39c008b18d554cccfb3b26e2265341729323ac4[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Tue May 12 09:41:08 2026 -0500
+
+    update
+
+[33mcommit 85d05acb048a3f57e90bf2ba3f8d05f30285efee[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 20 21:25:01 2026 -0500
+
+    NEXT
+
+[33mcommit f1eaf0627a4fa6f2062ababc03e6a116ffcb10eb[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 13 01:42:49 2026 -0500
+
+    UPDATE
+
+[33mcommit fcbd8ddb88c2cfdc0a6408c345da59bfbd5abd59[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 21:18:32 2026 -0500
+
+    feat: implement tracking page with search input and animated map with airplane routes
+
+[33mcommit 95c9152547e94392faedbffa03570dac30790503[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 21:09:03 2026 -0500
+
+    feat: implement warehouse capacity management with realistic range (500-800 suitcases)
+
+[33mcommit 8043108d057c4b67c1c9f33c04c363a978171858[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 21:03:12 2026 -0500
+
+    fix: add realistic GMT limits (min -12, max +14) to warehouse input field
+
+[33mcommit e501e08254707788283c1a1f726110855a4f9a3f[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 21:02:35 2026 -0500
+
+    style: expand input fields to full width in warehouse modals
+
+[33mcommit 6d817da7059419bcbaf3f3f1b08754d9334a1aa4[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 21:01:47 2026 -0500
+
+    refactor: change capacity from m2 to number of suitcases/maletas
+
+[33mcommit 92bd31db852f56588ce78278d9aed1d8c5fa30bc[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 21:00:11 2026 -0500
+
+    fix: modal close buttons and form inputs - use local functions and clarify warehouse capacity field
+
+[33mcommit 3b08280b595d17f9e3d2276b090be694103b5505[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:57:39 2026 -0500
+
+    feat: add buttons and modals for adding and bulk uploading warehouses
+
+[33mcommit a94bbfcba0e4ad415b30e3fe8ff5c29dc606ec37[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:47:03 2026 -0500
+
+    style: add warehouse emoji to Almacenes page title
+
+[33mcommit 1ba53430f94fd248d5267abe26ca84386f07ac75[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:44:25 2026 -0500
+
+    feat: add warehouse/almacenes table to aeropuertos.html with data from PDDS file
+
+[33mcommit 4c161ab35dc919c29d9edd3cc99bfde159fdc86e[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:42:47 2026 -0500
+
+    fix: update index.html sidebar - replace almacen.svg with emoji and update Monitoreo to Simulador
+
+[33mcommit b2aacf614a143df251adcf2e06a21d14af1c8106[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:41:40 2026 -0500
+
+    fix: completely remove almacen.svg references from all remaining screens
+
+[33mcommit c1672c20b16d08e5d5cd7043767f0e8034094a82[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:38:54 2026 -0500
+
+    fix: replace unreliable almacen.svg with warehouse emoji across all screens
+
+[33mcommit fe7d170dae570ef8edd28d155b89fbba42600ac1[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:35:31 2026 -0500
+
+    refactor: change Monitoreo to Simulador across all screen files
+
+[33mcommit 7d3ad33d5e7faa4008d72283e7f11600ed20a610[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:34:24 2026 -0500
+
+    fix: change Almacenes emoji from package to factory/warehouse
+
+[33mcommit 5a033e69309e0082980b52dca098a8ba96fbd329[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:34:14 2026 -0500
+
+    fix: add package emoji to Almacenes navigation item
+
+[33mcommit 44e33d38656ef9352456b78cb636894baf5250fc[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:31:54 2026 -0500
+
+    cleanup: remove all warehouses logic from aeropuertos.html, keep only sidebar
+
+[33mcommit d2b1328d7265bc02e017e15319e6c5dfae7aa8b0[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:31:13 2026 -0500
+
+    cleanup: remove all tracking logic from detalle-maleta.html, keep only sidebar
+
+[33mcommit c263475fdbfb691c946f9aeccdf054c74f91db8a[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:26:44 2026 -0500
+
+    fix: remove old header navbar from detalle-maleta.html, keep only sidebar
+
+[33mcommit e62dbea5ce5485af335b170ab1daf65b31621ce6[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:23:12 2026 -0500
+
+    feat: add active nav-item state to simulacion-config.html and mapa-logistica.html
+
+[33mcommit 7632c6fe9e34c31aef0bcf528a1c4f75c8a9cf34[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:21:35 2026 -0500
+
+    cleanup: remove unused header/navbar CSS styles
+
+[33mcommit 61510c44f7fd1476708a0a1912e5ac27025b9894[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:18:09 2026 -0500
+
+    feat: add sidebar to mapa-logistica.html
+
+[33mcommit 0480defe7f87b0dc131bddbb0f718ac31fcc8bcb[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:15:06 2026 -0500
+
+    restore: restore detalle-maleta.html to original version
+
+[33mcommit b57fd965b903f146c491be7cc386fdab75899d40[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:02:44 2026 -0500
+
+    style: improve initial search prompt UI with better typography, spacing and visual design
+
+[33mcommit 6b8e598c34e2775f8b14b8980245422e1b1d0be7[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 20:00:46 2026 -0500
+
+    feat: add initial search prompt for baggage tracking with special code 11111 validation
+
+[33mcommit 8547e0788ef0b9403906507e3de089c00a2fd150[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 19:50:18 2026 -0500
+
+    fix: properly add sidebars to mapa-principal and detalle-maleta
+
+[33mcommit 12fb225f051836512a585d013df168b90085b2e8[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Mon Apr 6 19:47:14 2026 -0500
+
+    feat: Add sidebars to mapa-principal and detalle-maleta, create aeropuertos.html with 25 warehouses, replace emoji with SVG icon
+
+[33mcommit ac5b0c85bb999db136d95e64ad268807c63a62b6[m
+Author: Diego <a20201317@pucp.edu.pe>
+Date:   Sun Mar 29 23:16:54 2026 -0500
+
+    Borrador
+
+[33mcommit 89877ed007d12dad800ddaed49446c81af565a1f[m
+Author: Diego <167366882+dcastilla03@users.noreply.github.com>
+Date:   Sun Mar 29 23:15:39 2026 -0500
+
+    Initial commit

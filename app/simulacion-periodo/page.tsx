@@ -119,6 +119,7 @@ export default function SimulacionPeriodo() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInst = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
+  const openPopupMarkerRef = useRef<any>(null);
   const [mapReady, setMapReady] = useState(false);
 
   const ctx = useSimulationContext();
@@ -142,6 +143,7 @@ export default function SimulacionPeriodo() {
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [flightPanelOpen, setFlightPanelOpen] = useState(false);
   const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
+  const [timePanelOpen, setTimePanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [showConfigOverlay, setShowConfigOverlay] = useState(
@@ -261,6 +263,7 @@ export default function SimulacionPeriodo() {
   const [filterCodigo, setFilterCodigo] = useState('');
   const [filterOrigen, setFilterOrigen] = useState('');
   const [filterDestino, setFilterDestino] = useState('');
+  const [filterSemaforo, setFilterSemaforo] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortBy, setSortBy] = useState('salida');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -280,6 +283,7 @@ export default function SimulacionPeriodo() {
   const [filterAlmCodigo, setFilterAlmCodigo] = useState('');
   const [filterAlmCiudad, setFilterAlmCiudad] = useState('');
   const [filterAlmPais, setFilterAlmPais] = useState('');
+  const [filterAlmSemaforo, setFilterAlmSemaforo] = useState('');
   const [sortAlmBy, setSortAlmBy] = useState('codigo');
   const [sortAlmDir, setSortAlmDir] = useState<'asc' | 'desc'>('asc');
   const filterAlmButtonRef = useRef<HTMLButtonElement>(null);
@@ -562,6 +566,9 @@ export default function SimulacionPeriodo() {
         require('leaflet/dist/leaflet.css');
         const map = L.map(mapRef.current, {
           zoomControl: false,
+          zoomSnap: 0.05,
+          zoomDelta: 0.1,
+          wheelPxPerZoomLevel: 120,
           maxBounds: [[-85, -180], [85, 180]],
           maxBoundsViscosity: 1.0,
           minZoom: 3,
@@ -657,7 +664,8 @@ export default function SimulacionPeriodo() {
       m.airportCode = a.codigo;
       m.generarPopupHTML = generarPopupHTML;
       m.bindPopup(generarPopupHTML(), { maxWidth: 300 });
-      m.on('popupopen', () => m.setPopupContent(m.generarPopupHTML()));
+      m.on('popupopen', () => { openPopupMarkerRef.current = m; m.setPopupContent(m.generarPopupHTML()); });
+      m.on('popupclose', () => { if (openPopupMarkerRef.current === m) openPopupMarkerRef.current = null; });
       markersRef.current.push(m);
     });
 
@@ -921,6 +929,12 @@ export default function SimulacionPeriodo() {
           }
         } catch (err) {
           console.error('[renderLoop] Error:', err);
+        }
+
+        // Refrescar popup de almacén abierto con datos en tiempo real
+        const openMkr = openPopupMarkerRef.current;
+        if (openMkr) {
+          openMkr.setPopupContent(openMkr.generarPopupHTML());
         }
 
         frameId = requestAnimationFrame(renderLoop);
@@ -1308,37 +1322,33 @@ export default function SimulacionPeriodo() {
     const salidaHHMM = horaSalida.split(' ')[1] || '00:00';
     const codigoVueloPanel = generarCodigoVuelo(fe.origenCode, fe.destinoCode, salidaHHMM);
 
-    // Buscar envíos relacionados (misma ruta por idEnvio)
-    const enviosRelacionados: { codigo: string; label: string }[] = [];
+    // Buscar envíos relacionados (mismo vuelo) desde los FlightEvents
+    const enviosRelacionados: { codigoUnico: string; idEnvio: string; label: string; maletas: number }[] = [];
     if (!isEmptyFlight) {
-      let currentIdEnvio = fe.key.split('-')[0];
-      // Si es key sintético (card-), buscar el idEnvio real desde rutasPlanificadasRef
-      if (fe.key.startsWith('card-')) {
-        const timeSlot = fe.minutosInicio % 1440;
-        for (const ruta of rutasPlanificadasRef.current.values()) {
-          for (const tramo of ruta.tramos || []) {
-            const [th, tm] = (tramo.sale || '00:00').split(':').map(Number);
-            if ((th * 60 + tm) === timeSlot && tramo.origen === fe.origenCode && tramo.destino === fe.destinoCode) {
-              currentIdEnvio = ruta.idEnvio;
-              break;
-            }
-          }
-          if (currentIdEnvio !== fe.key.split('-')[0]) break;
+      interface EnvioRef { idEnvio: string; idCliente: string; origen: string; destino: string; maletas: number; }
+      const flightToEnvios = new Map<string, EnvioRef[]>();
+      for (const feOther of flightEventsRef.current) {
+        if (feOther.key.startsWith('unused-')) continue;
+        const id = feOther.key.split('-')[0];
+        const cliRaw = feOther.key.split('-')[1] || '';
+        const cli = cliRaw === 'x' ? '' : cliRaw;
+        if (feOther.origenCode !== fe.origenCode || feOther.destinoCode !== fe.destinoCode) continue;
+        const k = `${feOther.origenCode}-${feOther.destinoCode}-${feOther.sale}`;
+        if (!flightToEnvios.has(k)) flightToEnvios.set(k, []);
+        const arr = flightToEnvios.get(k)!;
+        if (!arr.some(e => e.idEnvio === id)) {
+          const rutaE = rutasPlanificadasRef.current.get(id);
+          arr.push({ idEnvio: id, idCliente: cli, origen: feOther.origenCode, destino: feOther.destinoCode, maletas: rutaE?.maletas ?? feOther.maletasVuelo });
         }
       }
-      const prefix = currentIdEnvio + '-';
-      const codigosVistos = new Set<string>();
-      flightEventsRef.current.forEach(e => {
-        if (e.key.startsWith('unused-') || e.key.startsWith('card-')) return;
-        if (e.key.startsWith(prefix) && e.key !== fe.key) {
-          if (!codigosVistos.has(currentIdEnvio)) {
-            codigosVistos.add(currentIdEnvio);
-            const ruta = rutasPlanificadasRef.current.get(currentIdEnvio);
-            const label = ruta ? `${ruta.origen} → ${ruta.destino}${(ruta.tramos?.length ?? 0) > 1 ? ` (${ruta.tramos.length} tramos)` : ''}` : currentIdEnvio;
-            enviosRelacionados.push({ codigo: currentIdEnvio, label });
-          }
-        }
-      });
+      const flightKey = `${fe.origenCode}-${fe.destinoCode}-${fe.sale}`;
+      const entries = flightToEnvios.get(flightKey) || [];
+      for (const e of entries) {
+        const codigoUnico = `${e.idEnvio}${e.idCliente}${e.origen}${e.destino}`;
+        const totalTramos = new Set(flightEventsRef.current.filter(f => f.key.startsWith(e.idEnvio + '-')).map(f => `${f.origenCode}-${f.destinoCode}`)).size;
+        const tipo = totalTramos <= 1 ? 'Directo' : 'Por escalas';
+        enviosRelacionados.push({ codigoUnico, idEnvio: e.idEnvio, label: `${e.origen} → ${e.destino} · ${tipo}`, maletas: e.maletas });
+      }
     }
 
     panel.innerHTML = `
@@ -1400,12 +1410,17 @@ export default function SimulacionPeriodo() {
       </div>
       ${enviosRelacionados.length > 0 ? `
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-top:10px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">ENVÍOS RELACIONADOS</div>
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">📦 ENVÍOS RELACIONADOS</div>
         ${enviosRelacionados.map((env, i) => `
-        <div id="relEnvio_${i}" data-codigo="${env.codigo}" style="padding:6px 8px;background:white;border-radius:6px;cursor:pointer;margin-bottom:4px;border:1px solid var(--border-color,#e5e7eb);display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:12px;font-weight:600;color:var(--accent-blue,#2563eb);">${env.codigo}</span>
-          <span style="font-size:10px;color:#6b7280;">${env.label}</span>
+        <div id="relEnvio_${i}" data-codigo="${env.codigoUnico}" style="padding:6px 8px;background:white;border-radius:6px;cursor:pointer;margin-bottom:4px;border:1px solid var(--border-color,#e5e7eb);display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;font-weight:600;color:var(--accent-blue,#2563eb);">${env.codigoUnico}</span>
+          <span style="font-size:10px;color:#6b7280;">${env.label} — ${env.maletas} maletas</span>
         </div>`).join('')}
+      </div>
+      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-top:10px;">
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">🎒 MALETAS</div>
+        ${enviosRelacionados.map(env => Array.from({ length: env.maletas }, (_, i) => `
+        <div style="padding:4px 8px;background:white;border-radius:4px;margin-bottom:2px;font-size:11px;color:#1f2937;font-family:monospace;">${env.codigoUnico}${i + 1}</div>`).join('')).join('')}
       </div>` : ''}
     `;
 
@@ -1414,8 +1429,15 @@ export default function SimulacionPeriodo() {
       const el = document.getElementById(`relEnvio_${i}`);
       if (el) {
         el.addEventListener('click', () => {
-          const envioFe = flightEventsRef.current.find(e => e.key.startsWith(env.codigo));
-          if (envioFe) mostrarPanelEnvio(envioFe);
+          // Buscar FlightEvent activo o el último disponible de ese envío que coincida con origen+destino
+          const envId = env.codigoUnico.replace(/[^0-9]/g, '').match(/^0*(\d+)/)?.[1];
+          let envioFe: FlightEvent | undefined;
+          const candidatos = flightEventsRef.current.filter(f => {
+            const feId = f.key.split('-')[0];
+            return feId === env.idEnvio && f.origenCode === fe.origenCode && f.destinoCode === fe.destinoCode;
+          });
+          envioFe = candidatos.find(f => f.active) || candidatos[candidatos.length - 1];
+          if (envioFe) mostrarPanelEnvio(envioFe, env.codigoUnico);
         });
       }
     });
@@ -1450,11 +1472,14 @@ export default function SimulacionPeriodo() {
     }
 
     const codigoEnvio = fe.key.split('-')[0];
-    // Usar rutasPorCodigoUnicoRef si se proporciona código forzado (desde búsqueda)
-    // Si no, usar rutasPlanificadasRef (para otros casos)
-    const rutaCompleta = codigoUnicoForzado
+    // Usar rutasPorCodigoUnicoRef si se proporciona código forzado (desde búsqueda o envRel)
+    // Si no, usar rutasPlanificadasRef
+    let rutaCompleta = codigoUnicoForzado
       ? sim.rutasPorCodigoUnicoRef.current.get(codigoUnicoForzado)
       : rutasPlanificadasRef.current.get(codigoEnvio);
+    if (!rutaCompleta && codigoUnicoForzado) {
+      rutaCompleta = rutasPlanificadasRef.current.get(codigoEnvio);
+    }
 
     // ── Estado para refresh dinámico del Monitoreo ──
     let refreshInterval: number | null = null;
@@ -1548,6 +1573,7 @@ export default function SimulacionPeriodo() {
         <div style="background:#f9fafb;padding:12px;border-radius:10px;margin-bottom:${isLast ? '0' : '12px'};position:relative;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
+            <button id="gotoTramo_${codigoEnvio}_${index}" style="background:#2563eb;border:none;color:white;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;cursor:pointer;">✈ Ir</button>
           </div>
           <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;margin-bottom:8px;">
             <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
@@ -1800,6 +1826,23 @@ export default function SimulacionPeriodo() {
     }
 
     transitarA(generarVistaPlanViaje());
+    // Listeners para botones "✈ Ir" de cada tramo
+    setTimeout(() => {
+      const envioId = fe.key.split('-')[0];
+      (rc.tramos || []).forEach((tramo, idx) => {
+        const btn = document.getElementById(`gotoTramo_${envioId}_${idx}`);
+        if (btn) {
+          btn.addEventListener('click', () => {
+            const feTramo = flightEventsRef.current.find(f =>
+              f.key.startsWith(envioId + '-') &&
+              f.origenCode === tramo.origen &&
+              f.destinoCode === tramo.destino
+            );
+            if (feTramo) { cerrarPanelEnvio(); mostrarPanelAvion(feTramo); }
+          });
+        }
+      });
+    }, 300);
   }
 
   // ── Barra de progreso del cronómetro ─────────────────────────────────────
@@ -1814,16 +1857,37 @@ export default function SimulacionPeriodo() {
   const OVERSCAN = 5;
 
   const vuelosFiltrados = useMemo(() => {
+    const simStart = sim.simStartDateRef.current;
+    const feRef = flightEventsRef.current;
+
+    const getOcup = (v: typeof vuelosGlobales[0]) => {
+      if (!simStart) return -1;
+      const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
+      let d = new Date(simStart); d.setUTCHours(hh, mm, 0, 0);
+      while (d.getTime() < simStart.getTime()) d.setUTCDate(d.getUTCDate() + 1);
+      const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
+      const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && (e.minutosInicio % 1440) === (minInicio % 1440));
+      if (!fe || fe.key.startsWith('unused-')) return -1;
+      if (fe.capacidadVuelo > 0) return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
+      return 0;
+    };
+
     const sorted = vuelosGlobales.filter(vuelo => {
       const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, extraerHHMM(vuelo.salida));
       const matchCodigo = filterCodigo === '' || codigoVuelo.toLowerCase().includes(filterCodigo.toLowerCase());
       const matchOrigen = filterOrigen === '' || vuelo.origen.toLowerCase().includes(filterOrigen.toLowerCase());
       const matchDestino = filterDestino === '' || vuelo.destino.toLowerCase().includes(filterDestino.toLowerCase());
-      return matchCodigo && matchOrigen && matchDestino;
+      let matchSemaforo = true;
+      if (filterSemaforo) {
+        const pct = getOcup(vuelo);
+        if (pct < 0) { matchSemaforo = false; }
+        else if (filterSemaforo === 'azul') matchSemaforo = pct === 0;
+        else if (filterSemaforo === 'verde') matchSemaforo = pct > 0 && pct < 50;
+        else if (filterSemaforo === 'naranja') matchSemaforo = pct >= 50 && pct < 80;
+        else if (filterSemaforo === 'rojo') matchSemaforo = pct >= 80;
+      }
+      return matchCodigo && matchOrigen && matchDestino && matchSemaforo;
     });
-
-    const simStart = sim.simStartDateRef.current;
-    const feRef = flightEventsRef.current;
 
     sorted.sort((a, b) => {
       let cmp = 0;
@@ -1836,23 +1900,12 @@ export default function SimulacionPeriodo() {
       } else if (sortBy === 'destino') {
         cmp = a.destino.localeCompare(b.destino);
       } else if (sortBy === 'ocupacion') {
-        const getOcup = (v: typeof a) => {
-          if (!simStart) return -1;
-          const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
-          let d = new Date(simStart); d.setUTCHours(hh, mm, 0, 0);
-          while (d.getTime() < simStart.getTime()) d.setUTCDate(d.getUTCDate() + 1);
-          const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
-          const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && (e.minutosInicio % 1440) === (minInicio % 1440));
-          if (!fe || fe.key.startsWith('unused-')) return -1;
-          if (fe.capacidadVuelo > 0) return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
-          return 0;
-        };
         cmp = getOcup(a) - getOcup(b);
       }
       return sortDir === 'desc' ? -cmp : cmp;
     });
     return sorted;
-  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick, sim.allFlightEvents, sim.iteracion]);
+  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, filterSemaforo, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick, sim.allFlightEvents, sim.iteracion]);
 
   // ── Datos derivados de Almacenes ────────────────────────────────────────────
   const almacenesData = useMemo(() => {
@@ -1924,6 +1977,16 @@ export default function SimulacionPeriodo() {
       const q = filterAlmPais.toLowerCase();
       list = list.filter(a => a.pais.toLowerCase().includes(q));
     }
+    if (filterAlmSemaforo) {
+      list = list.filter(a => {
+        const pct = a.pct;
+        if (filterAlmSemaforo === 'azul') return pct === 0;
+        if (filterAlmSemaforo === 'verde') return pct > 0 && pct < 50;
+        if (filterAlmSemaforo === 'naranja') return pct >= 50 && pct < 80;
+        if (filterAlmSemaforo === 'rojo') return pct >= 80;
+        return true;
+      });
+    }
     list = [...list].sort((a, b) => {
       let cmp = 0;
       if (sortAlmBy === 'codigo') cmp = a.codigo.localeCompare(b.codigo);
@@ -1937,7 +2000,7 @@ export default function SimulacionPeriodo() {
       return sortAlmDir === 'desc' ? -cmp : cmp;
     });
     return list;
-  }, [almacenesData, filterAlmCodigo, filterAlmPais, sortAlmBy, sortAlmDir]);
+  }, [almacenesData, filterAlmCodigo, filterAlmPais, filterAlmSemaforo, sortAlmBy, sortAlmDir]);
 
   const totalHeightAlm = almacenesFiltrados.length * ITEM_HEIGHT_ALM;
   const startIdxAlm = Math.max(0, Math.floor(scrollTopAlm / ITEM_HEIGHT_ALM) - OVERSCAN_ALM);
@@ -2251,8 +2314,68 @@ export default function SimulacionPeriodo() {
 
           {/* Panel de Control — Centro Superior */}
           <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
-            <div style={{ pointerEvents: 'auto', padding: '8px 12px' }}>
-              <div style={{ display: 'flex', gap: 14, marginBottom: 0, padding: '10px 14px', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', pointerEvents: 'auto' }}>
+
+              {/* Panel de Tiempos — único, colapsable */}
+              <div
+                onClick={() => { if (!timePanelOpen) setTimePanelOpen(true); }}
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.92)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 10,
+                  boxShadow: 'var(--shadow)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: timePanelOpen ? 5 : 0,
+                  padding: timePanelOpen ? '8px 12px' : '6px 10px',
+                  minWidth: timePanelOpen ? 185 : 60,
+                  cursor: timePanelOpen ? 'default' : 'pointer',
+                  alignSelf: 'center',
+                  transition: 'all 0.15s',
+                }}>
+                {timePanelOpen ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
+                      <small style={{ fontWeight: 700, textTransform: 'uppercase', fontSize: 9, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}><img src="/tiempo.svg" style={{ width: 12, height: 12 }} /> Tiempos</small>
+                      <button onClick={(e) => { e.stopPropagation(); setTimePanelOpen(false); }}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280', padding: 0, lineHeight: 1 }}>
+                        ✕
+                      </button>
+                    </div>
+
+                    <div>
+                      <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9 }}>Tiempo Simulado</small>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 1, whiteSpace: 'nowrap' }}>{simTimeLabel}</div>
+                    </div>
+                    <div>
+                      <div style={{ lineHeight: 1.15 }}>
+                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9, display: 'block' }}>T. Transcurrido</small>
+                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 7, display: 'block', opacity: 0.7 }}>Simulado</small>
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed', marginTop: 1, whiteSpace: 'nowrap' }}>+{formatDuration(simMinutos)}</div>
+                    </div>
+                    <div>
+                      <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9 }}>Tiempo Actual</small>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#059669', marginTop: 1, whiteSpace: 'nowrap' }}>{realTimeLabel}</div>
+                    </div>
+                    <div>
+                      <div style={{ lineHeight: 1.15 }}>
+                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9, display: 'block' }}>T. Transcurrido</small>
+                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 7, display: 'block', opacity: 0.7 }}>Actual</small>
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#059669', marginTop: 1, whiteSpace: 'nowrap' }}>+{stopwatch}</div>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                    <img src="/tiempo.svg" style={{ width: 14, height: 14 }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tiempos</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Barra principal — sin ⏱, sin indicadores de tiempo */}
+              <div style={{ display: 'flex', gap: 14, padding: '10px 14px', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
                   <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
                     Simulación — Período 5 Días
@@ -2260,23 +2383,14 @@ export default function SimulacionPeriodo() {
                   </h1>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#f97316', marginTop: 1 }}>Día {sim.diaActual}/5</div>
                   <style>{`
-                  /* LED apagado (inicial) */
                   .led-off {
                     background-color: rgba(107, 114, 128, 0.3);
                     border: 1px solid rgba(107, 114, 128, 0.5);
                     box-shadow: none;
                   }
-                  
-                  /* LED activo - Rojo parpadeando */
                   @keyframes led-blink {
-                    0%, 100% { 
-                      opacity: 1; 
-                      box-shadow: 0 0 6px rgba(239, 68, 68, 0.8); 
-                    }
-                    50% { 
-                      opacity: 0.4; 
-                      box-shadow: 0 0 2px rgba(239, 68, 68, 0.2); 
-                    }
+                    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(239, 68, 68, 0.8); }
+                    50% { opacity: 0.4; box-shadow: 0 0 2px rgba(239, 68, 68, 0.2); }
                   }
                   .led-active {
                     background-color: #ef4444;
@@ -2288,33 +2402,8 @@ export default function SimulacionPeriodo() {
                   }
                 `}</style>
                 </div>
+
                 <div style={{ height: 20, width: 1, backgroundColor: 'var(--border-color)' }} />
-
-                <div>
-                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Simulado</small>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 2, whiteSpace: 'nowrap' }}>{simTimeLabel}</div>
-                </div>
-
-                <div>
-                  <div style={{ lineHeight: 1.15 }}>
-                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10, display: 'block' }}>Tiempo Transcurrido</small>
-                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 8, display: 'block', opacity: 0.7 }}>Simulado</small>
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', marginTop: 2, whiteSpace: 'nowrap' }}>+{formatDuration(simMinutos)}</div>
-                </div>
-
-                <div>
-                  <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10 }}>Tiempo Actual</small>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>{realTimeLabel}</div>
-                </div>
-
-                <div>
-                  <div style={{ lineHeight: 1.15 }}>
-                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 10, display: 'block' }}>Tiempo Transcurrido</small>
-                    <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 8, display: 'block', opacity: 0.7 }}>Actual</small>
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#059669', marginTop: 2, whiteSpace: 'nowrap' }}>+{stopwatch}</div>
-                </div>
 
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={handleDetener} disabled={!sim.isRunning}
@@ -2455,7 +2544,7 @@ export default function SimulacionPeriodo() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                    <button onClick={() => { setFilterCodigo(''); setFilterOrigen(''); setFilterDestino(''); setSortBy('salida'); setSortDir('asc'); }}
+                    <button onClick={() => { setFilterCodigo(''); setFilterOrigen(''); setFilterDestino(''); setFilterSemaforo(''); setSortBy('salida'); setSortDir('asc'); }}
                       style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
                       ✕ Borrar
                     </button>
@@ -2500,6 +2589,22 @@ export default function SimulacionPeriodo() {
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => setSortDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
                     <button onClick={() => setSortDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Semáforo</label>
+                    <select value={filterSemaforo} onChange={e => setFilterSemaforo(e.target.value)}
+                      style={{
+                        width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5,
+                        outline: 'none', cursor: 'pointer',
+                        color: filterSemaforo === 'azul' ? '#6366f1' : filterSemaforo === 'verde' ? '#22c55e' : filterSemaforo === 'naranja' ? '#f97316' : filterSemaforo === 'rojo' ? '#ef4444' : 'var(--text-primary)',
+                        fontWeight: filterSemaforo ? 600 : 400,
+                      }}>
+                      <option value="">Todos</option>
+                      <option value="azul" style={{ color: '#6366f1' }}>Vacío</option>
+                      <option value="verde" style={{ color: '#22c55e' }}>Bajo</option>
+                      <option value="naranja" style={{ color: '#f97316' }}>Medio</option>
+                      <option value="rojo" style={{ color: '#ef4444' }}>Alto</option>
+                    </select>
                   </div>
                 </div>
               )}
@@ -2702,7 +2807,7 @@ export default function SimulacionPeriodo() {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                  <button onClick={() => { setFilterAlmCodigo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
+                  <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmSemaforo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
                     style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
                     ✕ Borrar
                   </button>
@@ -2734,6 +2839,22 @@ export default function SimulacionPeriodo() {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button onClick={() => setSortAlmDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
                   <button onClick={() => setSortAlmDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Semáforo</label>
+                  <select value={filterAlmSemaforo} onChange={e => setFilterAlmSemaforo(e.target.value)}
+                    style={{
+                      width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5,
+                      outline: 'none', cursor: 'pointer',
+                      color: filterAlmSemaforo === 'azul' ? '#6366f1' : filterAlmSemaforo === 'verde' ? '#22c55e' : filterAlmSemaforo === 'naranja' ? '#f97316' : filterAlmSemaforo === 'rojo' ? '#ef4444' : 'var(--text-primary)',
+                      fontWeight: filterAlmSemaforo ? 600 : 400,
+                    }}>
+                    <option value="">Todos</option>
+                    <option value="azul" style={{ color: '#6366f1' }}>Vacío</option>
+                    <option value="verde" style={{ color: '#22c55e' }}>Bajo</option>
+                    <option value="naranja" style={{ color: '#f97316' }}>Medio</option>
+                    <option value="rojo" style={{ color: '#ef4444' }}>Alto</option>
+                  </select>
                 </div>
               </div>
             )}
@@ -2782,7 +2903,7 @@ export default function SimulacionPeriodo() {
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
                           <span>📦 Stock: <strong style={{ color: 'var(--text-primary)' }}>{alm.ocupacion}/{alm.capacidad}</strong></span>
-                          <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#2563eb' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
+                          <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: 'var(--text-primary)' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
                           <span>📤 Salen: <strong style={{ color: '#d97706' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
                           <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#059669' }}>{alm.transito.maletas}</strong></span>
                         </div>

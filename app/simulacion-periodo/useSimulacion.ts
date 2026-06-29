@@ -15,6 +15,7 @@ export interface FlightEvent {
   tramoOrden: number;
   origenCode: string;
   destinoCode: string;
+  sale?: string;                    // "HH:mm" del tramo, directo del backend, sin calcular
   planVueloRuta: string[];
   planVueloTipo: 'Directo' | 'Por escalas';
   latOrigen: number;
@@ -191,6 +192,7 @@ function rutaAFlightEvents(
       tramoOrden: tramo.orden,
       origenCode: tramo.origen,
       destinoCode: tramo.destino,
+      sale: (tramo.sale || '').split(' ')[1] || '00:00',
       planVueloRuta: rutaCompleta,
       planVueloTipo,
       latOrigen: aOrigen.latitud,
@@ -227,15 +229,15 @@ function buildLogEvents(
   const totalTramos = tramos.length;
 
   // ── DEBUG: datos crudos del backend ─────────────────────────────────────
-  const _saleRaw = tramos[0]?.sale || '';
-  const _minutosReg = ruta.fechaRegistro
-    ? fechaHoraAMinutosDesdeInicio(ruta.fechaRegistro, simStartDate)
-    : 0;
-  console.log(
-    `[buildLogEvents] fechaRegistro="${ruta.fechaRegistro}"  tramo[0].sale="${_saleRaw}"  ` +
-    `simStart="${simStartDate.toISOString()}"  minutosDisparo=${_minutosReg}  ` +
-    `fechaRegistro→simStart diff ms=${ruta.fechaRegistro ? (extraerFecha(ruta.fechaRegistro).getTime() - simStartDate.getTime()) : 'N/A'}`
-  );
+  // const _saleRaw = tramos[0]?.sale || '';
+  // const _minutosReg = ruta.fechaRegistro
+  //   ? fechaHoraAMinutosDesdeInicio(ruta.fechaRegistro, simStartDate)
+  //   : 0;
+  // console.log(
+  //   `[buildLogEvents] fechaRegistro="${ruta.fechaRegistro}"  tramo[0].sale="${_saleRaw}"  ` +
+  //   `simStart="${simStartDate.toISOString()}"  minutosDisparo=${_minutosReg}  ` +
+  //   `fechaRegistro→simStart diff ms=${ruta.fechaRegistro ? (extraerFecha(ruta.fechaRegistro).getTime() - simStartDate.getTime()) : 'N/A'}`
+  // );
 
   // ── Evento 1: Envío registrado (a la hora de fechaRegistro) ─────────────
   const minutosRegistro = ruta.fechaRegistro
@@ -376,27 +378,29 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const addLog = useCallback((text: string, color: string, minutosSimulados?: number | null) => {
     let t: string | null = null;
     if (typeof minutosSimulados === 'number') {
-      const dia = Math.floor(minutosSimulados / (24 * 60)) + 1;
-      const minDelDia = minutosSimulados % (24 * 60);
+      const m = Math.max(0, minutosSimulados);
+      const dia = Math.floor(m / (24 * 60)) + 1;
+      const minDelDia = m % (24 * 60);
       const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
       const mm = String(minDelDia % 60).padStart(2, '0');
       t = `Día ${dia} ${hh}:${mm}`;
     }
     setLogs(prev => [{ time: t, text, color }, ...prev].slice(0, 100));
   }, []);
-
+  
   const addLogBatch = useCallback((entries: Array<{ text: string; color: string; minutosDisparo: number }>) => {
     setLogs(prev => {
       let updated = [...prev];
       for (const entry of entries) {
         let t: string | null = null;
         if (typeof entry.minutosDisparo === 'number') {
-          const dia = Math.floor(entry.minutosDisparo / (24 * 60)) + 1;
-          const minDelDia = entry.minutosDisparo % (24 * 60);
+          const m = Math.max(0, entry.minutosDisparo);
+          const dia = Math.floor(m / (24 * 60)) + 1;
+          const minDelDia = m % (24 * 60);
           const hh = String(Math.floor(minDelDia / 60)).padStart(2, '0');
           const mm = String(minDelDia % 60).padStart(2, '0');
           t = `Día ${dia} ${hh}:${mm}`;
-          console.log(`[addLogBatch] minutosDisparo=${entry.minutosDisparo} → t="${t}"  text="${entry.text.slice(0, 80)}"`);
+          // console.log(`[addLogBatch] minutosDisparo=${entry.minutosDisparo} → t="${t}"  text="${entry.text.slice(0, 80)}"`);
         }
         updated = [{ time: t, text: entry.text, color: entry.color }, ...updated];
       }
@@ -625,7 +629,9 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     // Escuchar evento genérico 'message' (sin event: header en el SSE)
     es.onmessage = (e: MessageEvent) => {
       try {
-        const d: BackendSimEvent = JSON.parse(e.data);
+        const raw = e.data;
+        console.log('[SSE RAW]', raw);
+        const d: BackendSimEvent = JSON.parse(raw);
         procesarMensaje(d);
       } catch (err) {
         console.warn('[SSE] Error parseando mensaje:', e.data, err);
@@ -637,8 +643,10 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     ['INICIO', 'ITERACION', 'COLAPSO', 'CANCELACION', 'RESUMEN_FINAL'].forEach(tipo => {
       es.addEventListener(tipo, (e: MessageEvent) => {
         try {
+          const raw = e.data;
+          console.log(`[SSE RAW ${tipo}]`, raw);
           const d: BackendSimEvent = JSON.parse(e.data);
-          if (!d.tipo) d.tipo = tipo; // asegurar que tipo esté presente
+          if (!d.tipo) d.tipo = tipo;
           procesarMensaje(d);
         } catch (err) {
           console.warn(`[SSE] Error parseando evento ${tipo}:`, err);

@@ -339,8 +339,9 @@ export default function SimulacionPeriodo() {
     try {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
       const g = u?.aeropuerto?.gmt;
-      return typeof g === 'number' && !isNaN(g) ? g : 0;
-    } catch { return 0; }
+      if (typeof g === 'number' && !isNaN(g)) return g;
+    } catch {}
+    return -new Date().getTimezoneOffset() / 60;
   });
   useEffect(() => {
     if (sim.aeropuertos.length === 0) return;
@@ -353,16 +354,13 @@ export default function SimulacionPeriodo() {
       }
     } catch {}
   }, [sim.aeropuertos]);
-  // ── addLogBatch local: formatea DD/MM/AAAA HH:MM directo ──
+  // ── addLogBatch local: formatea DD/MM/AAAA HH:MM directo como horaActual ──
   useEffect(() => {
     addLogBatchRef.current = (entries) => {
       const formatted = entries.map(e => {
-        const simStart = sim.simStartDateRef.current;
-        let time: string | null = null;
-        if (simStart && typeof e.minutosDisparo === 'number') {
-          const d = new Date(simStart.getTime() + e.minutosDisparo * 60000 + gmtOffset * 3600000);
-          time = `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-        }
+        const now = new Date();
+        const local = new Date(now.getTime() + gmtOffset * 3600000);
+        const time = `${String(local.getUTCDate()).padStart(2, '0')}/${String(local.getUTCMonth() + 1).padStart(2, '0')}/${local.getUTCFullYear()} ${String(local.getUTCHours()).padStart(2, '0')}:${String(local.getUTCMinutes()).padStart(2, '0')}`;
         let text = e.text;
         const salidaMatch = text.match(/Salida (\d{2}):(\d{2})/);
         if (salidaMatch) {
@@ -449,6 +447,7 @@ export default function SimulacionPeriodo() {
   const [filterCodigo, setFilterCodigo] = useState('');
   const [filterOrigen, setFilterOrigen] = useState('');
   const [filterDestino, setFilterDestino] = useState('');
+  const [filterSemaforo, setFilterSemaforo] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortBy, setSortBy] = useState('salida');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -468,6 +467,7 @@ export default function SimulacionPeriodo() {
   const [filterAlmCodigo, setFilterAlmCodigo] = useState('');
   const [filterAlmCiudad, setFilterAlmCiudad] = useState('');
   const [filterAlmPais, setFilterAlmPais] = useState('');
+  const [filterAlmSemaforo, setFilterAlmSemaforo] = useState('');
   const [sortAlmBy, setSortAlmBy] = useState('codigo');
   const [sortAlmDir, setSortAlmDir] = useState<'asc' | 'desc'>('asc');
   const filterAlmButtonRef = useRef<HTMLButtonElement>(null);
@@ -584,6 +584,9 @@ export default function SimulacionPeriodo() {
         require('leaflet/dist/leaflet.css');
         const map = L.map(mapRef.current, {
           zoomControl: false,
+          zoomSnap: 0.05,
+          zoomDelta: 0.1,
+          wheelPxPerZoomLevel: 120,
           maxBounds: [[-85, -180], [85, 180]],
           maxBoundsViscosity: 1.0,
           minZoom: 3,
@@ -1576,7 +1579,7 @@ export default function SimulacionPeriodo() {
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">PLAN DE VIAJE</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRegistro ? formatDateTime(new Date(parseDateStr(rc.fechaRegistro)), gmtOffset) : '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRegistro ? (() => { const p = rc.fechaRegistro.split(' '); const [d, mo, y] = p[0].split('/'); const [h, mi] = (p[1] || '00:00').split(':').map(Number); const lh = ((h + gmtOffset) % 24 + 24) % 24; return `${d}/${mo}/${y} ${String(lh).padStart(2, '0')}:${mi}`; })() : '-'}</div></div>
             <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRecojo ? formatDateTime(new Date(parseDateStr(rc.fechaRecojo)), gmtOffset) : '-'}</div></div>
           </div>
           <div style="margin-bottom:8px;"><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Ruta</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionOrigen} → ${ubicacionDestino}</div></div>
@@ -1810,16 +1813,37 @@ export default function SimulacionPeriodo() {
   const OVERSCAN = 5;
 
   const vuelosFiltrados = useMemo(() => {
+    const simStart = sim.simStartDateRef.current;
+    const feRef = flightEventsRef.current;
+
+    const getOcup = (v: typeof vuelosGlobales[0]) => {
+      if (!simStart) return -1;
+      const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
+      let d = new Date(simStart); d.setHours(hh, mm, 0, 0);
+      while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
+      const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
+      const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && (e.minutosInicio % 1440) === (minInicio % 1440));
+      if (!fe || fe.key.startsWith('unused-')) return -1;
+      if (fe.capacidadVuelo > 0) return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
+      return 0;
+    };
+
     const sorted = vuelosGlobales.filter(vuelo => {
       const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, extraerHHMM(vuelo.salida));
       const matchCodigo = filterCodigo === '' || codigoVuelo.toLowerCase().includes(filterCodigo.toLowerCase());
       const matchOrigen = filterOrigen === '' || vuelo.origen.toLowerCase().includes(filterOrigen.toLowerCase());
       const matchDestino = filterDestino === '' || vuelo.destino.toLowerCase().includes(filterDestino.toLowerCase());
-      return matchCodigo && matchOrigen && matchDestino;
+      let matchSemaforo = true;
+      if (filterSemaforo) {
+        const pct = getOcup(vuelo);
+        if (pct < 0) { matchSemaforo = false; }
+        else if (filterSemaforo === 'azul') matchSemaforo = pct === 0;
+        else if (filterSemaforo === 'verde') matchSemaforo = pct > 0 && pct < 50;
+        else if (filterSemaforo === 'naranja') matchSemaforo = pct >= 50 && pct < 80;
+        else if (filterSemaforo === 'rojo') matchSemaforo = pct >= 80;
+      }
+      return matchCodigo && matchOrigen && matchDestino && matchSemaforo;
     });
-
-    const simStart = sim.simStartDateRef.current;
-    const feRef = flightEventsRef.current;
 
     sorted.sort((a, b) => {
       let cmp = 0;
@@ -1832,23 +1856,12 @@ export default function SimulacionPeriodo() {
       } else if (sortBy === 'destino') {
         cmp = a.destino.localeCompare(b.destino);
       } else if (sortBy === 'ocupacion') {
-        const getOcup = (v: typeof a) => {
-          if (!simStart) return -1;
-          const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
-          let d = new Date(simStart); d.setHours(hh, mm, 0, 0);
-          while (d.getTime() < simStart.getTime()) d.setDate(d.getDate() + 1);
-          const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
-          const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && (e.minutosInicio % 1440) === (minInicio % 1440));
-          if (!fe || fe.key.startsWith('unused-')) return -1;
-          if (fe.capacidadVuelo > 0) return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
-          return 0;
-        };
         cmp = getOcup(a) - getOcup(b);
       }
       return sortDir === 'desc' ? -cmp : cmp;
     });
     return sorted;
-  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick, sim.allFlightEvents, sim.iteracion]);
+  }, [vuelosGlobales, filterCodigo, filterOrigen, filterDestino, filterSemaforo, sortBy, sortDir, sim.simStartDateRef, flightEventsRef, refreshTick, sim.allFlightEvents, sim.iteracion]);
 
   // ── Datos derivados de Almacenes ────────────────────────────────────────────
   const almacenesData = useMemo(() => {
@@ -1920,6 +1933,16 @@ export default function SimulacionPeriodo() {
       const q = filterAlmPais.toLowerCase();
       list = list.filter(a => a.pais.toLowerCase().includes(q));
     }
+    if (filterAlmSemaforo) {
+      list = list.filter(a => {
+        const pct = a.pct;
+        if (filterAlmSemaforo === 'azul') return pct === 0;
+        if (filterAlmSemaforo === 'verde') return pct > 0 && pct < 50;
+        if (filterAlmSemaforo === 'naranja') return pct >= 50 && pct < 80;
+        if (filterAlmSemaforo === 'rojo') return pct >= 80;
+        return true;
+      });
+    }
     list = [...list].sort((a, b) => {
       let cmp = 0;
       if (sortAlmBy === 'codigo') cmp = a.codigo.localeCompare(b.codigo);
@@ -1933,7 +1956,7 @@ export default function SimulacionPeriodo() {
       return sortAlmDir === 'desc' ? -cmp : cmp;
     });
     return list;
-  }, [almacenesData, filterAlmCodigo, filterAlmPais, sortAlmBy, sortAlmDir]);
+  }, [almacenesData, filterAlmCodigo, filterAlmPais, filterAlmSemaforo, sortAlmBy, sortAlmDir]);
 
   const totalHeightAlm = almacenesFiltrados.length * ITEM_HEIGHT_ALM;
   const startIdxAlm = Math.max(0, Math.floor(scrollTopAlm / ITEM_HEIGHT_ALM) - OVERSCAN_ALM);
@@ -2169,7 +2192,7 @@ export default function SimulacionPeriodo() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                    <button onClick={() => { setFilterCodigo(''); setFilterOrigen(''); setFilterDestino(''); setSortBy('salida'); setSortDir('asc'); }}
+                    <button onClick={() => { setFilterCodigo(''); setFilterOrigen(''); setFilterDestino(''); setFilterSemaforo(''); setSortBy('salida'); setSortDir('asc'); }}
                       style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
                       ✕ Borrar
                     </button>
@@ -2214,6 +2237,22 @@ export default function SimulacionPeriodo() {
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => setSortDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
                     <button onClick={() => setSortDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Semáforo</label>
+                    <select value={filterSemaforo} onChange={e => setFilterSemaforo(e.target.value)}
+                      style={{
+                        width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5,
+                        outline: 'none', cursor: 'pointer',
+                        color: filterSemaforo === 'azul' ? '#6366f1' : filterSemaforo === 'verde' ? '#22c55e' : filterSemaforo === 'naranja' ? '#f97316' : filterSemaforo === 'rojo' ? '#ef4444' : 'var(--text-primary)',
+                        fontWeight: filterSemaforo ? 600 : 400,
+                      }}>
+                      <option value="">Todos</option>
+                      <option value="azul" style={{ color: '#6366f1' }}>Vacío</option>
+                      <option value="verde" style={{ color: '#22c55e' }}>Bajo</option>
+                      <option value="naranja" style={{ color: '#f97316' }}>Medio</option>
+                      <option value="rojo" style={{ color: '#ef4444' }}>Alto</option>
+                    </select>
                   </div>
                 </div>
               )}
@@ -2489,7 +2528,7 @@ export default function SimulacionPeriodo() {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                  <button onClick={() => { setFilterAlmCodigo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
+                  <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmSemaforo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
                     style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
                     ✕ Borrar
                   </button>
@@ -2521,6 +2560,22 @@ export default function SimulacionPeriodo() {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button onClick={() => setSortAlmDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
                   <button onClick={() => setSortAlmDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: sortAlmDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: sortAlmDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Semáforo</label>
+                  <select value={filterAlmSemaforo} onChange={e => setFilterAlmSemaforo(e.target.value)}
+                    style={{
+                      width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5,
+                      outline: 'none', cursor: 'pointer',
+                      color: filterAlmSemaforo === 'azul' ? '#6366f1' : filterAlmSemaforo === 'verde' ? '#22c55e' : filterAlmSemaforo === 'naranja' ? '#f97316' : filterAlmSemaforo === 'rojo' ? '#ef4444' : 'var(--text-primary)',
+                      fontWeight: filterAlmSemaforo ? 600 : 400,
+                    }}>
+                    <option value="">Todos</option>
+                    <option value="azul" style={{ color: '#6366f1' }}>Vacío</option>
+                    <option value="verde" style={{ color: '#22c55e' }}>Bajo</option>
+                    <option value="naranja" style={{ color: '#f97316' }}>Medio</option>
+                    <option value="rojo" style={{ color: '#ef4444' }}>Alto</option>
+                  </select>
                 </div>
               </div>
             )}

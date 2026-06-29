@@ -286,6 +286,14 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
             }
             le.fired = true;
             pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
+            // Actualizar ocupación del almacén cuando se registra un envío
+            const leAny = le as any;
+            if (leAny.updatePopupCode && typeof leAny.updatePopupOcupacion === 'number') {
+              airportStateRef.current.set(leAny.updatePopupCode, {
+                ocupacion: leAny.updatePopupOcupacion,
+                capacidad: leAny.updatePopupCapacidad ?? 0,
+              });
+            }
           }
         }
         if (pendingLogs.length > 0) {

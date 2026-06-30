@@ -180,6 +180,29 @@ export default function SimulacionPeriodo() {
     const nuevos = sim.allLogEvents.slice(logEventsRef.current.length);
     if (nuevos.length > 0) {
       logEventsRef.current = [...logEventsRef.current, ...nuevos];
+      // Disparar logs inmediatamente (Día a Día corre a K=1, no esperar al reloj)
+      const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
+      for (const le of nuevos) {
+        le.fired = true;
+        if (le.idEnvio) {
+          const ruta = rutasPlanificadasRef.current.get(le.idEnvio);
+          if (ruta) {
+            if (le.color === '#22c55e') {
+              actualizarOcupacionAlmacen(ruta.origen, ruta.maletas);
+            } else if (le.color === '#3b82f6' && le.tramoOrden !== undefined) {
+              const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
+              if (tramo) actualizarOcupacionAlmacen(tramo.origen, -tramo.maletasVuelo);
+            } else if (le.color === '#8b5cf6' && le.tramoOrden !== undefined) {
+              const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
+              if (tramo) actualizarOcupacionAlmacen(tramo.destino, tramo.maletasVuelo);
+            } else if (le.color === '#f59e0b') {
+              actualizarOcupacionAlmacen(ruta.destino, -ruta.maletas);
+            }
+          }
+        }
+        pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
+      }
+      if (pendingLogs.length > 0) addLogBatchRef.current(pendingLogs);
     }
   }, [sim.allLogEvents]);
 

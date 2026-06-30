@@ -109,7 +109,26 @@ export default function SimulacionPeriodo() {
   const [mapReady, setMapReady] = useState(false);
 
   const sim = useSimulacion();
+  const simRef = useRef(sim);
+  simRef.current = sim;
   const user = typeof window !== 'undefined' ? (() => { try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; } })() : null;
+  useEffect(() => {
+    (window as any).debugDiaADia = () => ({
+      allLogEvents: simRef.current.allLogEvents.length,
+      logEventsRef: logEventsRef.current.length,
+      minSim: currentMinSimRef.current,
+      clockEnabled: clockEnabledRef.current,
+      isRunning: simRef.current.isRunning,
+      iteracion: simRef.current.iteracion,
+      logs: simRef.current.logs.length,
+      localLogs: localLogsRef.current.length,
+      flightEvents: flightEventsRef.current.length,
+      rutas: rutasPlanificadasRef.current.size,
+      K: SIM_CONFIG.K,
+      allFlightEvents: simRef.current.allFlightEvents.length,
+    });
+    return () => { delete (window as any).debugDiaADia; };
+  }, []);
 
   // ── Refs locales (independientes de Periodo) ──
   const flightEventsRef = useRef<FlightEvent[]>([]);
@@ -120,6 +139,8 @@ export default function SimulacionPeriodo() {
   const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => {});
   const addLogBatchRef = useRef<(entries: Array<{ text: string; color: string; minutosDisparo: number }>) => void>(() => {});
   const [localLogs, setLocalLogs] = useState<Array<{ time: string | null; text: string; color: string }>>([]);
+  const localLogsRef = useRef(localLogs);
+  localLogsRef.current = localLogs;
 
   function actualizarOcupacionAlmacen(codigo: string, delta: number) {
     const state = airportStateRef.current.get(codigo);

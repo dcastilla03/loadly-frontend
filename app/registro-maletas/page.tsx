@@ -45,6 +45,7 @@ export default function RegistroMaletas() {
   const [cantidad, setCantidad] = useState(0);
   const [formMsg, setFormMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [envios, setEnvios] = useState<EnvioDTO[]>([]);
+  const [gmtOffset, setGmtOffset] = useState(0); // offset del usuario (GMT del aeropuerto)
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchEnvios = async () => {
@@ -98,6 +99,14 @@ export default function RegistroMaletas() {
       if (apt) setOrigen(apt.idAeropuerto);
     }
   }, [esAdmin, aeropuertoUsuario, aeropuertos]);
+
+  // Obtener GMT del aeropuerto del usuario para enviar fecha local
+  useEffect(() => {
+    if (aeropuertoUsuario && aeropuertos.length > 0) {
+      const apt = aeropuertos.find(a => a.codigo === aeropuertoUsuario);
+      if (apt) setGmtOffset(apt.gmt);
+    }
+  }, [aeropuertoUsuario, aeropuertos]);
 
   const aeropuertosAgrupados = aeropuertos.reduce<Record<string, Aeropuerto[]>>((acc, a) => {
     const grupo = a.continente || 'Otros';
@@ -170,9 +179,15 @@ export default function RegistroMaletas() {
       const params = new URLSearchParams();
       const now = new Date();
       const pad = (n: number) => String(n).padStart(2, '0');
-      const fechaUTC =
-        `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
-      params.append('fechaRegistro', fechaUTC);
+      // Fecha local del usuario (GMT 0 + GMT offset del aeropuerto)
+      // Ej: si GMT = -5 (Lima) y UTC son 18:30, se envía 13:30 del mismo día
+      // Si el offset cruza la medianoche, el día se ajusta automáticamente
+      const localNow = new Date(now.getTime() + gmtOffset * 3600000);
+      const fechaLocal =
+        `${localNow.getUTCFullYear()}-${pad(localNow.getUTCMonth() + 1)}-${pad(localNow.getUTCDate())}T${pad(localNow.getUTCHours())}:${pad(localNow.getUTCMinutes())}:${pad(localNow.getUTCSeconds())}`;
+      // const fechaUTC =
+      //   `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+      params.append('fechaRegistro', fechaLocal);
       params.append('idAeropuertoOrigen', String(origen));
       params.append('idAeropuertoDestino', String(destino));
       params.append('cantidadMaletas', String(cantidad));

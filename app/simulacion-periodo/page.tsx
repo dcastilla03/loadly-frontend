@@ -857,6 +857,7 @@ export default function SimulacionPeriodo() {
         tasaCumplimientoSLA: 0,
         entregasExitosas: 0,
         ocupacionAviones: 0,
+        maletasEntregadas: 0,
       };
     }
 
@@ -887,9 +888,56 @@ export default function SimulacionPeriodo() {
     const entregasExitosas = completedFlights.length;
 
     const rutasPlanificadas = Array.from(rutasPlanificadasRef.current.values());
-    const rutasCumplidas = rutasPlanificadas.filter(r => (r.sla || '').toLowerCase() === 'cumplido').length;
-    const tasaCumplimientoSLA = rutasPlanificadas.length > 0
-      ? (rutasCumplidas / rutasPlanificadas.length) * 100
+    
+    // Calcular dinámicamente el cumplimiento de SLA usando LogEvents
+    // Los envíos completados tienen un LogEvent con color #f59e0b (naranja)
+    // Nota: el evento de completado no siempre tiene idEnvio, así que buscamos
+    // por el texto del log que contiene el codigoRastreo de cada ruta
+    const enviosCompletadosIds = new Set<string>();
+
+    // Construir mapa de codigoRastreo → idEnvio para búsqueda rápida
+    const codigoARuta = new Map<string, BackendRutaPlanificada>();
+    rutasPlanificadas.forEach(ruta => {
+      const codigo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+      codigoARuta.set(codigo, ruta);
+    });
+
+    logEventsRef.current.forEach(logEvent => {
+      if (logEvent.color === '#f59e0b') {
+        // Verificar por idEnvio si está disponible
+        if (logEvent.idEnvio && logEvent.fired) {
+          enviosCompletadosIds.add(logEvent.idEnvio);
+          return;
+        }
+        // Fallback: extraer codigoRastreo del texto "✅ Envío CODIGO completado..."
+        const match = logEvent.text.match(/✅ Envío (\S+) completado/);
+        if (match) {
+          const ruta = codigoARuta.get(match[1]);
+          if (ruta && (logEvent.fired || logEvent.minutosDisparo <= currentMinSimRef.current)) {
+            enviosCompletadosIds.add(ruta.idEnvio);
+          }
+        }
+      }
+    });
+
+    let rutasCumplidas = 0;
+    let rutasCompletadas = 0;
+    let maletasEntregadas = 0;
+    
+    rutasPlanificadas.forEach(ruta => {
+      // Si el envío aparece en los logs como completado
+      if (enviosCompletadosIds.has(ruta.idEnvio)) {
+        rutasCompletadas++;
+        maletasEntregadas += ruta.maletas;
+        // Verificar si cumplió el SLA
+        if ((ruta.sla || '').toLowerCase() === 'cumplido') {
+          rutasCumplidas++;
+        }
+      }
+    });
+    
+    const tasaCumplimientoSLA = rutasCompletadas > 0
+      ? (rutasCumplidas / rutasCompletadas) * 100
       : 0;
 
     return {
@@ -900,8 +948,9 @@ export default function SimulacionPeriodo() {
       ocupacionAviones,
       tasaCumplimientoSLA,
       entregasExitosas,
+      maletasEntregadas,
     };
-  }, [sim.isRunning, sim.iteracion, simMinutos]); // Re-calcula cada vez que simMinutos cambia
+  }, [sim.isRunning, sim.iteracion, simMinutos, sim.logs.length]); // Re-calcula cada vez que simMinutos o logs cambian
 
 
 
@@ -1194,6 +1243,25 @@ export default function SimulacionPeriodo() {
     ctx.emptyFlightsAddedRef.current.clear();
     ctx.canceledLocallyRef.current.clear();
     ctx.currentMinSimRef.current = 0;
+    // Colapsar todos los paneles abiertos
+    setFlightPanelOpen(false);
+    setEnviosPanelOpen(false);
+    setAlmacenesPanelOpen(false);
+    setTimePanelOpen(false);
+    setCentroControlOpen(false);
+    setColorFilterOpen(false);
+    setWarehouseFilterOpen(false);
+    setIsMapLogsOpen(false);
+    setIsGlobalIndicatorsOpen(false);
+    setIsOcupacionLegendOpen(false);
+    setFiltersOpen(false);
+    setEnvFiltersOpen(false);
+    setFiltrosAlmOpen(false);
+    // Cerrar paneles flotantes del mapa
+    const panelVuelo = document.getElementById('airplaneFlightPanel');
+    if (panelVuelo) panelVuelo.remove();
+    const panelEnvio = document.getElementById('airplaneDetailsPanel');
+    if (panelEnvio) panelEnvio.remove();
     setShowStoppedOverlay(true);
     setStartDate('');
     sessionStorage.removeItem('periodoStartDate');
@@ -1357,6 +1425,93 @@ export default function SimulacionPeriodo() {
     }
   };
 
+  // ── Helper: hacer un panel arrastrable dentro del mapa ──────────────────────
+  function makeDraggable(panel: HTMLElement, defaultRight: number, defaultTop: number) {
+    const container = mapRef.current;
+    if (!container) return;
+
+    // Posición de reset
+    const resetPosition = () => {
+      panel.style.right = defaultRight + 'px';
+      panel.style.top = defaultTop + 'px';
+      panel.style.left = '';
+    };
+
+    // Exponer función de reset para el botón inline onclick
+    (panel as any)._resetPosition = resetPosition;
+
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTopPx = 0;
+
+    const onMouseDown = (e: MouseEvent) => {
+      // Solo iniciar drag si el click es en el handle o en el panel fuera de botones
+      const target = e.target as HTMLElement;
+      if (target.closest('button')) return;
+      const handle = panel.querySelector('.panel-drag-handle');
+      if (handle && !handle.contains(target)) return;
+
+      isDragging = true;
+      panel.style.cursor = 'grabbing';
+
+      const containerRect = container.getBoundingClientRect();
+      const rect = panel.getBoundingClientRect();
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = rect.left - containerRect.left;
+      startTopPx = rect.top - containerRect.top;
+
+      // Convertir de right/top a left/top para facilitar el drag
+      panel.style.left = startLeft + 'px';
+      panel.style.right = '';
+      panel.style.top = startTopPx + 'px';
+
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const containerRect = container.getBoundingClientRect();
+      const panelW = panel.offsetWidth;
+      const panelH = panel.offsetHeight;
+
+      let newLeft = startLeft + (e.clientX - startX);
+      let newTop = startTopPx + (e.clientY - startY);
+
+      // Restringir dentro del mapa
+      newLeft = Math.max(0, Math.min(newLeft, containerRect.width - panelW));
+      newTop = Math.max(0, Math.min(newTop, containerRect.height - panelH));
+
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+    };
+
+    const onMouseUp = () => {
+      if (isDragging) {
+        isDragging = false;
+        panel.style.cursor = '';
+      }
+    };
+
+    panel.addEventListener('mousedown', onMouseDown as any);
+    document.addEventListener('mousemove', onMouseMove as any);
+    document.addEventListener('mouseup', onMouseUp);
+
+    // Cleanup al remover el panel
+    const observer = new MutationObserver(() => {
+      if (!document.contains(panel)) {
+        panel.removeEventListener('mousedown', onMouseDown as any);
+        document.removeEventListener('mousemove', onMouseMove as any);
+        document.removeEventListener('mouseup', onMouseUp);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
   // ── Panel de Detalle del Avión (tramo de vuelo — se abre al hacer clic en el mapa) ──
   function cerrarPanelAvion(feKey?: string) {
     if (feKey && panelFlightKeyRef.current !== feKey) return;
@@ -1372,6 +1527,7 @@ export default function SimulacionPeriodo() {
     if (panelEnvio) panelEnvio.remove();
 
     let panel = document.getElementById('airplaneFlightPanel');
+    const isNew = !panel;
     if (!panel) {
       panel = document.createElement('div');
       panel.id = 'airplaneFlightPanel';
@@ -1384,6 +1540,7 @@ export default function SimulacionPeriodo() {
         max-height:60vh;overflow-y:auto;pointer-events:auto;
       `;
       if (mapRef.current) mapRef.current.appendChild(panel); else document.body.appendChild(panel);
+      makeDraggable(panel, 12, 170);
     }
 
     panelFlightKeyRef.current = fe.key;
@@ -1473,12 +1630,15 @@ export default function SimulacionPeriodo() {
     }
 
     panel.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div class="panel-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;cursor:grab;user-select:none;">
         <div style="display:flex;align-items:center;gap:8px;">
           ${isEmptyFlight ? '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;flex-shrink:0;"></div>' : ''}
           <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del viaje</h3>
         </div>
-        <button id="closeAvionPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <button id="resetAvionPanel" title="Volver a posición original" style="background:none;border:1px solid #d1d5db;border-radius:5px;font-size:12px;cursor:pointer;color:#6b7280;padding:2px 6px;line-height:1.4;" onclick="(function(){var p=document.getElementById('airplaneFlightPanel');if(p&&p._resetPosition)p._resetPosition();})()">⌖</button>
+          <button id="closeAvionPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+        </div>
       </div>
       ${isEmptyFlight ? '<div style="background:#eff6ff;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:11px;color:#2563eb;font-weight:600;">Vuelo sin uso — No transporta maletas</div>' : ''}
 
@@ -1555,6 +1715,7 @@ export default function SimulacionPeriodo() {
     cerrarPanelAvion();
 
     let panel = document.getElementById('airplaneDetailsPanel');
+    const isNewPanel = !panel;
     if (!panel) {
       panel = document.createElement('div');
       panel.id = 'airplaneDetailsPanel';
@@ -1567,6 +1728,7 @@ export default function SimulacionPeriodo() {
         max-height:70vh;overflow-y:auto;pointer-events:auto;
       `;
       if (mapRef.current) mapRef.current.appendChild(panel); else document.body.appendChild(panel);
+      makeDraggable(panel, 12, 170);
     }
 
     const codigoEnvio = fe.key.split('-')[0];
@@ -1592,12 +1754,15 @@ export default function SimulacionPeriodo() {
 
     if (!rutaCompleta) {
       panel.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="panel-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;cursor:grab;user-select:none;">
           <div>
             <h3 style="margin:0;font-size:16px;color:#1f2937;">📦 Plan de viaje</h3>
             <div style="font-size:11px;color:#6b7280;margin-top:2px;">Código único de envío: ${codigoRastreo}</div>
           </div>
-          <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <button onclick="(function(){var p=document.getElementById('airplaneDetailsPanel');if(p&&p._resetPosition)p._resetPosition();})();" title="Volver a posición original" style="background:none;border:1px solid #d1d5db;border-radius:5px;font-size:12px;cursor:pointer;color:#6b7280;padding:2px 6px;line-height:1.4;">⌖</button>
+            <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+          </div>
         </div>
         <div style="background:#fef3c7;padding:12px;border-radius:8px;color:#92400e;font-size:13px;">
           Información de ruta no disponible
@@ -1682,11 +1847,14 @@ export default function SimulacionPeriodo() {
     // ── Views ──
     function generarVistaPlanViaje() {
       return `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="panel-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;cursor:grab;user-select:none;">
           <div>
             <h3 style="margin:0;font-size:16px;color:#1f2937;">📦 Plan de viaje</h3>
           </div>
-          <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <button onclick="(function(){var p=document.getElementById('airplaneDetailsPanel');if(p&&p._resetPosition)p._resetPosition();})();" title="Volver a posición original" style="background:none;border:1px solid #d1d5db;border-radius:5px;font-size:12px;cursor:pointer;color:#6b7280;padding:2px 6px;line-height:1.4;">⌖</button>
+            <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+          </div>
         </div>
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">DETALLES DE ENVÍO</div>
@@ -1792,9 +1960,12 @@ export default function SimulacionPeriodo() {
       const trColor = restMin > 0 ? '#1f2937' : '#16a34a';
 
       return `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="panel-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;cursor:grab;user-select:none;">
           <h3 style="margin:0;font-size:16px;color:#1f2937;">📡 Monitoreo de envío</h3>
-          <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <button onclick="(function(){var p=document.getElementById('airplaneDetailsPanel');if(p&&p._resetPosition)p._resetPosition();})();" title="Volver a posición original" style="background:none;border:1px solid #d1d5db;border-radius:5px;font-size:12px;cursor:pointer;color:#6b7280;padding:2px 6px;line-height:1.4;">⌖</button>
+            <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
+          </div>
         </div>
         <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Código Único de Envío</div>
@@ -2820,9 +2991,9 @@ export default function SimulacionPeriodo() {
                 <div style={{ borderTop: '1px solid #e5e7eb', padding: '4px 10px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
                     {[{ label: 'Ocupación Almacenes', value: `${metricas.ocupacionPromedio.toFixed(1)}%`, sv: metricas.ocupacionPromedio },
-                    { label: 'Tasa cumplimiento SLA', value: `${metricas.tasaCumplimientoSLA.toFixed(1)}%`, sv: metricas.tasaCumplimientoSLA },
+                    { label: 'Tasa cumplimiento SLA', value: `${metricas.tasaCumplimientoSLA.toFixed(1)}%` },
                     { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(1)}%`, sv: metricas.ocupacionAviones },
-                    { label: 'Entregas Retrasadas', value: '0' },
+                    { label: 'Maletas entregadas', value: metricas.maletasEntregadas.toLocaleString() },
                     ].map(m => {
                       const sc = m.sv !== undefined ? (m.sv < 50 ? '#22c55e' : m.sv < 80 ? '#f97316' : '#ef4444') : undefined;
                       return (
@@ -3009,19 +3180,31 @@ export default function SimulacionPeriodo() {
                         }
                       }}
                       style={{
-                        padding: '10px', backgroundColor: 'var(--bg-tertiary)',
+                        padding: '6px 10px', backgroundColor: 'var(--bg-tertiary)',
                         border: selectedEnvioKey === idEnvio ? '2px solid var(--accent-blue)' : '1px solid var(--border-color)',
                         borderRadius: '6px', marginBottom: '6px', cursor: 'pointer',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <div style={{ marginBottom: '2px' }}>
                         <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-blue)' }}>{codigoRastreo}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280' }}>{tipoRuta}</span>
-                        </div>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#374151', fontWeight: 400 }}>
-                        {ciudadOrigen} → {ciudadDestino}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', color: '#374151', fontWeight: 400 }}>
+                          {ciudadOrigen} → {ciudadDestino}
+                        </span>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          backgroundColor: tipoRuta === 'Directo' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)',
+                          color: tipoRuta === 'Directo' ? '#16a34a' : '#d97706',
+                          flexShrink: 0,
+                          marginLeft: '8px',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {tipoRuta}
+                        </span>
                       </div>
                     </div>
                   );

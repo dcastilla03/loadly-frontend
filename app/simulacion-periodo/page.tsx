@@ -43,6 +43,13 @@ function getLocationSVG(pct: number): string {
   return '/almacen-red.svg';
 }
 
+function getWarehouseColorKey(pct: number): 'blue' | 'green' | 'orange' | 'red' {
+  if (pct === 0) return 'blue';
+  if (pct < 50) return 'green';
+  if (pct < 80) return 'orange';
+  return 'red';
+}
+
 function bezierCurve(
   p0: [number, number],
   p1: [number, number],
@@ -140,16 +147,33 @@ export default function SimulacionPeriodo() {
 
   const calcStartedAtRef = ctx.calcStartedAtRef;
   const configCountdownRef = ctx.configCountdownRef;
-  const [searchPanelOpen, setSearchPanelOpen] = useState(false);
+  const [enviosPanelOpen, setEnviosPanelOpen] = useState(false);
   const [flightPanelOpen, setFlightPanelOpen] = useState(false);
   const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
   const [timePanelOpen, setTimePanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [centroControlOpen, setCentroControlOpen] = useState(false);
+  const [colorFilterOpen, setColorFilterOpen] = useState(false);
+  const [activeColors, setActiveColors] = useState<Record<string, boolean>>({ all: true, blue: true, green: true, orange: true, red: true });
+  const activeColorsRef = useRef(activeColors);
+  activeColorsRef.current = activeColors;
+  const [warehouseFilterOpen, setWarehouseFilterOpen] = useState(false);
+  const [activeWarehouseColors, setActiveWarehouseColors] = useState<Record<string, boolean>>({ all: true, blue: true, green: true, orange: true, red: true });
+  const activeWarehouseColorsRef = useRef(activeWarehouseColors);
+  activeWarehouseColorsRef.current = activeWarehouseColors;
+  const [envFilterCodigo, setEnvFilterCodigo] = useState('');
+  const [envFilterOrigen, setEnvFilterOrigen] = useState('');
+  const [envFilterDestino, setEnvFilterDestino] = useState('');
+  const [envSortBy, setEnvSortBy] = useState('salida');
+  const [envSortDir, setEnvSortDir] = useState<'asc' | 'desc'>('asc');
+  const [envFiltersOpen, setEnvFiltersOpen] = useState(false);
+  const [envFilterPosition, setEnvFilterPosition] = useState({ top: 0, left: 0 });
+  const envFilterButtonRef = useRef<HTMLButtonElement>(null);
 
   const [showConfigOverlay, setShowConfigOverlay] = useState(
     typeof window !== 'undefined'
       ? !new URLSearchParams(window.location.search).has('startDate')
-        && !sessionStorage.getItem('periodoStartDate')
+      && !sessionStorage.getItem('periodoStartDate')
       : true
   );
   const [configWizardStep, setConfigWizardStep] = useState(1);
@@ -169,6 +193,30 @@ export default function SimulacionPeriodo() {
   useEffect(() => {
     lastFrameTimeRef.current = performance.now();
   }, []);
+
+  useEffect(() => {
+    const filter = activeColorsRef.current;
+    flightEventsRef.current.forEach(fe => {
+      if (!fe.airplaneImage) return;
+      const isEmpty = fe.key.startsWith('unused-');
+      const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
+      const bucket = (fe as any)._lastColorBucket ?? (isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2));
+      const colorKey = bucket === -1 ? 'blue' : bucket === 0 ? 'green' : bucket === 1 ? 'orange' : 'red';
+      fe.airplaneImage.style.display = (filter.all || filter[colorKey]) ? '' : 'none';
+    });
+  }, [activeColors]);
+
+  useEffect(() => {
+    const filter = activeWarehouseColorsRef.current;
+    markersRef.current.forEach((marker: any) => {
+      const state = airportStateRef.current.get(marker.airportCode);
+      const pct = state && state.capacidad > 0 ? (state.ocupacion / state.capacidad) * 100 : 0;
+      const colorKey = getWarehouseColorKey(pct);
+      const visible = filter.all || filter[colorKey];
+      const element = typeof marker.getElement === 'function' ? marker.getElement() : marker._icon;
+      if (element) element.style.display = visible ? '' : 'none';
+    });
+  }, [activeWarehouseColors, sim.iteracion]);
 
   // Al montar:
   // - Si hay config de Periodo guardada y la sim no está corriendo (page reload), restaurar
@@ -254,13 +302,13 @@ export default function SimulacionPeriodo() {
   useEffect(() => {
     const mapContainer = document.querySelector('.map-container') as HTMLElement;
     if (mapContainer) {
-      if (flightPanelOpen || almacenesPanelOpen) {
+      if (enviosPanelOpen || flightPanelOpen || almacenesPanelOpen) {
         mapContainer.classList.add('flight-panel-open');
       } else {
         mapContainer.classList.remove('flight-panel-open');
       }
     }
-  }, [flightPanelOpen, almacenesPanelOpen]);
+  }, [enviosPanelOpen, flightPanelOpen, almacenesPanelOpen]);
   const rutasPlanificadasRef = sim.rutasPlanificadasRef;
 
   // States for flight filters and virtual scroll
@@ -278,11 +326,19 @@ export default function SimulacionPeriodo() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(600);
+  const pendingScrollVuelo = useRef<string | null>(null);
+  const panelWasOpenRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoScrollPendingRef = useRef(false);
+  const [scrollTrigger, setScrollTrigger] = useState(0);
+
 
   // ── Estados del panel de Almacenes ──────────────────────────────────────────────
   const [scrollTopAlm, setScrollTopAlm] = useState(0);
   const [containerHeightAlm, setContainerHeightAlm] = useState(600);
   const [selectedAlmacen, setSelectedAlmacen] = useState<string | null>(null);
+  const [selectedVueloKey, setSelectedVueloKey] = useState<string | null>(null);
+  const [selectedEnvioKey, setSelectedEnvioKey] = useState<string | null>(null);
   const [filtrosAlmOpen, setFiltrosAlmOpen] = useState(false);
   const [filterAlmCodigo, setFilterAlmCodigo] = useState('');
   const [filterAlmCiudad, setFilterAlmCiudad] = useState('');
@@ -494,11 +550,20 @@ export default function SimulacionPeriodo() {
       const [llh, llm] = (v.horaLlegada || '00:00').split(':').map(Number);
       const gmtLlegaHour = ((llh - gmtOffsetDes) % 24 + 24) % 24;
       const llegadaGMT = `${String(gmtLlegaHour).padStart(2, '0')}:${String(llm).padStart(2, '0')}`;
+      const simStart = sim.simStartDateRef.current;
+      let depDate = simStart ? new Date(simStart) : new Date();
+      depDate.setUTCHours(gmtHour, lm, 0, 0);
+      if (simStart && depDate.getTime() < simStart.getTime()) depDate.setUTCDate(depDate.getUTCDate() + 1);
+      let arrDate = new Date(depDate.getTime());
+      arrDate.setUTCHours(gmtLlegaHour, llm, 0, 0);
+      if (arrDate.getTime() < depDate.getTime()) arrDate.setUTCDate(arrDate.getUTCDate() + 1);
+      const salidaFull = `${String(depDate.getUTCDate()).padStart(2, '0')}/${String(depDate.getUTCMonth() + 1).padStart(2, '0')}/${depDate.getUTCFullYear()} ${salidaGMT}`;
+      const llegadaFull = `${String(arrDate.getUTCDate()).padStart(2, '0')}/${String(arrDate.getUTCMonth() + 1).padStart(2, '0')}/${arrDate.getUTCFullYear()} ${llegadaGMT}`;
       return {
         origen,
         destino,
-        salida: salidaGMT,
-        llegada: llegadaGMT,
+        salida: salidaFull,
+        llegada: llegadaFull,
         horaSalida: v.horaSalida,
       };
     });
@@ -524,6 +589,54 @@ export default function SimulacionPeriodo() {
     return map;
   }, [sim.aeropuertos]);
 
+  const envOrigenesUnicos = useMemo(() => {
+    const set = new Set<string>();
+    sim.rutasPlanificadasRef.current.forEach(ruta => set.add(ruta.origen));
+    return Array.from(set).sort();
+  }, [sim.allFlightEvents, sim.iteracion, sim.aeropuertos]);
+
+  const envDestinosUnicos = useMemo(() => {
+    const set = new Set<string>();
+    sim.rutasPlanificadasRef.current.forEach(ruta => set.add(ruta.destino));
+    return Array.from(set).sort();
+  }, [sim.allFlightEvents, sim.iteracion, sim.aeropuertos]);
+
+  const enviosFiltrados = useMemo(() => {
+    const arr = Array.from(sim.rutasPlanificadasRef.current.entries()).map(([idEnvio, ruta]) => {
+      const tramos = ruta.tramos || [];
+      const primerTramo = tramos[0];
+      const ultimoTramo = tramos[tramos.length - 1];
+      const salida = (primerTramo?.sale || ruta.fechaRegistro || '').split(' ')[1] || '00:00';
+      const llegada = (ultimoTramo?.llega || ruta.fechaRecojo || '').split(' ')[1] || '00:00';
+      return {
+        idEnvio,
+        ruta,
+        salida,
+        llegada,
+        tipoRuta: tramos.length <= 1 ? 'Directo' : 'En escala',
+      };
+    });
+
+    const filtroCodigo = envFilterCodigo.trim().toLowerCase();
+
+    return arr
+      .filter(({ idEnvio, ruta }) => {
+        const codigoRastreo = `${idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`.toLowerCase();
+        return (!filtroCodigo || codigoRastreo.includes(filtroCodigo))
+          && (!envFilterOrigen || ruta.origen === envFilterOrigen)
+          && (!envFilterDestino || ruta.destino === envFilterDestino);
+      })
+      .sort((a, b) => {
+        let cmp = 0;
+        if (envSortBy === 'salida') cmp = a.salida.localeCompare(b.salida);
+        else if (envSortBy === 'llegada') cmp = a.llegada.localeCompare(b.llegada);
+        else if (envSortBy === 'origen') cmp = a.ruta.origen.localeCompare(b.ruta.origen);
+        else if (envSortBy === 'destino') cmp = a.ruta.destino.localeCompare(b.ruta.destino);
+        else if (envSortBy === 'ocupacion') cmp = a.ruta.maletas - b.ruta.maletas;
+        return envSortDir === 'asc' ? cmp : -cmp;
+      });
+  }, [sim.allFlightEvents, sim.iteracion, sim.aeropuertos, envFilterCodigo, envFilterOrigen, envFilterDestino, envSortBy, envSortDir]);
+
   // Calculate filter popup position
   useEffect(() => {
     if (filtersOpen && filterButtonRef.current) {
@@ -535,6 +648,16 @@ export default function SimulacionPeriodo() {
     }
   }, [filtersOpen]);
 
+  useEffect(() => {
+    if (envFiltersOpen && envFilterButtonRef.current) {
+      const rect = envFilterButtonRef.current.getBoundingClientRect();
+      setEnvFilterPosition({
+        top: rect.bottom + 8,
+        left: rect.left,
+      });
+    }
+  }, [envFiltersOpen]);
+
   // States for pausing logs
   const [isLogsPaused, setIsLogsPaused] = useState(false);
   const [pausedLogs, setPausedLogs] = useState<LogEntry[]>([]);
@@ -544,17 +667,24 @@ export default function SimulacionPeriodo() {
   const [pausedMapLogs, setPausedMapLogs] = useState<LogEntry[]>([]);
   const mapLogsContainerRef = useRef<HTMLDivElement>(null);
   const [isGlobalIndicatorsOpen, setIsGlobalIndicatorsOpen] = useState(false);
+  const [isOcupacionLegendOpen, setIsOcupacionLegendOpen] = useState(false);
   const mapRegistroPanelRef = useRef<HTMLDivElement>(null);
-  const [mapRegistroHeight, setMapRegistroHeight] = useState(37);
+  const ocupacionLegendRef = useRef<HTMLDivElement>(null);
 
-  useLayoutEffect(() => {
-    if (mapRegistroPanelRef.current && isMapLogsOpen) {
-      const h = mapRegistroPanelRef.current.getBoundingClientRect().height;
-      if (Math.abs(h - mapRegistroHeight) > 1) {
-        setMapRegistroHeight(h);
-      }
-    }
-  });
+  const parseTime = (t: string) => {
+    const p = t.split(' ');
+    if (t.includes('/')) return { date: p[0], time: p[1] };
+    if (t.startsWith('Día')) return { date: `${p[0]} ${p[1]}`, time: p[2] };
+    return { date: t, time: '' };
+  };
+
+  const simplifyEnvio = (text: string) => {
+    const m1 = text.match(/^(📦 Envío \S+?)[: ]/);
+    if (m1) return `${m1[1]} registrado`;
+    const m2 = text.match(/^(✅ Envío \S+?) completado/);
+    if (m2) return `${m2[1]} completado`;
+    return text;
+  };
 
   // Todos los logs según el modo
   const logsPaginados = useMemo(() => {
@@ -724,7 +854,7 @@ export default function SimulacionPeriodo() {
         maletasEnTransito: 0,
         almacenesConCarga: 0,
         ocupacionPromedio: 0,
-        tiempoPromedio: 0,
+        tasaCumplimientoSLA: 0,
         entregasExitosas: 0,
         ocupacionAviones: 0,
       };
@@ -756,9 +886,10 @@ export default function SimulacionPeriodo() {
     // Entregas exitosas
     const entregasExitosas = completedFlights.length;
 
-    // Tiempo promedio de envío
-    const tiempoPromedio = completedFlights.length > 0
-      ? completedFlights.reduce((sum, fe) => sum + (fe.minutosFin - fe.minutosInicio), 0) / completedFlights.length
+    const rutasPlanificadas = Array.from(rutasPlanificadasRef.current.values());
+    const rutasCumplidas = rutasPlanificadas.filter(r => (r.sla || '').toLowerCase() === 'cumplido').length;
+    const tasaCumplimientoSLA = rutasPlanificadas.length > 0
+      ? (rutasCumplidas / rutasPlanificadas.length) * 100
       : 0;
 
     return {
@@ -767,7 +898,7 @@ export default function SimulacionPeriodo() {
       almacenesConCarga,
       ocupacionPromedio,
       ocupacionAviones,
-      tiempoPromedio,
+      tasaCumplimientoSLA,
       entregasExitosas,
     };
   }, [sim.isRunning, sim.iteracion, simMinutos]); // Re-calcula cada vez que simMinutos cambia
@@ -831,6 +962,18 @@ export default function SimulacionPeriodo() {
 
       (fe as any)._path = path;
       (fe as any)._lastColorBucket = -1;
+      applyColorFilterToFlight(fe);
+    }
+
+    function applyColorFilterToFlight(fe: FlightEvent) {
+      if (!fe.airplaneImage) return;
+      const filter = activeColorsRef.current;
+      const isEmpty = fe.key.startsWith('unused-');
+      const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
+      const bucket = (fe as any)._lastColorBucket ?? (isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2));
+      const colorKey = bucket === -1 ? 'blue' : bucket === 0 ? 'green' : bucket === 1 ? 'orange' : 'red';
+      const visible = filter.all || filter[colorKey];
+      fe.airplaneImage.style.display = visible ? '' : 'none';
     }
 
     function removeAvionRender(fe: FlightEvent) {
@@ -902,6 +1045,7 @@ export default function SimulacionPeriodo() {
       if ((fe as any)._lastColorBucket !== bucket) {
         fe.airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct, isEmpty));
         (fe as any)._lastColorBucket = bucket;
+        applyColorFilterToFlight(fe);
       }
     }
 
@@ -1019,112 +1163,16 @@ export default function SimulacionPeriodo() {
     };
   }, []);
 
-  // ── Panel de búsqueda de envíos ───────────────────────────────────────────
-  function cerrarPanelBusqueda() {
-    const panel = document.getElementById('shipmentSearchPanel');
-    if (panel) panel.remove();
-    setSearchPanelOpen(false);
-  }
-
-  function mostrarPanelBusqueda() {
-    if (searchPanelOpen) {
-      cerrarPanelBusqueda();
-      return;
-    }
-
-    let panel = document.getElementById('shipmentSearchPanel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'shipmentSearchPanel';
-      panel.style.cssText = `
-        position:absolute;left:12px;bottom:270px;width:280px;
-        background:white;border-radius:10px;
-        box-shadow:0 4px 20px rgba(0,0,0,0.18);
-        padding:12px;z-index:999996;
-        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-        pointer-events:auto;
-      `;
-      // Append to map container instead of body
-      const mapContainer = mapRef.current;
-      if (mapContainer) {
-        mapContainer.appendChild(panel);
-      } else {
-        document.body.appendChild(panel);
+  // ── Panel de Envíos Planificados ─────────────────────────────────────────
+  function toggleEnviosPanel() {
+    setEnviosPanelOpen(prev => {
+      const next = !prev;
+      if (next) {
+        setFlightPanelOpen(false);
+        setAlmacenesPanelOpen(false);
       }
-    }
-
-    setSearchPanelOpen(true);
-
-    panel.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <h3 style="margin:0;font-size:14px;color:#1f2937;">🔍 Buscar envío</h3>
-        <button id="closeSearchPanel" style="background:none;border:none;font-size:18px;cursor:pointer;color:#6b7280;">×</button>
-      </div>
-      <div style="margin-bottom:8px;">
-        <input 
-          type="text" 
-          id="shipmentSearchInput"
-          placeholder="Código de rastreo"
-          style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;"
-          onkeypress="if(event.key === 'Enter') document.getElementById('searchShipmentBtn').click()"
-        />
-      </div>
-      <button 
-        id="searchShipmentBtn"
-        style="width:100%;padding:8px;background:var(--accent-blue);color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;"
-      >
-        Buscar
-      </button>
-    `;
-
-    document.getElementById('closeSearchPanel')?.addEventListener('click', cerrarPanelBusqueda);
-    document.getElementById('searchShipmentBtn')?.addEventListener('click', buscarEnvio);
-  }
-
-  function buscarEnvio() {
-    const input = document.getElementById('shipmentSearchInput') as HTMLInputElement;
-    const codigoBusqueda = input?.value.trim();
-
-    if (!codigoBusqueda) {
-      mostrarNotificacion('Por favor ingrese un código de rastreo', '#f97316');
-      return;
-    }
-
-    // Buscar por código único de envío en LogEvents (tienen el código correcto)
-    // Extraer el código único del texto del LogEvent usando regex
-    let matchedIdEnvio: string | undefined;
-    for (const le of sim.allLogEvents) {
-      if (le.idEnvio && le.text.startsWith('📦 Envío')) {
-        // Extraer código único del texto: "📦 Envío XXXXXX: ..."
-        const match = le.text.match(/📦 Envío ([^:]+):/);
-        if (match) {
-          const codigoExtraido = match[1];
-          if (codigoExtraido === codigoBusqueda) {
-            matchedIdEnvio = le.idEnvio;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!matchedIdEnvio) {
-      mostrarNotificacion('El envío no está registrado actualmente', '#ef4444');
-      return;
-    }
-
-    // Buscar flightEvent asociado al idEnvio
-    const flightEvent = flightEventsRef.current.find(fe => fe.key.startsWith(matchedIdEnvio));
-
-    if (!flightEvent) {
-      mostrarNotificacion('El envío no tiene vuelos disponibles', '#ef4444');
-      return;
-    }
-
-    // Cerrar panel de búsqueda
-    cerrarPanelBusqueda();
-
-    // Mostrar panel de detalles del envío (solo desde búsqueda)
-    mostrarPanelEnvio(flightEvent, codigoBusqueda);
+      return next;
+    });
   }
 
   function handleDetener() {
@@ -1315,9 +1363,10 @@ export default function SimulacionPeriodo() {
     const panel = document.getElementById('airplaneFlightPanel');
     if (panel) panel.remove();
     panelFlightKeyRef.current = null;
+    setSelectedVueloKey(null);
   }
 
-  function mostrarPanelAvion(fe: FlightEvent) {
+  function mostrarPanelAvion(fe: FlightEvent, autoScroll = true) {
     // Cerrar panel de envío si estuviera abierto
     const panelEnvio = document.getElementById('airplaneDetailsPanel');
     if (panelEnvio) panelEnvio.remove();
@@ -1327,7 +1376,7 @@ export default function SimulacionPeriodo() {
       panel = document.createElement('div');
       panel.id = 'airplaneFlightPanel';
       panel.style.cssText = `
-        position:absolute;right:12px;top:170px;width:340px;
+        position:absolute;right:12px;top:170px;width:300px;
         background:white;border-radius:12px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
         padding:18px;z-index:10001;
@@ -1385,6 +1434,15 @@ export default function SimulacionPeriodo() {
     const salidaHHMM = horaSalida.split(' ')[1] || '00:00';
     const codigoVueloPanel = generarCodigoVuelo(fe.origenCode, fe.destinoCode, salidaHHMM);
 
+    if (autoScroll) {
+      panelWasOpenRef.current = flightPanelOpen;
+      setFlightPanelOpen(true);
+      setSelectedEnvioKey(null);
+      setSelectedVueloKey(codigoVueloPanel);
+      pendingScrollVuelo.current = codigoVueloPanel;
+      setScrollTrigger(t => t + 1);
+    }
+
     // Buscar envíos relacionados (mismo vuelo) desde los FlightEvents
     const enviosRelacionados: { codigoUnico: string; idEnvio: string; label: string; maletas: number }[] = [];
     if (!isEmptyFlight) {
@@ -1419,71 +1477,47 @@ export default function SimulacionPeriodo() {
         <div style="display:flex;align-items:center;gap:8px;">
           ${isEmptyFlight ? '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;flex-shrink:0;"></div>' : ''}
           <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Detalle del viaje</h3>
-          <span style="font-size:11px;font-weight:700;color:var(--accent-blue,#2563eb);background:#eef2ff;padding:3px 8px;border-radius:6px;margin-left:4px;">${codigoVueloPanel}</span>
         </div>
         <button id="closeAvionPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
       </div>
       ${isEmptyFlight ? '<div style="background:#eff6ff;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:11px;color:#2563eb;font-weight:600;">Vuelo sin uso — No transporta maletas</div>' : ''}
 
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
-          <div style="font-size:11px;color:#6b7280;">TRAMO</div>
-        </div>
-        <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:8px;">
-          <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
-            <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Origen</span>
-            <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
-              <span>${fe.origenCode}</span>
-              <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aeropuertoOrigen ? `${aeropuertoOrigen.ciudad}, ${aeropuertoOrigen.pais}` : ''}</span>
-            </span>
-          </span>
-          <span style="color:#9ca3af;font-size:18px;font-weight:800;margin-top:18px;">→</span>
-          <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
-            <span style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Destino</span>
-            <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#fef3c7;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
-              <span>${fe.destinoCode}</span>
-              <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aeropuertoDestino ? `${aeropuertoDestino.ciudad}, ${aeropuertoDestino.pais}` : ''}</span>
-            </span>
-          </span>
-        </div>
-      </div>
-
-      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
         <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">HORARIOS</div>
         <div style="display:flex;justify-content:space-between;gap:12px;">
           <div style="flex:1;">
             <div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:2px;">Hora de salida</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${horaSalida}</div>
+            <div style="font-size:11px;color:#1f2937;font-weight:700;white-space:nowrap;">${depDD}/${depMM}/${depYYYY}</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;white-space:nowrap;">${depHH}:${depMi}</div>
           </div>
           <div style="flex:1;">
             <div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:2px;">Hora de llegada</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${horaLlegada}</div>
+            <div style="font-size:11px;color:#1f2937;font-weight:700;white-space:nowrap;">${arrDD}/${arrMM}/${arrYYYY}</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;white-space:nowrap;">${arrHH}:${arrMi}</div>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:2px;">Duración</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${duracionLabel}</div>
           </div>
         </div>
-      </div>
-
-      <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">MALETAS</div>
-        <div style="font-size:12px;color:#1f2937;font-weight:700;">${isEmptyFlight ? '0 / ' + fe.capacidadVuelo + ' maletas (vuelo vacío)' : fe.maletasVuelo + ' / ' + fe.capacidadVuelo + ' maletas'}</div>
-      </div>
-
-      <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">DURACIÓN DEL TRAMO</div>
-        <div style="font-size:14px;color:#1f2937;font-weight:700;">${duracionLabel}</div>
       </div>
       ${enviosRelacionados.length > 0 ? `
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-top:10px;">
         <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">📦 ENVÍOS RELACIONADOS</div>
+        <div style="max-height:${enviosRelacionados.length > 3 ? '120px' : 'auto'};overflow-y:auto;">
         ${enviosRelacionados.map((env, i) => `
         <div id="relEnvio_${i}" data-codigo="${env.codigoUnico}" style="padding:6px 8px;background:white;border-radius:6px;cursor:pointer;margin-bottom:4px;border:1px solid var(--border-color,#e5e7eb);display:flex;justify-content:space-between;align-items:center;">
           <span style="font-size:12px;font-weight:600;color:var(--accent-blue,#2563eb);">${env.codigoUnico}</span>
-          <span style="font-size:10px;color:#6b7280;">${env.label} — ${env.maletas} maletas</span>
+          <span style="font-size:10px;color:#6b7280;">${env.maletas} maletas</span>
         </div>`).join('')}
+        </div>
       </div>
       <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-top:10px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">🎒 MALETAS</div>
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">🎒 MALETAS (${isEmptyFlight ? '0 / ' + fe.capacidadVuelo : fe.maletasVuelo + ' / ' + fe.capacidadVuelo} maletas)</div>
+        <div style="max-height:${enviosRelacionados.reduce((sum, env) => sum + env.maletas, 0) > 3 ? '80px' : 'auto'};overflow-y:auto;">
         ${enviosRelacionados.map(env => Array.from({ length: env.maletas }, (_, i) => `
         <div style="padding:4px 8px;background:white;border-radius:4px;margin-bottom:2px;font-size:11px;color:#1f2937;font-family:monospace;">${env.codigoUnico}${i + 1}</div>`).join('')).join('')}
+        </div>
       </div>` : ''}
     `;
 
@@ -1514,6 +1548,7 @@ export default function SimulacionPeriodo() {
   function cerrarPanelEnvio() {
     const panel = document.getElementById('airplaneDetailsPanel');
     if (panel) panel.remove();
+    setSelectedEnvioKey(null);
   }
 
   function mostrarPanelEnvio(fe: FlightEvent, codigoUnicoForzado?: string) {
@@ -1524,7 +1559,7 @@ export default function SimulacionPeriodo() {
       panel = document.createElement('div');
       panel.id = 'airplaneDetailsPanel';
       panel.style.cssText = `
-        position:absolute;right:12px;top:170px;width:340px;
+        position:absolute;right:12px;top:170px;width:300px;
         background:white;border-radius:12px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
         padding:18px;z-index:10000;
@@ -1559,7 +1594,7 @@ export default function SimulacionPeriodo() {
       panel.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <div>
-            <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Plan de viaje</h3>
+            <h3 style="margin:0;font-size:16px;color:#1f2937;">📦 Plan de viaje</h3>
             <div style="font-size:11px;color:#6b7280;margin-top:2px;">Código único de envío: ${codigoRastreo}</div>
           </div>
           <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
@@ -1633,33 +1668,14 @@ export default function SimulacionPeriodo() {
       const saleD = formatDateTime(saleDate);
       const llegaD = formatDateTime(llegaDate);
       return `
-        <div style="background:#f9fafb;padding:12px;border-radius:10px;margin-bottom:${isLast ? '0' : '12px'};position:relative;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
+        <div style="background:#f9fafb;padding:8px 12px;border-radius:8px;margin-bottom:${isLast ? '0' : '8px'};">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
+              <span style="font-size:11px;color:#1f2937;font-weight:600;font-family:monospace;">${tramo.origen} → ${tramo.destino}</span>
+            </div>
             <button id="gotoTramo_${codigoEnvio}_${index}" style="background:#2563eb;border:none;color:white;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;cursor:pointer;">✈ Ir</button>
           </div>
-          <div style="display:flex;align-items:flex-start;justify-content:center;gap:6px;margin-bottom:8px;">
-            <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
-              <span style="font-size:9px;color:#6b7280;font-weight:600;">Origen</span>
-              <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
-                <span>${tramo.origen}</span>
-                <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aOrigen ? `${aOrigen.ciudad}, ${aOrigen.pais}` : ''}</span>
-              </span>
-            </span>
-            <span style="color:#9ca3af;font-size:18px;font-weight:800;margin-top:18px;flex-shrink:0;">✈</span>
-            <span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
-              <span style="font-size:9px;color:#6b7280;font-weight:600;">Destino</span>
-              <span style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:6px 10px;border-radius:999px;background:#fef3c7;color:#111827;font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);">
-                <span>${tramo.destino}</span>
-                <span style="font-size:9px;font-weight:500;color:#6b7280;margin-top:1px;">${aDestino ? `${aDestino.ciudad}, ${aDestino.pais}` : ''}</span>
-              </span>
-            </span>
-          </div>
-          <div style="display:flex;justify-content:space-between;gap:12px;">
-            <div style="flex:1;background:white;padding:8px;border-radius:6px;"><div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Sale</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${saleD}</div></div>
-            <div style="flex:1;background:white;padding:8px;border-radius:6px;"><div style="font-size:9px;color:#6b7280;margin-bottom:3px;font-weight:600;">Llega</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${llegaD}</div></div>
-          </div>
-          ${!isLast ? '<div style="position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);z-index:1;"><div style="width:2px;height:12px;background:#d1d5db;margin:0 auto;"></div><div style="width:8px;height:8px;background:#d1d5db;border-radius:50%;margin:-6px auto 0;"></div></div>' : ''}
         </div>`;
     }).join('') || '';
 
@@ -1668,27 +1684,25 @@ export default function SimulacionPeriodo() {
       return `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <div>
-            <h3 style="margin:0;font-size:16px;color:#1f2937;">✈️ Plan de viaje</h3>
-            <div style="font-size:11px;color:#6b7280;margin-top:2px;">Código único de envío: ${codigoRastreo}</div>
+            <h3 style="margin:0;font-size:16px;color:#1f2937;">📦 Plan de viaje</h3>
           </div>
           <button id="closeFEPanel" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
         </div>
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
-          <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">PLAN DE VIAJE</div>
+          <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">DETALLES DE ENVÍO</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
             <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRegistro || '-'}</div></div>
             <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRecojo || '-'}</div></div>
           </div>
-          <div style="margin-bottom:8px;"><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Ruta</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${ubicacionOrigen} → ${ubicacionDestino}</div></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;">
             <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.duracion || '-'}</div></div>
             <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">SLA</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div></div>
             <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">👥 Cliente</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.idCliente || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Maletas</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.maletas}</div></div>
           </div>
-          <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;"><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Maletas</div><div style="font-size:12px;color:#1f2937;font-weight:700;">${rc.maletas}</div></div>
         </div>
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
-          <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">TRAMOS</div>
+          <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">RUTA</div>
           ${tramosVisual}
         </div>
         <button id="monitoreoBtn" style="width:100%;padding:9px;font-size:12px;background:#2564eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">📡 Monitoreo</button>
@@ -2079,7 +2093,44 @@ export default function SimulacionPeriodo() {
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     setScrollTop(e.currentTarget.scrollTop);
+    autoScrollPendingRef.current = false;
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = null;
+    }
   }, []);
+
+  // Efecto: hacer scroll cuando se selecciona un avión
+  useEffect(() => {
+    if (!pendingScrollVuelo.current) return;
+    const codigo = pendingScrollVuelo.current;
+    pendingScrollVuelo.current = null;
+
+    const idx = vuelosFiltrados.findIndex(v =>
+      generarCodigoVuelo(v.origen, v.destino, extraerHHMM(v.salida)) === codigo
+    );
+    if (idx < 0) return;
+    const targetScrollTop = idx * ITEM_HEIGHT;
+
+    setScrollTop(targetScrollTop);
+    autoScrollPendingRef.current = true;
+
+    const delay = panelWasOpenRef.current ? 0 : 420;
+    scrollTimeoutRef.current = setTimeout(() => {
+      scrollTimeoutRef.current = null;
+      if (!autoScrollPendingRef.current) return;
+      autoScrollPendingRef.current = false;
+      if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = targetScrollTop;
+    }, delay);
+
+    return () => {
+      autoScrollPendingRef.current = false;
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+        scrollTimeoutRef.current = null;
+      }
+    };
+  }, [scrollTrigger]);
 
   return (
     <div className="main-wrapper">
@@ -2511,114 +2562,156 @@ export default function SimulacionPeriodo() {
             </div>
           )}
 
-          {/* Panel de Control — Centro Superior */}
-          <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 999999 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', pointerEvents: 'auto' }}>
-
-              {/* Panel de Tiempos — único, colapsable */}
-              <div
-                onClick={() => { if (!timePanelOpen) setTimePanelOpen(true); }}
-                style={{
-                  backgroundColor: 'rgba(255,255,255,0.92)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 10,
-                  boxShadow: 'var(--shadow)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: timePanelOpen ? 5 : 0,
-                  padding: timePanelOpen ? '8px 12px' : '6px 10px',
-                  minWidth: timePanelOpen ? 185 : 60,
-                  cursor: timePanelOpen ? 'default' : 'pointer',
-                  alignSelf: 'center',
-                  transition: 'all 0.15s',
-                }}>
-                {timePanelOpen ? (
-                  <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
-                      <small style={{ fontWeight: 700, textTransform: 'uppercase', fontSize: 9, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}><img src="/tiempo.svg" style={{ width: 12, height: 12 }} /> Tiempos</small>
-                      <button onClick={(e) => { e.stopPropagation(); setTimePanelOpen(false); }}
-                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280', padding: 0, lineHeight: 1 }}>
-                        ✕
-                      </button>
-                    </div>
-
-                    <div>
-                      <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9 }}>Tiempo Simulado</small>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-blue)', marginTop: 1, whiteSpace: 'nowrap' }}>{simTimeLabel}</div>
-                    </div>
-                    <div>
-                      <div style={{ lineHeight: 1.15 }}>
-                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9, display: 'block' }}>T. Transcurrido</small>
-                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 7, display: 'block', opacity: 0.7 }}>Simulado</small>
-                      </div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed', marginTop: 1, whiteSpace: 'nowrap' }}>+{formatDuration(simMinutos)}</div>
-                    </div>
-                    <div>
-                      <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9 }}>Tiempo Actual</small>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#059669', marginTop: 1, whiteSpace: 'nowrap' }}>{realTimeLabel}</div>
-                    </div>
-                    <div>
-                      <div style={{ lineHeight: 1.15 }}>
-                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9, display: 'block' }}>T. Transcurrido</small>
-                        <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 7, display: 'block', opacity: 0.7 }}>Actual</small>
-                      </div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#059669', marginTop: 1, whiteSpace: 'nowrap' }}>+{stopwatch}</div>
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                    <img src="/tiempo.svg" style={{ width: 14, height: 14 }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tiempos</span>
-                  </div>
-                )}
+          {/* Filtro de colores de aviones — Superior Izquierda */}
+          <div style={{ position: 'absolute', top: 12, left: 55, pointerEvents: 'none', zIndex: 999999 }}>
+            <div style={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 8, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+              <div onClick={() => setColorFilterOpen(!colorFilterOpen)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, flexShrink: 0, userSelect: 'none' }}>
+                <img src="/airplane.svg" style={{ width: 18, height: 18, filter: 'brightness(0.6)' }} alt="" />
               </div>
-
-              {/* Barra principal — sin ⏱, sin indicadores de tiempo */}
-              <div style={{ display: 'flex', gap: 14, padding: '10px 14px', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
-                  <h1 style={{ marginBottom: 0, fontSize: 18, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    Simulación — Período 5 Días
-                    <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 10, height: 10, borderRadius: '50%', display: 'inline-block' }} />
-                  </h1>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#f97316', marginTop: 1 }}>Día {sim.diaActual}/5</div>
-                  <style>{`
-                  .led-off {
-                    background-color: rgba(107, 114, 128, 0.3);
-                    border: 1px solid rgba(107, 114, 128, 0.5);
-                    box-shadow: none;
-                  }
-                  @keyframes led-blink {
-                    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(239, 68, 68, 0.8); }
-                    50% { opacity: 0.4; box-shadow: 0 0 2px rgba(239, 68, 68, 0.2); }
-                  }
-                  .led-active {
-                    background-color: #ef4444;
-                    border: 1px solid #b91c1c;
-                    animation: led-blink 1.2s ease-in-out infinite;
-                  }
-                  .almacen-marker {
-                    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25));
-                  }
-                `}</style>
+              <div style={{ overflow: 'hidden', transition: 'max-width 0.3s ease, opacity 0.2s ease', maxWidth: colorFilterOpen ? 400 : 0, opacity: colorFilterOpen ? 1 : 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 6px 3px 0', whiteSpace: 'nowrap' }}>
+                  {(['blue', 'green', 'orange', 'red'] as const).map(color => {
+                    const colorMap: Record<string, string> = { blue: '#3b82f6', green: '#22c55e', orange: '#f97316', red: '#ef4444' };
+                    return (
+                      <div key={color} onClick={() => {
+                        const next = { ...activeColors, [color]: !activeColors[color] };
+                        if (!next[color]) next.all = false;
+                        else if (next.blue && next.green && next.orange && next.red) next.all = true;
+                        setActiveColors(next);
+                      }} style={{ width: 20, height: 20, borderRadius: 3, backgroundColor: colorMap[color], cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: activeColors[color] ? 1 : 0.4, transition: 'opacity 0.15s', flexShrink: 0 }} />
+                    );
+                  })}
+                  <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-color)', margin: '0 2px', flexShrink: 0 }} />
+                  <div onClick={() => {
+                    const all = !activeColors.all;
+                    setActiveColors({ all, blue: all, green: all, orange: all, red: all });
+                  }} style={{ padding: '3px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: activeColors.all ? '#111827' : '#9ca3af', backgroundColor: activeColors.all ? 'rgba(0,0,0,0.06)' : 'transparent', userSelect: 'none', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {activeColors.all ? '✓' : '○'} Todos
+                  </div>
                 </div>
+              </div>
+            </div>
+          </div>
 
-                <div style={{ height: 20, width: 1, backgroundColor: 'var(--border-color)' }} />
+          {/* Filtro de colores de almacenes — Superior Izquierda */}
+          <div style={{ position: 'absolute', top: 52, left: 55, pointerEvents: 'none', zIndex: 999999 }}>
+            <div style={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 8, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+              <div onClick={() => setWarehouseFilterOpen(!warehouseFilterOpen)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, flexShrink: 0, userSelect: 'none' }}>
+                <img src="/almacen.svg" style={{ width: 18, height: 18, filter: 'brightness(0.6)' }} alt="" />
+              </div>
+              <div style={{ overflow: 'hidden', transition: 'max-width 0.3s ease, opacity 0.2s ease', maxWidth: warehouseFilterOpen ? 400 : 0, opacity: warehouseFilterOpen ? 1 : 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 6px 3px 0', whiteSpace: 'nowrap' }}>
+                  {(['blue', 'green', 'orange', 'red'] as const).map(color => {
+                    const colorMap: Record<string, string> = { blue: '#3b82f6', green: '#22c55e', orange: '#f97316', red: '#ef4444' };
+                    return (
+                      <div key={color} onClick={() => {
+                        const next = { ...activeWarehouseColors, [color]: !activeWarehouseColors[color] };
+                        if (!next[color]) next.all = false;
+                        else if (next.blue && next.green && next.orange && next.red) next.all = true;
+                        setActiveWarehouseColors(next);
+                      }} style={{ width: 20, height: 20, borderRadius: 3, backgroundColor: colorMap[color], cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: activeWarehouseColors[color] ? 1 : 0.4, transition: 'opacity 0.15s', flexShrink: 0 }} />
+                    );
+                  })}
+                  <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-color)', margin: '0 2px', flexShrink: 0 }} />
+                  <div onClick={() => {
+                    const all = !activeWarehouseColors.all;
+                    setActiveWarehouseColors({ all, blue: all, green: all, orange: all, red: all });
+                  }} style={{ padding: '3px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: activeWarehouseColors.all ? '#111827' : '#9ca3af', backgroundColor: activeWarehouseColors.all ? 'rgba(0,0,0,0.06)' : 'transparent', userSelect: 'none', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {activeWarehouseColors.all ? '✓' : '○'} Todos
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-                <div style={{ display: 'flex', gap: 8 }}>
+          {/* Panel de Control — Superior Derecha */}
+          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 6, alignItems: 'flex-start', pointerEvents: 'none', zIndex: 999999 }}>
+
+            <div style={{ pointerEvents: 'auto', padding: '6px 10px', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)', whiteSpace: 'nowrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <h1 style={{ margin: 0, fontSize: 13, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  Simulación — Período 5 Días
+                  <span className={sim.isRunning ? 'led-active' : 'led-off'} style={{ width: 7, height: 7, borderRadius: '50%', display: 'inline-block' }} />
+                </h1>
+              </div>
+            </div>
+
+            {/* Panel de Tiempos — colapsable */}
+            <div
+              onClick={() => { if (!timePanelOpen) setTimePanelOpen(true); }}
+              style={{
+                pointerEvents: 'auto',
+                backgroundColor: 'rgba(255,255,255,0.92)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 10,
+                boxShadow: 'var(--shadow)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: timePanelOpen ? 3 : 0,
+                padding: timePanelOpen ? '6px 10px' : '6px 6px',
+                minWidth: timePanelOpen ? 220 : 50,
+                cursor: timePanelOpen ? 'default' : 'pointer',
+                transition: 'all 0.15s',
+              }}>
+              {timePanelOpen ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <small style={{ fontWeight: 700, textTransform: 'uppercase', fontSize: 9, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}><img src="/tiempo.svg" style={{ width: 12, height: 12 }} /> Tiempos</small>
+                    <button onClick={(e) => { e.stopPropagation(); setTimePanelOpen(false); }}
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280', padding: 0, lineHeight: 1 }}>
+                      ✕
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div>
+                      <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9, display: 'block' }}>Simulado</small>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-blue)', whiteSpace: 'nowrap', lineHeight: 1.2 }}>{simTimeLabel}</div>
+                      <small style={{ color: '#7c3aed', fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap', lineHeight: 1 }}>Transcurrido: +{formatDuration(simMinutos)}</small>
+                    </div>
+                    <div>
+                      <small style={{ color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', fontSize: 9, display: 'block' }}>Actual</small>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#059669', whiteSpace: 'nowrap', lineHeight: 1.2 }}>{realTimeLabel}</div>
+                      <small style={{ color: '#059669', fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap', lineHeight: 1 }}>Transcurrido: +{stopwatch}</small>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                  <img src="/tiempo.svg" style={{ width: 14, height: 14 }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Tiempos</span>
+                </div>
+              )}
+            </div>
+            <style>{`
+              .led-off { background-color: rgba(107, 114, 128, 0.3); border: 1px solid rgba(107, 114, 128, 0.5); box-shadow: none; }
+              @keyframes led-blink { 0%,100% { opacity:1; box-shadow:0 0 6px rgba(239,68,68,0.8); } 50% { opacity:0.4; box-shadow:0 0 2px rgba(239,68,68,0.2); } }
+              .led-active { background-color: #ef4444; border: 1px solid #b91c1c; animation: led-blink 1.2s ease-in-out infinite; }
+              .almacen-marker { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); }
+            `}</style>
+
+            <div style={{ pointerEvents: 'auto', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)', overflow: 'hidden', width: 110 }}>
+              <div onClick={() => setCentroControlOpen(!centroControlOpen)} style={{ padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, userSelect: 'none', fontSize: 11, fontWeight: 700, color: '#374151' }}>
+                <span style={{ width: 10, textAlign: 'center' }}>{centroControlOpen ? '▼' : '▶'}</span>
+                <svg width="13" height="13" viewBox="0 0 512 512" fill="#374151" style={{ flexShrink: 0 }}><g transform="translate(0,512) scale(0.1,-0.1)"><path d="M2076 5013c-13-60-43-184-66-278l-41-170-109-42-108-43-235 145c-129 80-239 145-244 145-4 0-152-144-327-319-214-214-317-324-313-334 3-8 67-115 143-238 76-123 138-231 137-239-1-22-73-193-87-206-6-6-112-35-236-63-124-29-244-57-267-63l-43-10 0-459c0-427 1-458 18-463 9-2 125-30 257-61 252-58 285-68 285-84 0-6 18-53 40-104l40-94-148-242-149-242 126-122c352-341 319-313 329-286 128 335 344 592 637 756 64 36 132 67 201 93l26 10-89 93c-170 176-257 360-284 602-32 281 69 575 268 785 199 210 451 320 733 320 710 0 1199-722 934-1378-49-123-116-225-217-329-76-79-87-94-71-99 360-126 673-428 819-788 21-53 42-95 45-94 9 4 405 429 408 439 2 4-62 115-143 245l-146 237 41 94c22 51 40 98 40 103 0 15 12 19 272 81 139 33 261 62 271 65 16 5 17 36 17 464l0 458-177 42c-98 23-220 52-271 64-50 12-96 26-101 32-12 12-83 185-84 204-1 8 61 116 137 239 76 123 140 230 143 238 4 10-99 120-313 334-175 175-322 319-326 319-5 0-114-65-244-145l-236-146-109 43-108 43-41 170c-23 94-53 218-66 278l-26 107-458 0-458 0-26-107z" /><path d="M2445 3486c-141-28-245-80-347-175-146-135-217-288-226-487-9-211 52-368 203-520 78-79 103-98 185-137 122-58 181-72 310-72 128 0 188 14 305 70 174 84 297 222 361 407 38 108 44 272 15 388-34 138-82 221-186 326-73 74-106 98-175 132-47 23-112 49-145 57-87 22-218 27-300 11z" /><path d="M2196 1755c-104-22-191-53-296-106-287-147-483-398-567-724-25-98-26-110-30-512l-5-413 1271 0 1271 0 0 353c0 370-7 474-40 598-85 324-334 613-635 735-181 74-204 78-570 80-252 2-346 0-399-11z" /></g></svg>
+                Control
+              </div>
+              <div style={{ overflow: 'hidden', transition: 'max-height 0.25s ease, opacity 0.2s ease', maxHeight: centroControlOpen ? 130 : 0, opacity: centroControlOpen ? 1 : 0 }}>
+                <div style={{ padding: '0 8px 6px', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'stretch' }}>
                   <button onClick={handleDetener} disabled={!sim.isRunning}
-                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', opacity: !sim.isRunning ? 0.6 : 1, fontWeight: 600 }}>
+                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', fontWeight: 600, opacity: !sim.isRunning ? 0.6 : 1, textAlign: 'center' }}>
                     ⏹️ Detener
                   </button>
-                  <button onClick={mostrarPanelBusqueda}
-                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: '#8b5cf6', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
-                    🔍 Buscar envío
-                  </button>
-                  <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) setAlmacenesPanelOpen(false); }}
-                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                  <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) { setAlmacenesPanelOpen(false); setEnviosPanelOpen(false); } }}
+                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600, textAlign: 'center' }}>
                     ✈️ Vuelos
                   </button>
-                  <button onClick={() => { setAlmacenesPanelOpen(!almacenesPanelOpen); if (!almacenesPanelOpen) setFlightPanelOpen(false); }}
-                    style={{ padding: '7px 12px', fontSize: 11, backgroundColor: almacenesPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600 }}>
+                  <button onClick={() => { setEnviosPanelOpen(!enviosPanelOpen); if (!enviosPanelOpen) { setFlightPanelOpen(false); setAlmacenesPanelOpen(false); } }}
+                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: enviosPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600, textAlign: 'center' }}>
+                    📦 Envíos
+                  </button>
+                  <button onClick={() => { setAlmacenesPanelOpen(!almacenesPanelOpen); if (!almacenesPanelOpen) { setFlightPanelOpen(false); setEnviosPanelOpen(false); } }}
+                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: almacenesPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600, textAlign: 'center' }}>
                     🏭 Almacenes
                   </button>
                 </div>
@@ -2626,110 +2719,124 @@ export default function SimulacionPeriodo() {
             </div>
           </div>
 
-          {/* Panel colapsable de Indicadores globales en el mapa */}
-          <div style={{ position: 'absolute', bottom: isMapLogsOpen ? 125 + mapRegistroHeight + 5 : 167, left: 12, zIndex: 999997, width: isGlobalIndicatorsOpen ? 380 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'bottom 0.2s ease, width 0.2s ease' }}>
-            <div
-              onClick={() => setIsGlobalIndicatorsOpen(!isGlobalIndicatorsOpen)}
-              style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📊 Indicadores globales</span>
-              <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{isGlobalIndicatorsOpen ? '▲' : '▼'}</span>
-            </div>
-            {isGlobalIndicatorsOpen && (
-              <div style={{ borderTop: '1px solid #e5e7eb', padding: '8px 10px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
-                  {[{ title: 'Vuelos operando', value: metricas.vuelosOperando, color: 'var(--accent-blue)' },
-                    { title: 'Maletas en tránsito', value: metricas.maletasEnTransito, color: '#22c55e' },
-                    { title: 'Almacenes con carga', value: metricas.almacenesConCarga, color: '#f97316' },
-                    { title: 'Entregas exitosas', value: metricas.entregasExitosas, color: '#10b981' },
-                  ].map(c => (
-                    <div key={c.title} style={{ textAlign: 'center', padding: '6px 4px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6 }}>
-                      <div style={{ fontSize: 9, color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 2, textTransform: 'uppercase' }}>{c.title}</div>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: c.color }}>{c.value.toLocaleString()}</div>
+          {/* Bloque de 3 paneles: Ocupación (abajo) → Registro → Indicadores (arriba) */}
+          <div style={{ position: 'absolute', bottom: 20, left: 12, display: 'flex', flexDirection: 'column-reverse', alignItems: 'flex-start', gap: 8, zIndex: 999997 }}>
+
+            {/* Ocupación — abajo */}
+            <div ref={ocupacionLegendRef} style={{ backgroundColor: 'rgba(255,255,255,0.92)', padding: '10px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', width: isOcupacionLegendOpen ? 220 : 200 }}>
+              <div
+                onClick={() => setIsOcupacionLegendOpen(!isOcupacionLegendOpen)}
+                style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>🛩️ Ocupación</span>
+                <span style={{ fontSize: 9, color: '#6b7280', marginLeft: 6 }}>{isOcupacionLegendOpen ? '▲' : '▼'}</span>
+              </div>
+              {isOcupacionLegendOpen && (
+                <div style={{ marginTop: 6 }}>
+                  {[
+                    { color: '#2563eb', label: '0% — Vacío' },
+                    { color: '#10b981', label: '< 50% — Bajo' },
+                    { color: '#f97316', label: '50–80% — Medio' },
+                    { color: '#ef4444', label: '> 80% — Alto' },
+                  ].map(({ color, label }) => (
+                    <div key={color} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />
+                      <span style={{ fontSize: 10, color: '#374151' }}>{label}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                  {[{ label: 'Ocupación Almacenes', value: `${metricas.ocupacionPromedio.toFixed(1)}%`, sv: metricas.ocupacionPromedio },
-                    { label: 'Tiempo Promedio', value: `${metricas.tiempoPromedio.toFixed(0)} min` },
-                    { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(1)}%`, sv: metricas.ocupacionAviones },
-                    { label: 'Entregas Retrasadas', value: '0' },
-                  ].map(m => {
-                    const sc = m.sv !== undefined ? (m.sv < 50 ? '#22c55e' : m.sv < 80 ? '#f97316' : '#ef4444') : undefined;
-                    return (
-                      <div key={m.label} style={{ padding: '6px 8px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6, borderLeft: sc ? `3px solid ${sc}` : undefined }}>
-                        <div style={{ fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>{m.label}</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: sc || 'var(--accent-blue)', marginTop: 2 }}>{m.value}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Panel colapsable de Registro de Eventos en el mapa */}
-          <div ref={mapRegistroPanelRef} style={{ position: 'absolute', bottom: 125, left: 12, zIndex: 999997, width: isMapLogsOpen ? 380 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
-            <div
-              onClick={() => { if (!isMapLogsOpen) setIsMapLogsOpen(true); }}
-              style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📋 Registro de Eventos</span>
-              {isMapLogsOpen ? (
-                <button onClick={(e) => { e.stopPropagation(); setIsMapLogsOpen(false); }} style={{ background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', color: '#6b7280', padding: '0 0 0 8px', lineHeight: 1 }}>▲</button>
-              ) : (
-                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{sim.logs.length >= 100 ? '+100' : sim.logs.length} ▼</span>
               )}
             </div>
-            {isMapLogsOpen && (
-              <div>
-                <div style={{ maxHeight: 240, overflowY: 'auto', borderTop: '1px solid #e5e7eb', padding: '8px 14px' }} ref={mapLogsContainerRef}
-                  onWheel={(e) => { e.stopPropagation(); if (!isMapLogsPaused) { setPausedMapLogs(sim.logs); setIsMapLogsPaused(true); } }}
-                  onTouchMove={(e) => { e.stopPropagation(); if (!isMapLogsPaused) { setPausedMapLogs(sim.logs); setIsMapLogsPaused(true); } }}
-                >
-                  {(isMapLogsPaused ? pausedMapLogs : sim.logs).length === 0 ? (
-                    <p style={{ color: '#9ca3af', fontSize: 12, margin: 0 }}>Inicia la simulación para ver eventos...</p>
-                  ) : (
-                    (isMapLogsPaused ? pausedMapLogs : sim.logs).map((log, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid #f3f4f6' }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', minWidth: 48, flexShrink: 0 }}>{log.time || '-'}</span>
-                        <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, color: '#374151' }}>{log.text}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {isMapLogsPaused && (
-                  <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 14px', borderTop: '1px solid #e5e7eb' }}>
-                    <button
-                      onClick={() => { setIsMapLogsPaused(false); if (mapLogsContainerRef.current) mapLogsContainerRef.current.scrollTop = 0; }}
-                      style={{
-                        padding: '6px 14px', fontSize: 11, backgroundColor: '#2563eb', color: 'white',
-                        border: 'none', borderRadius: 16, cursor: 'pointer', fontWeight: 600,
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 4
-                      }}
-                    >
-                      ▶ Reanudar flujo en vivo
-                    </button>
-                  </div>
+
+            {/* Registro de Eventos — medio */}
+            <div ref={mapRegistroPanelRef} style={{ width: isMapLogsOpen ? 300 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
+              <div
+                onClick={() => { if (!isMapLogsOpen) setIsMapLogsOpen(true); }}
+                style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📋 Registro de Eventos</span>
+                {isMapLogsOpen ? (
+                  <button onClick={(e) => { e.stopPropagation(); setIsMapLogsOpen(false); }} style={{ background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', color: '#6b7280', padding: '0 0 0 8px', lineHeight: 1 }}>▲</button>
+                ) : (
+                  <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{sim.logs.length >= 100 ? '+100' : sim.logs.length} ▼</span>
                 )}
               </div>
-            )}
-          </div>
+              {isMapLogsOpen && (
+                <div>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', borderTop: '1px solid #e5e7eb', padding: '8px 14px' }} ref={mapLogsContainerRef}
+                    onWheel={(e) => { e.stopPropagation(); if (!isMapLogsPaused) { setPausedMapLogs(sim.logs); setIsMapLogsPaused(true); } }}
+                    onTouchMove={(e) => { e.stopPropagation(); if (!isMapLogsPaused) { setPausedMapLogs(sim.logs); setIsMapLogsPaused(true); } }}
+                  >
+                    {(isMapLogsPaused ? pausedMapLogs : sim.logs).length === 0 ? (
+                      <p style={{ color: '#9ca3af', fontSize: 12, margin: 0 }}>Inicia la simulación para ver eventos...</p>
+                    ) : (
+                      (isMapLogsPaused ? pausedMapLogs : sim.logs).map((log, i) => {
+                        const parsed = log.time ? parseTime(log.time) : null;
+                        return (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid #f3f4f6' }}>
+                            {parsed ? (
+                              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', minWidth: 48, flexShrink: 0, textAlign: 'center', lineHeight: 1.3 }}>
+                                <div>{parsed.date}</div>
+                                <div>{parsed.time}</div>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', minWidth: 48, flexShrink: 0 }}>-</span>
+                            )}
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: log.color, flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, color: '#374151' }}>{simplifyEnvio(log.text)}</span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  {isMapLogsPaused && (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 14px', borderTop: '1px solid #e5e7eb' }}>
+                      <button
+                        onClick={() => { setIsMapLogsPaused(false); if (mapLogsContainerRef.current) mapLogsContainerRef.current.scrollTop = 0; }}
+                        style={{
+                          padding: '6px 14px', fontSize: 11, backgroundColor: '#2563eb', color: 'white',
+                          border: 'none', borderRadius: 16, cursor: 'pointer', fontWeight: 600,
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 4
+                        }}
+                      >
+                        ▶ Reanudar flujo en vivo
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
-          {/* Leyenda de colores */}
-          <div style={{ position: 'absolute', bottom: 25, left: 12, backgroundColor: 'rgba(255,255,255,0.92)', padding: '10px 14px', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', zIndex: 999997 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#374151', marginBottom: 6, textTransform: 'uppercase' }}>Ocupación de Vuelos</div>
-            {[
-              { color: '#10b981', label: '< 50% — Bajo' },
-              { color: '#f97316', label: '50–80% — Medio' },
-              { color: '#ef4444', label: '> 80% — Alto' },
-            ].map(({ color, label }) => (
-              <div key={color} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />
-                <span style={{ fontSize: 10, color: '#374151' }}>{label}</span>
+            {/* Indicadores globales — arriba */}
+            <div style={{ width: isGlobalIndicatorsOpen ? 250 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
+              <div
+                onClick={() => setIsGlobalIndicatorsOpen(!isGlobalIndicatorsOpen)}
+                style={{ padding: '6px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📊 Indicadores globales</span>
+                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{isGlobalIndicatorsOpen ? '▲' : '▼'}</span>
               </div>
-            ))}
+              {isGlobalIndicatorsOpen && (
+                <div style={{ borderTop: '1px solid #e5e7eb', padding: '4px 10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                    {[{ label: 'Ocupación Almacenes', value: `${metricas.ocupacionPromedio.toFixed(1)}%`, sv: metricas.ocupacionPromedio },
+                    { label: 'Tasa cumplimiento SLA', value: `${metricas.tasaCumplimientoSLA.toFixed(1)}%`, sv: metricas.tasaCumplimientoSLA },
+                    { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(1)}%`, sv: metricas.ocupacionAviones },
+                    { label: 'Entregas Retrasadas', value: '0' },
+                    ].map(m => {
+                      const sc = m.sv !== undefined ? (m.sv < 50 ? '#22c55e' : m.sv < 80 ? '#f97316' : '#ef4444') : undefined;
+                      return (
+                        <div key={m.label} style={{ padding: '3px 6px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6, borderLeft: sc ? `3px solid ${sc}` : undefined }}>
+                          <div style={{ fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>{m.label}</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: sc || 'var(--accent-blue)' }}>{m.value}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
 
           {/* Panel Configurando Algoritmo — Derecha Inferior */}
@@ -2770,9 +2877,9 @@ export default function SimulacionPeriodo() {
 
         </div>
 
-        {/* Panel Lateral Compartido — Vuelos / Almacenes */}
+        {/* Panel Lateral Compartido — Envíos / Vuelos / Almacenes */}
         <div style={{
-          width: (flightPanelOpen || almacenesPanelOpen) ? '280px' : '0',
+          width: (enviosPanelOpen || flightPanelOpen || almacenesPanelOpen) ? '280px' : '0',
           flexShrink: 0,
           position: 'relative',
           overflow: 'hidden',
@@ -2780,8 +2887,148 @@ export default function SimulacionPeriodo() {
           transition: 'width 0.35s ease',
           height: '100%',
           backgroundColor: 'rgba(255,255,255,0.98)',
-          boxShadow: (flightPanelOpen || almacenesPanelOpen) ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
+          boxShadow: (enviosPanelOpen || flightPanelOpen || almacenesPanelOpen) ? '-4px 0 20px rgba(0,0,0,0.10)' : 'none',
         }}>
+
+          {/* Envíos Planificados */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: enviosPanelOpen ? 'flex' : 'none',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            backgroundColor: 'rgba(255,255,255,0.98)',
+            zIndex: 1,
+          }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Envíos Planificados
+                </h3>
+                <button
+                  onClick={() => setEnviosPanelOpen(false)}
+                  style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                Total: {sim.rutasPlanificadasRef.current.size} envíos
+              </div>
+              <button
+                ref={envFilterButtonRef}
+                onClick={() => setEnvFiltersOpen(!envFiltersOpen)}
+                style={{
+                  marginTop: '12px', padding: '8px 12px', fontSize: '12px',
+                  backgroundColor: 'var(--accent-blue)', color: 'white',
+                  border: 'none', borderRadius: '6px', cursor: 'pointer',
+                  fontWeight: 600, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', gap: '6px'
+                }}
+              >
+                🔽 Filtrar
+              </button>
+              {envFiltersOpen && (
+                <div style={{
+                  position: 'fixed', top: envFilterPosition.top, left: envFilterPosition.left,
+                  backgroundColor: 'white', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 999999,
+                  padding: '14px', minWidth: '220px',
+                  animation: 'fadeIn 0.15s ease'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
+                    <button onClick={() => { setEnvFilterCodigo(''); setEnvFilterOrigen(''); setEnvFilterDestino(''); setEnvSortBy('salida'); setEnvSortDir('asc'); }}
+                      style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
+                      ✕ Borrar
+                    </button>
+                  </div>
+                  <div style={{ marginBottom: 6 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Código</label>
+                    <input type="text" placeholder="LIM-CUZ" value={envFilterCodigo}
+                      onChange={(e) => setEnvFilterCodigo(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ marginBottom: 6 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Origen</label>
+                    <select value={envFilterOrigen} onChange={(e) => setEnvFilterOrigen(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
+                      <option value="">Todos</option>
+                      {envOrigenesUnicos.map(og => (
+                        <option key={og} value={og}>{og}{aeropuertoMap.has(og) ? ` - ${aeropuertoMap.get(og)}` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ marginBottom: 6 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Destino</label>
+                    <select value={envFilterDestino} onChange={(e) => setEnvFilterDestino(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
+                      <option value="">Todos</option>
+                      {envDestinosUnicos.map(dest => (
+                        <option key={dest} value={dest}>{dest}{aeropuertoMap.has(dest) ? ` - ${aeropuertoMap.get(dest)}` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
+                    <select value={envSortBy} onChange={(e) => setEnvSortBy(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
+                      <option value="salida">Hora de salida</option>
+                      <option value="llegada">Hora de llegada</option>
+                      <option value="origen">Origen</option>
+                      <option value="destino">Destino</option>
+                      <option value="ocupacion">Maletas</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => setEnvSortDir('asc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: envSortDir === 'asc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: envSortDir === 'asc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↑ Asc</button>
+                    <button onClick={() => setEnvSortDir('desc')} style={{ flex: 1, padding: '4px 0', fontSize: 11, backgroundColor: envSortDir === 'desc' ? 'var(--accent-blue)' : 'var(--bg-tertiary)', color: envSortDir === 'desc' ? 'white' : 'var(--text-primary)', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>↓ Desc</button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+              {enviosFiltrados.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px', fontSize: '13px' }}>
+                  {sim.rutasPlanificadasRef.current.size === 0 ? '⏳ Esperando planificación del GA...' : '⚠️ No envíos coinciden con los filtros'}
+                </div>
+              ) : (
+                enviosFiltrados.slice().reverse().map(({ idEnvio, ruta, tipoRuta }) => {
+                  const aOri = sim.aeropuertos.find((a: any) => a.codigo === ruta.origen);
+                  const aDes = sim.aeropuertos.find((a: any) => a.codigo === ruta.destino);
+                  const ciudadOrigen = aOri ? `${aOri.ciudad}` : ruta.origen;
+                  const ciudadDestino = aDes ? `${aDes.ciudad}` : ruta.destino;
+                  const codigoRastreo = `${idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+                  return (
+                    <div
+                      key={idEnvio}
+                      onClick={() => {
+                        const envioFe = flightEventsRef.current.find(e => e.key.startsWith(idEnvio + '-')) || flightEventsRef.current.find(e => e.key.startsWith(idEnvio));
+                        if (envioFe) {
+                          setSelectedEnvioKey(idEnvio);
+                          setSelectedVueloKey(null);
+                          mostrarPanelEnvio(envioFe, codigoRastreo);
+                        }
+                      }}
+                      style={{
+                        padding: '10px', backgroundColor: 'var(--bg-tertiary)',
+                        border: selectedEnvioKey === idEnvio ? '2px solid var(--accent-blue)' : '1px solid var(--border-color)',
+                        borderRadius: '6px', marginBottom: '6px', cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-blue)' }}>{codigoRastreo}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280' }}>{tipoRuta}</span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#374151', fontWeight: 400 }}>
+                        {ciudadOrigen} → {ciudadDestino}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
           {/* Vuelos Disponibles */}
           <div style={{
@@ -2910,6 +3157,10 @@ export default function SimulacionPeriodo() {
                     const realIdx = startIdx + i;
                     const salidaHHMM = extraerHHMM(vuelo.salida);
                     const llegadaHHMM = extraerHHMM(vuelo.llegada);
+                    const aO = sim.aeropuertosRef.current.get(vuelo.origen);
+                    const aD = sim.aeropuertosRef.current.get(vuelo.destino);
+                    const cOri = aO ? `${aO.ciudad}` : vuelo.origen;
+                    const cDes = aD ? `${aD.ciudad}` : vuelo.destino;
                     const codigoVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, salidaHHMM);
                     const claveVuelo = getCancelKey(vuelo);
                     const esCancelado = sim.cancelledFlights.has(claveVuelo) || canceledLocallyRef.current.has(claveVuelo);
@@ -2967,11 +3218,11 @@ export default function SimulacionPeriodo() {
                               };
                             }
                           }
-                          if (fe) mostrarPanelAvion(fe);
+                          if (fe) { setSelectedVueloKey(codigoVuelo); setSelectedEnvioKey(null); mostrarPanelAvion(fe, false); }
                         }}
                         style={{
                           backgroundColor: esCancelado ? 'rgba(220,53,69,0.05)' : 'var(--bg-tertiary)',
-                          border: `1px solid ${esCancelado ? 'rgba(220,53,69,0.3)' : 'var(--border-color)'}`,
+                          border: selectedVueloKey === codigoVuelo ? '2px solid var(--accent-blue)' : `1px solid ${esCancelado ? 'rgba(220,53,69,0.3)' : 'var(--border-color)'}`,
                           borderRadius: '6px', padding: '8px', marginBottom: '6px',
                           cursor: esCancelado || esCancelling ? 'default' : 'pointer',
                           opacity: esCancelado ? 0.6 : (esCancelling ? 0.4 : 1),
@@ -2984,56 +3235,41 @@ export default function SimulacionPeriodo() {
                           <div style={{ fontSize: '13px', fontWeight: 700, color: esCancelado ? 'var(--danger-red)' : 'var(--accent-blue)' }}>
                             {codigoVuelo}
                           </div>
-                          {esCancelado && (
-                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(220,53,69,0.1)', color: 'var(--danger-red)' }}>
-                              Cancelado
-                            </span>
-                          )}
-                          {esSinUso && !esCancelado && (
-                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
-                              Sin uso
-                            </span>
-                          )}
-                          {!esSinUso && !esCancelado && (
-                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-                              En uso
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 500 }}>
-                          {vuelo.origen} → {vuelo.destino}
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', flex: 1 }}>
-                            <div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Salida</div>
-                              <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{salidaHHMM}</div>
-                            </div>
-                            <div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Llegada</div>
-                              <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{llegadaHHMM}</div>
-                            </div>
-                            {pctOcupacion >= 0 && (
-                              <div>
-                                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '1px' }}>Ocup.</div>
-                                <div style={{ fontSize: '11px', fontWeight: 700, color: ocupColor }}>{pctOcupacion.toFixed(1)}%</div>
-                              </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            {esCancelado && (
+                              <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(220,53,69,0.1)', color: 'var(--danger-red)' }}>
+                                Cancelado
+                              </span>
+                            )}
+                            {esSinUso && !esCancelado && (
+                              <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
+                                Sin uso
+                              </span>
+                            )}
+                            {!esSinUso && !esCancelado && (
+                              <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+                                En uso
+                              </span>
+                            )}
+                            {!esCancelado && !esCancelling && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
+                                style={{
+                                  padding: '2px 6px', fontSize: '10px',
+                                  backgroundColor: 'rgba(220, 53, 69, 0.1)', color: 'var(--danger-red)',
+                                  border: '1px solid rgba(220, 53, 69, 0.3)', borderRadius: '4px',
+                                  cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
+                                }}
+                              >
+                                Cancelar
+                              </button>
                             )}
                           </div>
-                          {!esCancelado && !esCancelling && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
-                              style={{
-                                padding: '3px 8px', fontSize: '10px',
-                                backgroundColor: 'rgba(220, 53, 69, 0.1)', color: 'var(--danger-red)',
-                                border: '1px solid rgba(220, 53, 69, 0.3)', borderRadius: '4px',
-                                cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
-                              }}
-                            >
-                              Cancelar
-                            </button>
-                          )}
                         </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 400 }}>
+                          {cOri} → {cDes}
+                        </div>
+
                       </div>
                     );
                   })}

@@ -2,7 +2,6 @@
 
 import React, { ReactNode, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import './globals.css';
 import { Sidebar } from '../components/Sidebar';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { SimulationProvider } from './SimulationContext';

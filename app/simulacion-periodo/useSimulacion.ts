@@ -376,6 +376,16 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+        fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' }).catch(() => {});
+      };
+    }, []);
+
   const addLog = useCallback((text: string, color: string, minutosSimulados?: number | null) => {
     let t: string | null = null;
     if (typeof minutosSimulados === 'number') {

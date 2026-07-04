@@ -150,14 +150,14 @@ export default function SimulacionPeriodo() {
   const [enviosPanelOpen, setEnviosPanelOpen] = useState(false);
   const [flightPanelOpen, setFlightPanelOpen] = useState(false);
   const [almacenesPanelOpen, setAlmacenesPanelOpen] = useState(false);
-  const [timePanelOpen, setTimePanelOpen] = useState(false);
+  const [timePanelOpen, setTimePanelOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [centroControlOpen, setCentroControlOpen] = useState(false);
-  const [colorFilterOpen, setColorFilterOpen] = useState(false);
+  const [colorFilterOpen, setColorFilterOpen] = useState(true);
   const [activeColors, setActiveColors] = useState<Record<string, boolean>>({ all: true, blue: true, green: true, orange: true, red: true });
   const activeColorsRef = useRef(activeColors);
   activeColorsRef.current = activeColors;
-  const [warehouseFilterOpen, setWarehouseFilterOpen] = useState(false);
+  const [warehouseFilterOpen, setWarehouseFilterOpen] = useState(true);
   const [activeWarehouseColors, setActiveWarehouseColors] = useState<Record<string, boolean>>({ all: true, blue: true, green: true, orange: true, red: true });
   const activeWarehouseColorsRef = useRef(activeWarehouseColors);
   activeWarehouseColorsRef.current = activeWarehouseColors;
@@ -352,6 +352,12 @@ export default function SimulacionPeriodo() {
   const refrescoAlmRef = useRef(0);
   const [, setRefrescoAlm] = useState(0);
 
+  useEffect(() => {
+    if (sim.logs.length > 0) {
+      setRefreshTick(prev => prev + 1);
+    }
+  }, [sim.logs.length]);
+  
   // ── API: todos los vuelos de la base de datos (planes-vuelo + aeropuertos) ──
   const [apiFlights, setApiFlights] = useState<any[] | null>(null);
   const aeropuertoInfoRef = useRef<Map<number, { codigo: string; gmt: number }>>(new Map());
@@ -666,7 +672,7 @@ export default function SimulacionPeriodo() {
   const [isMapLogsPaused, setIsMapLogsPaused] = useState(false);
   const [pausedMapLogs, setPausedMapLogs] = useState<LogEntry[]>([]);
   const mapLogsContainerRef = useRef<HTMLDivElement>(null);
-  const [isGlobalIndicatorsOpen, setIsGlobalIndicatorsOpen] = useState(false);
+  const [isGlobalIndicatorsOpen, setIsGlobalIndicatorsOpen] = useState(true);
   const [isOcupacionLegendOpen, setIsOcupacionLegendOpen] = useState(false);
   const mapRegistroPanelRef = useRef<HTMLDivElement>(null);
   const ocupacionLegendRef = useRef<HTMLDivElement>(null);
@@ -950,7 +956,7 @@ export default function SimulacionPeriodo() {
       entregasExitosas,
       maletasEntregadas,
     };
-  }, [sim.isRunning, sim.iteracion, simMinutos, sim.logs.length]); // Re-calcula cada vez que simMinutos o logs cambian
+  }, [sim.isRunning, sim.iteracion, simMinutos, sim.logs.length,sim.allLogEvents.length,sim.allFlightEvents.length]); // Re-calcula cada vez que simMinutos o logs cambian
 
 
 
@@ -2109,14 +2115,24 @@ export default function SimulacionPeriodo() {
     const feRef = flightEventsRef.current;
 
     const getOcup = (v: typeof vuelosGlobales[0]) => {
-      if (!simStart) return -1;
+      if (!simStart) return 0;
       const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
-      let d = new Date(simStart); d.setUTCHours(hh, mm, 0, 0);
-      while (d.getTime() < simStart.getTime()) d.setUTCDate(d.getUTCDate() + 1);
+      let d = new Date(simStart);
+      d.setUTCHours(hh, mm, 0, 0);
+      while (d.getTime() < simStart.getTime()) {
+        d.setUTCDate(d.getUTCDate() + 1);
+      }
       const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
-      const fe = feRef.find((e: any) => e.origenCode === v.origen && e.destinoCode === v.destino && (e.minutosInicio % 1440) === (minInicio % 1440));
-      if (!fe || fe.key.startsWith('unused-')) return -1;
-      if (fe.capacidadVuelo > 0) return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
+      const fe = feRef.find((e: any) =>
+        e.origenCode === v.origen &&
+        e.destinoCode === v.destino &&
+        (e.minutosInicio % 1440) === (minInicio % 1440)
+      );
+      if (!fe) return 0;
+      if (fe.key.startsWith('unused-')) return 0;
+      if (fe.capacidadVuelo > 0) {
+        return (fe.maletasVuelo / fe.capacidadVuelo) * 100;
+      }
       return 0;
     };
 
@@ -2899,7 +2915,7 @@ export default function SimulacionPeriodo() {
                 onClick={() => setIsOcupacionLegendOpen(!isOcupacionLegendOpen)}
                 style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
               >
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>🛩️ Ocupación</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#374151'}}>🛩️ Nivel de Ocupación</span>
                 <span style={{ fontSize: 9, color: '#6b7280', marginLeft: 6 }}>{isOcupacionLegendOpen ? '▲' : '▼'}</span>
               </div>
               {isOcupacionLegendOpen && (
@@ -3349,9 +3365,9 @@ export default function SimulacionPeriodo() {
                     const esCancelado = sim.cancelledFlights.has(claveVuelo) || canceledLocallyRef.current.has(claveVuelo);
                     const esCancelling = cancellingFlights.has(claveVuelo);
                     // Buscar FlightEvent activo para obtener ocupación y detectar sin uso
-                    let pctOcupacion = -1;
-                    let ocupColor = '';
-                    let esSinUso = false;
+                    let pctOcupacion = 0;
+                    let ocupColor = '#2563eb';
+                    let esSinUso = true;
                     const simStartOcc = sim.simStartDateRef.current;
                     if (simStartOcc) {
                       const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
@@ -3361,14 +3377,19 @@ export default function SimulacionPeriodo() {
                       let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
                       if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
                       esSinUso = !fe || fe.key.startsWith('unused-');
-                      if (fe && !esSinUso && currentMinSimRef.current >= fe.minutosInicio && currentMinSimRef.current < fe.minutosFin) {
-                        if (fe.capacidadVuelo > 0) {
-                          pctOcupacion = (fe.maletasVuelo / fe.capacidadVuelo) * 100;
-                          ocupColor = pctOcupacion < 50 ? '#22c55e' : pctOcupacion < 80 ? '#f97316' : '#ef4444';
-                        } else {
-                          pctOcupacion = 0;
-                          ocupColor = '#2563eb';
-                        }
+                      if (fe && !esSinUso) {
+                        pctOcupacion = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
+                      } else {
+                        pctOcupacion = 0;
+                      }
+                       if (esSinUso) {
+                        ocupColor = '#2563eb';
+                      } else if (pctOcupacion < 50) {
+                        ocupColor = '#22c55e';
+                      } else if (pctOcupacion < 80) {
+                        ocupColor = '#f97316';
+                      } else {
+                        ocupColor = '#ef4444';
                       }
                     }
                     return (
@@ -3424,16 +3445,6 @@ export default function SimulacionPeriodo() {
                                 Cancelado
                               </span>
                             )}
-                            {esSinUso && !esCancelado && (
-                              <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
-                                Sin uso
-                              </span>
-                            )}
-                            {!esSinUso && !esCancelado && (
-                              <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-                                En uso
-                              </span>
-                            )}
                             {!esCancelado && !esCancelling && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
@@ -3449,10 +3460,16 @@ export default function SimulacionPeriodo() {
                             )}
                           </div>
                         </div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '4px', fontWeight: 400 }}>
-                          {cOri} → {cDes}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 400 }}>
+                            {cOri} → {cDes}
+                          </span>
+                          {!esCancelado && (
+                            <span style={{ fontSize: '12px', fontWeight: 600, color: ocupColor }}>
+                              {`Ocup. ${(esSinUso ? 0 : pctOcupacion).toFixed(1)}%`}
+                            </span>
+                          )}
                         </div>
-
                       </div>
                     );
                   })}

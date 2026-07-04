@@ -49,6 +49,7 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
   const calcStartedAtRef = useRef<number>(0);
   const configCountdownRef = useRef<number>(60);
   const stopwatchStartedAtRef = useRef<number | null>(null);
+  
 
   // ── Sincronizar flightEvents del hook → ref local ──
   useEffect(() => {

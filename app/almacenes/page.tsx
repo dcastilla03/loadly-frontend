@@ -146,9 +146,6 @@ export default function Almacenes() {
           <h2 style={{ marginBottom: '20px', fontSize: '20px', color: 'var(--text-primary)' }}>Listado de Almacenes Disponibles</h2>
           
           <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-            <button className="btn btn-primary" onClick={() => setShowFormAgregar(true)}>
-              <span style={{ fontSize: '16px', marginRight: '8px' }}>➕</span>Agregar Almacén
-            </button>
             <button className="btn btn-primary" onClick={() => setShowFormCargaMasiva(true)}>
               <span style={{ fontSize: '16px', marginRight: '8px' }}>📤</span>Cargar Masiva
             </button>

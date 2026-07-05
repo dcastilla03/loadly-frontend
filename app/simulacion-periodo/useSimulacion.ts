@@ -79,6 +79,7 @@ interface BackendVueloPlanificado {
 export interface BackendRutaPlanificada {
   idEnvio: string;
   idCliente?: string;
+  numeroLote?: number | null;
   origen: string;
   destino: string;
   maletas: number;
@@ -105,7 +106,7 @@ interface BackendSimEvent {
   resumenFinal?: Resumen;
   // Para CANCELACION
   vueloCancelado?: string;
-  enviosAfectadosCancelacion?: { idEnvio: string; idCliente: string; origen: string; destino: string }[];
+  enviosAfectadosCancelacion?: { idEnvio: string; idCliente: string; origen: string; destino: string; numeroLote?: number | null }[];
 }
 
 /** Convierte "HH:MM" a minutos del día */
@@ -143,11 +144,13 @@ export function fechaHoraAMinutosDesdeInicio(fechaHoraStr: string, simStartDate:
   return Math.round((fecha.getTime() - simStartDate.getTime()) / 60000);
 }
 
-
-
+export function claveEnvio(idEnvio: string, numeroLote?: number | null): string {
+  return numeroLote ? `${idEnvio}|L${numeroLote}` : idEnvio;
+}
 
 function rutaAFlightEvents(
   ruta: BackendRutaPlanificada,
+  claveRuta: string,
   limiteLectura: string,
   aeropuertos: Map<string, AeropuertoSim>,
   simStartDate: Date,
@@ -185,7 +188,7 @@ function rutaAFlightEvents(
 
     cursorDate = llegaDate;
 
-    const key = `${ruta.idEnvio}-${ruta.idCliente || 'x'}-iter${iteracionIdx}-tramo${tramo.orden}`;
+    const key = `${claveRuta}-${ruta.idCliente || 'x'}-iter${iteracionIdx}-tramo${tramo.orden}`;
 
     events.push({
       key,
@@ -221,6 +224,7 @@ function rutaAFlightEvents(
  */
 function buildLogEvents(
   ruta: BackendRutaPlanificada,
+  claveRuta: string,
   limiteLectura: string,
   simStartDate: Date
 ): LogEvent[] {
@@ -248,7 +252,8 @@ function buildLogEvents(
   // Extraer solo la hora de tramo.sale
   const salidaTexto = totalTramos > 0 ? ` · Salida ${((tramos[0].sale || '').split(' ')[1] || '00:00').split(':').slice(0, 2).join(':')}` : '';
 
-  const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+  const codigoRastreo = `${claveRuta}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+
   const textRegistro = esDirecto
     ? `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Directo${salidaTexto}`
     : `📦 Envío ${codigoRastreo}: ${ruta.maletas} maleta${ruta.maletas !== 1 ? 's' : ''} · ${ruta.origen} → ${ruta.destino} · Escalas: ${tramos.slice(0, -1).map(t => t.destino).join(', ')}${salidaTexto}`;
@@ -259,7 +264,7 @@ function buildLogEvents(
     updatePopupCode: ruta.origen,
     updatePopupOcupacion: ruta.ocupacionAlmacenRegistro,
     updatePopupCapacidad: ruta.capacidadAlmacenRegistro,
-    idEnvio: ruta.idEnvio
+    idEnvio: claveRuta
   });
 
   // ── Eventos 2 & 3: Salida y llegada por cada tramo ───────────────────────
@@ -290,14 +295,14 @@ function buildLogEvents(
     const textSalida = totalTramos > 1
       ? `✈️ Sale avión de ${tramo.origen} → ${tramo.destino} (Tramo ${tramo.orden}/${totalTramos})`
       : `✈️ Sale avión de ${tramo.origen} → ${tramo.destino}`;
-    events.push({ minutosDisparo: minutosInicio, text: textSalida, color: '#3b82f6', idEnvio: ruta.idEnvio, tramoOrden: tramo.orden });
-    events.push({ minutosDisparo: minutosFin, text: `🛬 Llega avión a ${tramo.destino} (desde ${tramo.origen})`, color: '#8b5cf6', idEnvio: ruta.idEnvio, tramoOrden: tramo.orden });
+    events.push({ minutosDisparo: minutosInicio, text: textSalida, color: '#3b82f6', idEnvio: claveRuta, tramoOrden: tramo.orden });
+    events.push({ minutosDisparo: minutosFin, text: `🛬 Llega avión a ${tramo.destino} (desde ${tramo.origen})`, color: '#8b5cf6', idEnvio: claveRuta, tramoOrden: tramo.orden });
   }
 
   // ── Evento 4: Envío completado (a la hora de fechaRecojo) ───────────────
   if (ruta.fechaRecojo) {
     const minutosRecojo = fechaHoraAMinutosDesdeInicio(ruta.fechaRecojo, simStartDate);
-    const codigoRastreo = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+    const codigoRastreo = `${claveRuta}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
     events.push({
       minutosDisparo: minutosRecojo,
       text: `✅ Envío ${codigoRastreo} completado satisfactoriamente · ${ruta.origen} → ${ruta.destino}`,
@@ -369,6 +374,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const aeropuertosRef = useRef<Map<string, AeropuertoSim>>(new Map());
   const iteracionIdxRef = useRef(0);
   const rutasPlanificadasRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
+  const totalLotesRef = useRef<Map<string, number>>(new Map());
   const rutasPorCodigoUnicoRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
   const allFlightEventsRef = useRef<FlightEvent[]>([]);
   const simulacionFinalizadaRef = useRef(false);
@@ -443,6 +449,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     realStartTimeRef.current = performance.now();
     rutasPlanificadasRef.current.clear();
     rutasPorCodigoUnicoRef.current.clear();
+    totalLotesRef.current.clear();
     simulacionFinalizadaRef.current = false;
 
     // Cargar aeropuertos si aún no están disponibles
@@ -567,16 +574,30 @@ export function useSimulacion(startDate?: string, startTime?: string) {
           const nuevosFlightEvents: FlightEvent[] = [];
           const nuevosLogEvents: LogEvent[] = [];
 
-          d.rutasPlanificadas.forEach(ruta => {
-            // Store complete route data for panel display (by idEnvio)
-            rutasPlanificadasRef.current.set(ruta.idEnvio, ruta);
+          const totalLotesPorEnvio = new Map<string, number>();
+          d.rutasPlanificadas.forEach(r => {
+            if (r.numeroLote) {
+              totalLotesPorEnvio.set(
+                r.idEnvio,
+                Math.max(totalLotesPorEnvio.get(r.idEnvio) || 0, r.numeroLote)
+              );
+            }
+          });
 
-            // Store complete route data by unique code for search
-            const codigoUnico = `${ruta.idEnvio}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
+          d.rutasPlanificadas.forEach(ruta => {
+            const claveRuta = claveEnvio(ruta.idEnvio, ruta.numeroLote);
+
+            rutasPlanificadasRef.current.set(claveRuta, ruta);
+
+            if (ruta.numeroLote) {
+              totalLotesRef.current.set(ruta.idEnvio, totalLotesPorEnvio.get(ruta.idEnvio)!);
+            }
+
+            const codigoUnico = `${claveRuta}${ruta.idCliente || ''}${ruta.origen}${ruta.destino}`;
             rutasPorCodigoUnicoRef.current.set(codigoUnico, ruta);
 
-            nuevosFlightEvents.push(...rutaAFlightEvents(ruta, limLectura, aeropuertosRef.current, simStart, iterIdx));
-            nuevosLogEvents.push(...buildLogEvents(ruta, limLectura, simStart));
+            nuevosFlightEvents.push(...rutaAFlightEvents(ruta, claveRuta, limLectura, aeropuertosRef.current, simStart, iterIdx));
+            nuevosLogEvents.push(...buildLogEvents(ruta, claveRuta, limLectura, simStart));
           });
 
           if (nuevosFlightEvents.length > 0) {
@@ -605,14 +626,15 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
             for (const ae of d.enviosAfectadosCancelacion) {
               if (!simStart) continue;
+              const claveAe = claveEnvio(ae.idEnvio, ae.numeroLote);   // ← NUEVO
               // Buscar el tramo cancelado en FlightEvents (NO en rutasPlanificadasRef,
               // porque puede haber sido overwriteado por una ITERACION posterior)
               for (const fe of allFlightEventsRef.current) {
-                if (!fe.key.startsWith(ae.idEnvio + '-')) continue;
+                if (!fe.key.startsWith(claveAe + '-')) continue;   // ← antes: ae.idEnvio
                 if (fe.origenCode !== cancelledOrig || fe.destinoCode !== cancelledDest) continue;
                 // Usar tramo.sale exacto de los datos de ruta (evita errores de timezone)
-                const feIdEnvio = fe.key.split('-')[0];
-                const feRuta = rutasPlanificadasRef.current.get(feIdEnvio);
+                const feClaveRuta = fe.key.split('-')[0];   // ← renombrado (antes: feIdEnvio), sigue siendo el prefijo del key
+                const feRuta = rutasPlanificadasRef.current.get(feClaveRuta);   // ← ahora busca por claveRuta, coincide con el paso 3
                 let feH = -1, feM = -1;
                 if (feRuta && feRuta.tramos) {
                   const feTramo = feRuta.tramos.find(t => t.orden === fe.tramoOrden);
@@ -624,7 +646,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
                 if (feH === localH && feM === localM) {
                   const m = fe.key.match(/iter(\d+)/);
                   const iterIdx = m ? parseInt(m[1]) : -1;
-                  nuevosSuppressed.set(ae.idEnvio, { minTramoOrden: fe.tramoOrden, iteracionIdx: iterIdx });
+                  nuevosSuppressed.set(claveAe, { minTramoOrden: fe.tramoOrden, iteracionIdx: iterIdx });   // ← antes: ae.idEnvio
                   break;
                 }
               }
@@ -728,6 +750,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     aeropuertosRef,
     rutasPlanificadasRef,
     rutasPorCodigoUnicoRef,
+    totalLotesRef,
     cancelledFlights,
     suppressedTramos,
   };

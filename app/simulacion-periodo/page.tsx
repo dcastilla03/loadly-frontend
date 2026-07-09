@@ -124,6 +124,8 @@ export default function SimulacionPeriodo() {
   const [startDate, setStartDate] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  const timePanelRef = useRef<HTMLDivElement>(null);
+  const globalIndicatorsPanelRef = useRef<HTMLDivElement>(null);
   const mapInst = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const openPopupMarkerRef = useRef<any>(null);
@@ -144,6 +146,7 @@ export default function SimulacionPeriodo() {
   const emptyFlightsAddedRef = ctx.emptyFlightsAddedRef;
   const canceledLocallyRef = ctx.canceledLocallyRef;
   const suppressedTramosRef = ctx.suppressedTramosRef;
+  const groupPanelRef = useRef<HTMLDivElement>(null);
 
   const calcStartedAtRef = ctx.calcStartedAtRef;
   const configCountdownRef = ctx.configCountdownRef;
@@ -1526,6 +1529,146 @@ export default function SimulacionPeriodo() {
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
+  // ── Helper: hacer arrastrable un panel que vive dentro de un layout flex ──
+  // Mientras el panel está en su posición original, permanece como un ítem normal
+  // del flex (por lo tanto sigue siendo afectado por sus hermanos, como corresponde).
+  // Solo cuando el usuario realiza un arrastre real (supera un pequeño umbral de
+  // movimiento) el panel se "desprende":
+  //   - Se inserta un placeholder invisible del mismo tamaño en su lugar dentro del
+  //      flex, para que sus hermanos (p.ej. "Simulación") NO ocupen ese espacio al
+  //      instante — el hueco queda reservado mientras dura el arrastre.
+  //   - El panel pasa a position:fixed (coordenadas de viewport), exactamente en el
+  //      píxel donde ya estaba, sin saltos, y queda completamente inmune a cambios de
+  //      tamaño de sus contenedores (p.ej. al abrir "Registro de Eventos" o "Niveles
+  //      de Ocupación"), que sí afectan al panel solo cuando está en su posición original.
+  // El botón de reposicionamiento (_resetPosition) quita el placeholder y devuelve el
+  // panel por completo al flujo normal.
+  function makeDraggableFloating(panel: HTMLElement, container: HTMLElement) {
+    const DRAG_THRESHOLD = 4; // px — evita que un simple click dispare el desprendimiento
+    let pendingDrag = false;
+    let isDragging = false;
+    let isDetached = false;
+    let downX = 0;
+    let downY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+
+    const detach = () => {
+      if (isDetached) return;
+      // Capturar la posición/tamaño actual (coords de viewport) antes de sacarlo del
+      // flujo, para que el desprendimiento sea imperceptible (sin saltos).
+      const rect = panel.getBoundingClientRect();
+
+      // Placeholder invisible: reserva el mismo espacio dentro del flex para que los
+      // paneles hermanos no se reacomoden al instante.
+      const placeholder = document.createElement('div');
+      placeholder.style.width = rect.width + 'px';
+      placeholder.style.height = rect.height + 'px';
+      placeholder.style.flexShrink = '0';
+      placeholder.style.visibility = 'hidden';
+      placeholder.setAttribute('aria-hidden', 'true');
+      panel.parentNode?.insertBefore(placeholder, panel.nextSibling);
+      (panel as any)._placeholder = placeholder;
+
+      panel.style.position = 'fixed';
+      panel.style.left = rect.left + 'px';
+      panel.style.top = rect.top + 'px';
+      panel.style.right = '';
+      panel.style.margin = '0';
+      panel.style.zIndex = '999999';
+
+      startLeft = rect.left;
+      startTop = rect.top;
+      isDetached = true;
+    };
+
+    const resetPosition = () => {
+      const placeholder = (panel as any)._placeholder as HTMLElement | undefined;
+      if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+      (panel as any)._placeholder = null;
+
+      panel.style.position = '';
+      panel.style.left = '';
+      panel.style.top = '';
+      panel.style.right = '';
+      panel.style.margin = '';
+      panel.style.zIndex = '';
+      isDetached = false;
+    };
+
+    // Exponer función de reset para el botón de reposicionamiento
+    (panel as any)._resetPosition = resetPosition;
+
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('button')) return;
+
+      pendingDrag = true;
+      isDragging = false;
+      downX = e.clientX;
+      downY = e.clientY;
+      if (isDetached) {
+        const rect = panel.getBoundingClientRect();
+        startLeft = rect.left;
+        startTop = rect.top;
+      }
+      e.preventDefault();
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!pendingDrag) return;
+
+      const dx = e.clientX - downX;
+      const dy = e.clientY - downY;
+
+      if (!isDragging) {
+        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+        // Recién aquí confirmamos que es un arrastre (no un simple click)
+        isDragging = true;
+        panel.style.cursor = 'grabbing';
+        detach();
+      }
+
+      // position:fixed usa coordenadas de viewport, el mismo sistema que
+      // getBoundingClientRect(), así que no hace falta ninguna conversión.
+      const containerRect = container.getBoundingClientRect();
+      const panelW = panel.offsetWidth;
+      const panelH = panel.offsetHeight;
+
+      let newLeft = startLeft + dx;
+      let newTop = startTop + dy;
+
+      newLeft = Math.max(containerRect.left, Math.min(newLeft, containerRect.right - panelW));
+      newTop = Math.max(containerRect.top, Math.min(newTop, containerRect.bottom - panelH));
+
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+    };
+
+    const onMouseUp = () => {
+      pendingDrag = false;
+      if (isDragging) {
+        isDragging = false;
+        panel.style.cursor = '';
+      }
+    };
+
+    panel.addEventListener('mousedown', onMouseDown as any);
+    document.addEventListener('mousemove', onMouseMove as any);
+    document.addEventListener('mouseup', onMouseUp);
+
+    // Cleanup (a diferencia de makeDraggable, aquí el panel es manejado por React
+    // y nunca se desmonta durante la sesión, pero se retorna igual una función de
+    // limpieza para usar con useEffect de forma correcta)
+    return () => {
+      panel.removeEventListener('mousedown', onMouseDown as any);
+      document.removeEventListener('mousemove', onMouseMove as any);
+      document.removeEventListener('mouseup', onMouseUp);
+      const placeholder = (panel as any)._placeholder as HTMLElement | undefined;
+      if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+    };
+  }
+
   // ── Panel de Detalle del Avión (tramo de vuelo — se abre al hacer clic en el mapa) ──
   function cerrarPanelAvion(feKey?: string) {
     if (feKey && panelFlightKeyRef.current !== feKey) return;
@@ -2335,6 +2478,16 @@ export default function SimulacionPeriodo() {
     };
   }, [scrollTrigger]);
 
+  // Efecto: hacer arrastrables (con botón de reposicionamiento) los paneles
+  // flotantes "Tiempos" e "Indicadores globales", igual que Detalle del viaje / Plan de viaje
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const cleanups: Array<() => void> = [];
+    if (timePanelRef.current) cleanups.push(makeDraggableFloating(timePanelRef.current, mapRef.current));
+    if (globalIndicatorsPanelRef.current) cleanups.push(makeDraggableFloating(globalIndicatorsPanelRef.current, mapRef.current));
+    return () => cleanups.forEach(fn => fn());
+  }, []);
+
   return (
     <div className="main-wrapper">
       <div className="map-container" style={{ display: 'flex', width: '100%', height: '100vh' }}>
@@ -2841,6 +2994,7 @@ export default function SimulacionPeriodo() {
 
             {/* Panel de Tiempos — colapsable */}
             <div
+              ref={timePanelRef}
               onClick={() => { if (!timePanelOpen) setTimePanelOpen(true); }}
               style={{
                 pointerEvents: 'auto',
@@ -2854,16 +3008,23 @@ export default function SimulacionPeriodo() {
                 padding: timePanelOpen ? '6px 10px' : '6px 6px',
                 minWidth: timePanelOpen ? 220 : 50,
                 cursor: timePanelOpen ? 'default' : 'pointer',
-                transition: 'all 0.15s',
+                transition: 'gap 0.15s, padding 0.15s, min-width 0.15s',
               }}>
               {timePanelOpen ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <small style={{ fontWeight: 700, textTransform: 'uppercase', fontSize: 9, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}><img src="/tiempo.svg" style={{ width: 12, height: 12 }} /> Tiempos</small>
-                    <button onClick={(e) => { e.stopPropagation(); setTimePanelOpen(false); }}
-                      style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280', padding: 0, lineHeight: 1 }}>
-                      ✕
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <button onClick={(e) => { e.stopPropagation(); const p = timePanelRef.current as any; if (p && p._resetPosition) p._resetPosition(); }}
+                        title="Volver a posición original"
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280', padding: 0, lineHeight: 1 }}>
+                        ⌖
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); setTimePanelOpen(false); }}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280', padding: 0, lineHeight: 1 }}>
+                        ✕
+                      </button>
+                    </div>
                   </div>
 
                   <div style={{ display: 'flex', gap: 10 }}>
@@ -3011,13 +3172,22 @@ export default function SimulacionPeriodo() {
             </div>
 
             {/* Indicadores globales — arriba */}
-            <div style={{ width: isGlobalIndicatorsOpen ? 250 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
+            <div ref={globalIndicatorsPanelRef} style={{ width: isGlobalIndicatorsOpen ? 250 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
               <div
                 onClick={() => setIsGlobalIndicatorsOpen(!isGlobalIndicatorsOpen)}
                 style={{ padding: '6px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
               >
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📊 Indicadores globales</span>
-                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{isGlobalIndicatorsOpen ? '▲' : '▼'}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {isGlobalIndicatorsOpen && (
+                    <button onClick={(e) => { e.stopPropagation(); const p = globalIndicatorsPanelRef.current as any; if (p && p._resetPosition) p._resetPosition(); }}
+                      title="Volver a posición original"
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 11, color: '#6b7280', padding: 0, lineHeight: 1 }}>
+                      ⌖
+                    </button>
+                  )}
+                  <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{isGlobalIndicatorsOpen ? '▲' : '▼'}</span>
+                </span>
               </div>
               {isGlobalIndicatorsOpen && (
                 <div style={{ borderTop: '1px solid #e5e7eb', padding: '4px 10px' }}>

@@ -129,6 +129,8 @@ export default function SimulacionPeriodo() {
   const mapInst = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const openPopupMarkerRef = useRef<any>(null);
+  const hoveredFlightKeyRef = useRef<string | null>(null);
+  const tooltipElRef = useRef<HTMLDivElement | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
   const ctx = useSimulationContext();
@@ -1020,6 +1022,35 @@ export default function SimulacionPeriodo() {
         mostrarPanelAvion(fe);
       });
 
+      // Hover → tooltip con código de vuelo y ocupación
+      img.addEventListener('mouseenter', () => {
+        hoveredFlightKeyRef.current = fe.key;
+        const isEmpty = fe.key.startsWith('unused-');
+        const ocupPct = isEmpty ? 0 : (fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0);
+        const codigo = generarCodigoVuelo(fe.origenCode, fe.destinoCode, extraerHHMM(fe.sale || ''));
+        const color = isEmpty ? '#3b82f6' : ocupPct < 50 ? '#10b981' : ocupPct < 80 ? '#f97316' : '#ef4444';
+        let tooltip = tooltipElRef.current;
+        if (!tooltip) {
+          tooltip = document.createElement('div');
+          tooltip.style.cssText = 'position:fixed;pointer-events:none;z-index:999999;background:rgba(255,255,255,0.95);border:1px solid var(--border-color);border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;color:#1f2937;box-shadow:0 2px 8px rgba(0,0,0,0.15);white-space:nowrap;display:none;';
+          document.body.appendChild(tooltip);
+          tooltipElRef.current = tooltip;
+        }
+        tooltip.innerHTML = `${codigo} · <span style="color:${color}">${ocupPct.toFixed(1)}%</span>`;
+        const rect = img.getBoundingClientRect();
+        tooltip.style.left = (rect.left + rect.width / 2) + 'px';
+        tooltip.style.top = (rect.top - 6) + 'px';
+        tooltip.style.transform = 'translate(-50%, -100%)';
+        tooltip.style.display = 'block';
+      });
+
+      img.addEventListener('mouseleave', () => {
+        hoveredFlightKeyRef.current = null;
+        if (tooltipElRef.current) {
+          tooltipElRef.current.style.display = 'none';
+        }
+      });
+
       // Actualizar icono almacén de origen
       const origPct = fe.capacidadAlmacenOrigen > 0 ? (fe.ocupacionAlmacenOrigen / fe.capacidadAlmacenOrigen) * 100 : 0;
       const origMarker = markersRef.current.find((m: any) => m.airportCode === fe.origenCode);
@@ -1112,6 +1143,13 @@ export default function SimulacionPeriodo() {
         fe.airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct, isEmpty));
         (fe as any)._lastColorBucket = bucket;
         applyColorFilterToFlight(fe);
+      }
+
+      // Reposicionar tooltip si este vuelo está siendo hovereado
+      if (hoveredFlightKeyRef.current === fe.key && tooltipElRef.current) {
+        const r = fe.airplaneImage.getBoundingClientRect();
+        tooltipElRef.current.style.left = (r.left + r.width / 2) + 'px';
+        tooltipElRef.current.style.top = (r.top - 6) + 'px';
       }
     }
 

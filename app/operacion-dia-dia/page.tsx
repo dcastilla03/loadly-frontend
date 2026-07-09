@@ -115,6 +115,8 @@ export default function SimulacionPeriodo() {
   const mapInst = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const [mapReady, setMapReady] = useState(false);
+  const hoveredFlightKeyRef = useRef<string | null>(null);
+  const tooltipElRef = useRef<HTMLDivElement | null>(null);
 
   const sim = useSimulacion();
   const simRef = useRef(sim);
@@ -760,6 +762,7 @@ export default function SimulacionPeriodo() {
   const [filterAlmCodigo, setFilterAlmCodigo] = useState('');
   const [filterAlmCiudad, setFilterAlmCiudad] = useState('');
   const [filterAlmPais, setFilterAlmPais] = useState('');
+  const [filterAlmContinente, setFilterAlmContinente] = useState('');
   const [filterAlmSemaforo, setFilterAlmSemaforo] = useState('');
   const [sortAlmBy, setSortAlmBy] = useState('codigo');
   const [sortAlmDir, setSortAlmDir] = useState<'asc' | 'desc'>('asc');
@@ -905,6 +908,7 @@ export default function SimulacionPeriodo() {
   const [isOcupacionLegendOpen, setIsOcupacionLegendOpen] = useState(false);
   const mapRegistroPanelRef = useRef<HTMLDivElement>(null);
   const ocupacionLegendRef = useRef<HTMLDivElement>(null);
+  const globalIndicatorsPanelRef = useRef<HTMLDivElement>(null);
 
   const parseTime = (t: string) => {
     const p = t.split(' ');
@@ -1010,23 +1014,13 @@ export default function SimulacionPeriodo() {
       const generarPopupHTML = () => {
         const estado = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
         const pct = estado.capacidad > 0 ? Math.min(100, (estado.ocupacion / estado.capacidad) * 100) : 0;
-        const color = pct < 50 ? '#10b981' : pct < 80 ? '#f97316' : '#ef4444';
+        const color = pct === 0 ? '#3b82f6' : pct < 50 ? '#10b981' : pct < 80 ? '#f97316' : '#ef4444';
         return `
-          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:220px;">
-            <div style="font-size:16px;font-weight:700;color:#1f2937;margin-bottom:8px;"><b>${a.codigo}</b></div>
-            <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">${a.ciudad}, ${a.pais}</div>
-            <div style="background:#f3f4f6;padding:10px;border-radius:6px;margin-bottom:10px;">
-              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;font-weight:600;text-transform:uppercase;">Ocupación del Almacén</div>
-              <div style="height:8px;background:#d1d5db;border-radius:4px;overflow:hidden;margin-bottom:6px;">
-                <div style="height:100%;background:${color};width:${pct}%;transition:width 0.3s;"></div>
-              </div>
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:12px;font-weight:600;color:#1f2937;">${estado.ocupacion} / ${estado.capacidad} maletas</span>
-                <span style="font-size:11px;font-weight:600;color:${color};">${Math.round(pct)}%</span>
-              </div>
-            </div>
-            <div style="font-size:10px;color:#9ca3af;padding-top:8px;border-top:1px solid #e5e7eb;">
-              <div>Tipo: ${a.capacidad > 7000 ? '⭐ Grande' : a.capacidad > 4000 ? '⭐⭐ Mediano' : '⭐⭐⭐ Pequeño'}</div>
+          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:120px;line-height:1.3;">
+            <div style="font-size:11px;font-weight:700;color:#1f2937;">${a.codigo} · ${a.ciudad}</div>
+            <div style="display:flex;align-items:center;gap:4px;font-size:10px;line-height:1.2;">
+              <span style="font-weight:700;color:${color};">${pct.toFixed(1)}%</span>
+              <span style="color:#6b7280;">${estado.ocupacion}/${estado.capacidad} maletas</span>
             </div>
           </div>`;
       };
@@ -1035,7 +1029,7 @@ export default function SimulacionPeriodo() {
       m.setZIndexOffset(10000);
       m.airportCode = a.codigo;
       m.generarPopupHTML = generarPopupHTML;
-      m.bindPopup(generarPopupHTML(), { maxWidth: 300 });
+      m.bindPopup(generarPopupHTML(), { maxWidth: 300, className: 'warehouse-popup' });
       m.on('popupopen', () => m.setPopupContent(m.generarPopupHTML()));
       markersRef.current.push(m);
     });
@@ -1200,6 +1194,35 @@ export default function SimulacionPeriodo() {
         mostrarPanelAvion(fe);
       });
 
+      // Hover → tooltip con código de vuelo y ocupación
+      img.addEventListener('mouseenter', () => {
+        hoveredFlightKeyRef.current = fe.key;
+        const isEmpty = fe.key.startsWith('unused-');
+        const ocupPct = isEmpty ? 0 : (fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0);
+        const codigo = generarCodigoVuelo(fe.origenCode, fe.destinoCode, extraerHHMM(fe.sale || ''));
+        const color = isEmpty ? '#3b82f6' : ocupPct < 50 ? '#10b981' : ocupPct < 80 ? '#f97316' : '#ef4444';
+        let tooltip = tooltipElRef.current;
+        if (!tooltip) {
+          tooltip = document.createElement('div');
+          tooltip.style.cssText = 'position:fixed;pointer-events:none;z-index:999999;background:rgba(255,255,255,0.95);border:1px solid var(--border-color);border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;color:#1f2937;box-shadow:0 2px 8px rgba(0,0,0,0.15);white-space:nowrap;display:none;';
+          document.body.appendChild(tooltip);
+          tooltipElRef.current = tooltip;
+        }
+        tooltip.innerHTML = `${codigo} · <span style="color:${color}">${ocupPct.toFixed(1)}%</span>`;
+        const rect = img.getBoundingClientRect();
+        tooltip.style.left = (rect.left + rect.width / 2) + 'px';
+        tooltip.style.top = (rect.top - 6) + 'px';
+        tooltip.style.transform = 'translate(-50%, -100%)';
+        tooltip.style.display = 'block';
+      });
+
+      img.addEventListener('mouseleave', () => {
+        hoveredFlightKeyRef.current = null;
+        if (tooltipElRef.current) {
+          tooltipElRef.current.style.display = 'none';
+        }
+      });
+
       (fe as any)._path = path;
       (fe as any)._lastColorBucket = -1;
       applyColorFilterToFlight(fe);
@@ -1281,6 +1304,13 @@ export default function SimulacionPeriodo() {
         fe.airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct, isEmpty));
         (fe as any)._lastColorBucket = bucket;
         applyColorFilterToFlight(fe);
+      }
+
+      // Reposicionar tooltip si este vuelo está siendo hovereado
+      if (hoveredFlightKeyRef.current === fe.key && tooltipElRef.current) {
+        const r = fe.airplaneImage.getBoundingClientRect();
+        tooltipElRef.current.style.left = (r.left + r.width / 2) + 'px';
+        tooltipElRef.current.style.top = (r.top - 6) + 'px';
       }
     }
 
@@ -1732,6 +1762,98 @@ export default function SimulacionPeriodo() {
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ── Helper: hacer un panel flotante arrastrable (se desprende del flujo) ─────────
+  function makeDraggableFloating(panel: HTMLElement, container: HTMLElement) {
+    const DRAG_THRESHOLD = 4;
+    let pendingDrag = false;
+    let isDragging = false;
+    let isDetached = false;
+    let downX = 0;
+    let downY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+
+    const detach = () => {
+      if (isDetached) return;
+      const rect = panel.getBoundingClientRect();
+      panel.style.position = 'fixed';
+      panel.style.left = rect.left + 'px';
+      panel.style.top = rect.top + 'px';
+      panel.style.right = '';
+      panel.style.margin = '0';
+      panel.style.zIndex = '999999';
+      startLeft = rect.left;
+      startTop = rect.top;
+      isDetached = true;
+    };
+
+    const resetPosition = () => {
+      panel.style.position = '';
+      panel.style.left = '';
+      panel.style.top = '';
+      panel.style.right = '';
+      panel.style.margin = '';
+      panel.style.zIndex = '';
+      isDetached = false;
+    };
+
+    (panel as any)._resetPosition = resetPosition;
+
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('button')) return;
+      pendingDrag = true;
+      isDragging = false;
+      downX = e.clientX;
+      downY = e.clientY;
+      if (isDetached) {
+        const rect = panel.getBoundingClientRect();
+        startLeft = rect.left;
+        startTop = rect.top;
+      }
+      e.preventDefault();
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!pendingDrag) return;
+      const dx = e.clientX - downX;
+      const dy = e.clientY - downY;
+      if (!isDragging) {
+        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+        isDragging = true;
+        panel.style.cursor = 'grabbing';
+        detach();
+      }
+      const containerRect = container.getBoundingClientRect();
+      const panelW = panel.offsetWidth;
+      const panelH = panel.offsetHeight;
+      let newLeft = startLeft + dx;
+      let newTop = startTop + dy;
+      newLeft = Math.max(containerRect.left, Math.min(newLeft, containerRect.right - panelW));
+      newTop = Math.max(containerRect.top, Math.min(newTop, containerRect.bottom - panelH));
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+    };
+
+    const onMouseUp = () => {
+      pendingDrag = false;
+      if (isDragging) {
+        isDragging = false;
+        panel.style.cursor = '';
+      }
+    };
+
+    panel.addEventListener('mousedown', onMouseDown as any);
+    document.addEventListener('mousemove', onMouseMove as any);
+    document.addEventListener('mouseup', onMouseUp);
+
+    return () => {
+      panel.removeEventListener('mousedown', onMouseDown as any);
+      document.removeEventListener('mousemove', onMouseMove as any);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
   }
 
   // ── Panel de Detalle del Avión (tramo de vuelo — se abre al hacer clic en el mapa) ──
@@ -2482,6 +2604,7 @@ export default function SimulacionPeriodo() {
         codigo: a.codigo,
         ciudad: a.ciudad,
         pais: a.pais,
+        continente: a.continente || '',
         capacidad: state.capacidad,
         ocupacion: state.ocupacion,
         pct,
@@ -2508,6 +2631,9 @@ export default function SimulacionPeriodo() {
       const q = filterAlmPais.toLowerCase();
       list = list.filter(a => a.pais.toLowerCase().includes(q));
     }
+    if (filterAlmContinente) {
+      list = list.filter(a => a.continente === filterAlmContinente);
+    }
     if (filterAlmSemaforo) {
       list = list.filter(a => {
         const pct = a.pct;
@@ -2523,6 +2649,7 @@ export default function SimulacionPeriodo() {
       if (sortAlmBy === 'codigo') cmp = a.codigo.localeCompare(b.codigo);
       else if (sortAlmBy === 'ciudad') cmp = a.ciudad.localeCompare(b.ciudad);
       else if (sortAlmBy === 'pais') cmp = a.pais.localeCompare(b.pais);
+      else if (sortAlmBy === 'continente') cmp = a.continente.localeCompare(b.continente);
       else if (sortAlmBy === 'ocupacion') cmp = a.pct - b.pct;
       else if (sortAlmBy === 'stock') cmp = a.ocupacion - b.ocupacion;
       else if (sortAlmBy === 'entrantes') cmp = a.entrantes.maletas - b.entrantes.maletas;
@@ -2531,7 +2658,7 @@ export default function SimulacionPeriodo() {
       return sortAlmDir === 'desc' ? -cmp : cmp;
     });
     return list;
-  }, [almacenesData, filterAlmCodigo, filterAlmPais, filterAlmSemaforo, sortAlmBy, sortAlmDir]);
+  }, [almacenesData, filterAlmCodigo, filterAlmPais, filterAlmContinente, filterAlmSemaforo, sortAlmBy, sortAlmDir]);
 
   const totalHeightAlm = almacenesFiltrados.length * ITEM_HEIGHT_ALM;
   const startIdxAlm = Math.max(0, Math.floor(scrollTopAlm / ITEM_HEIGHT_ALM) - OVERSCAN_ALM);
@@ -2585,6 +2712,14 @@ export default function SimulacionPeriodo() {
       }
     };
   }, [scrollTrigger]);
+
+  // Hacer arrastrable el panel de Indicadores globales
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const cleanups: Array<() => void> = [];
+    if (globalIndicatorsPanelRef.current) cleanups.push(makeDraggableFloating(globalIndicatorsPanelRef.current, mapRef.current));
+    return () => cleanups.forEach(fn => fn());
+  }, []);
 
   return (
     <div className="main-wrapper">
@@ -2739,6 +2874,9 @@ export default function SimulacionPeriodo() {
               @keyframes led-blink { 0%,100% { opacity:1; box-shadow:0 0 6px rgba(239,68,68,0.8); } 50% { opacity:0.4; box-shadow:0 0 2px rgba(239,68,68,0.2); } }
               .led-active { background-color: #ef4444; border: 1px solid #b91c1c; animation: led-blink 1.2s ease-in-out infinite; }
               .almacen-marker { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); }
+              .warehouse-popup .leaflet-popup-content-wrapper { padding: 6px 8px !important; border-radius: 6px; }
+              .warehouse-popup .leaflet-popup-content { margin: 0 !important; }
+              .warehouse-popup .leaflet-popup-tip-container { display: none; }
             `}</style>
 
             <div style={{ pointerEvents: 'auto', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)', overflow: 'hidden', width: 110 }}>
@@ -2855,13 +2993,20 @@ export default function SimulacionPeriodo() {
             </div>
 
             {/* Indicadores globales — arriba */}
-            <div style={{ width: isGlobalIndicatorsOpen ? 250 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
+            <div ref={globalIndicatorsPanelRef} style={{ width: isGlobalIndicatorsOpen ? 250 : 200, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', overflow: 'hidden', transition: 'width 0.2s ease' }}>
               <div
                 onClick={() => setIsGlobalIndicatorsOpen(!isGlobalIndicatorsOpen)}
                 style={{ padding: '6px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none', whiteSpace: 'nowrap' }}
               >
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>📊 Indicadores globales</span>
-                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>{isGlobalIndicatorsOpen ? '▲' : '▼'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <button onClick={(e) => { e.stopPropagation(); const p = globalIndicatorsPanelRef.current as any; if (p && p._resetPosition) p._resetPosition(); }}
+                    title="Volver a posición original"
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280', padding: 0, lineHeight: 1 }}>
+                    ⌖
+                  </button>
+                  <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 2 }}>{isGlobalIndicatorsOpen ? '▲' : '▼'}</span>
+                </div>
               </div>
               {isGlobalIndicatorsOpen && (
                 <div style={{ borderTop: '1px solid #e5e7eb', padding: '4px 10px' }}>
@@ -3060,6 +3205,7 @@ export default function SimulacionPeriodo() {
                         onClick={() => {
                           const simStart = sim.simStartDateRef.current;
                           if (!simStart || esCancelado || esCancelling) return;
+                          if (selectedVueloKey === claveVuelo) { setSelectedVueloKey(null); cerrarPanelAvion(); return; }
                           const minInicio = vuelo.minutosInicio;
                           let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.key.startsWith('unused-'));
                           console.log(`[DEBUG VUELOS] vuelo=${vuelo.origen}→${vuelo.destino} salida=${salidaHHMM} minInicio=${minInicio}`, fe ? `feKey=${fe.key} capac=${fe.capacidadVuelo}` : 'SIN FE (card)');
@@ -3348,7 +3494,7 @@ export default function SimulacionPeriodo() {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                  <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmSemaforo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
+                  <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmContinente(''); setFilterAlmSemaforo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
                     style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
                     ✕ Borrar
                   </button>
@@ -3364,12 +3510,23 @@ export default function SimulacionPeriodo() {
                   </select>
                 </div>
                 <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Continente</label>
+                  <select value={filterAlmContinente} onChange={e => setFilterAlmContinente(e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
+                    <option value="">Todos</option>
+                    {[...new Set(sim.aeropuertos.map(a => a.continente).filter(Boolean))].sort().map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: 8 }}>
                   <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
                   <select value={sortAlmBy} onChange={e => setSortAlmBy(e.target.value)}
                     style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none' }}>
                     <option value="codigo">Código</option>
                     <option value="ciudad">Ciudad</option>
                     <option value="pais">País</option>
+                    <option value="continente">Continente</option>
                     <option value="ocupacion">Ocupación</option>
                     <option value="stock">Stock</option>
                     <option value="entrantes">Entrantes</option>
@@ -3429,7 +3586,7 @@ export default function SimulacionPeriodo() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <div>
                             <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{alm.codigo}</span>
-                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}{alm.continente ? ` · ${alm.continente}` : ''}</div>
                           </div>
                           <span style={{ fontSize: '11px', fontWeight: 700, color: estadoColor }}>{alm.pct.toFixed(0)}%</span>
                         </div>

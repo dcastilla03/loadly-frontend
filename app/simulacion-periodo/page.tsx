@@ -348,6 +348,7 @@ export default function SimulacionPeriodo() {
   const [filterAlmCodigo, setFilterAlmCodigo] = useState('');
   const [filterAlmCiudad, setFilterAlmCiudad] = useState('');
   const [filterAlmPais, setFilterAlmPais] = useState('');
+  const [filterAlmContinente, setFilterAlmContinente] = useState('');
   const [filterAlmSemaforo, setFilterAlmSemaforo] = useState('');
   const [sortAlmBy, setSortAlmBy] = useState('codigo');
   const [sortAlmDir, setSortAlmDir] = useState<'asc' | 'desc'>('asc');
@@ -829,23 +830,13 @@ export default function SimulacionPeriodo() {
       const generarPopupHTML = () => {
         const estado = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
         const pct = estado.capacidad > 0 ? Math.min(100, (estado.ocupacion / estado.capacidad) * 100) : 0;
-        const color = pct < 50 ? '#10b981' : pct < 80 ? '#f97316' : '#ef4444';
+        const color = pct === 0 ? '#3b82f6' : pct < 50 ? '#10b981' : pct < 80 ? '#f97316' : '#ef4444';
         return `
-          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:220px;">
-            <div style="font-size:16px;font-weight:700;color:#1f2937;margin-bottom:8px;"><b>${a.codigo}</b></div>
-            <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">${a.ciudad}, ${a.pais}</div>
-            <div style="background:#f3f4f6;padding:10px;border-radius:6px;margin-bottom:10px;">
-              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;font-weight:600;text-transform:uppercase;">Ocupación del Almacén</div>
-              <div style="height:8px;background:#d1d5db;border-radius:4px;overflow:hidden;margin-bottom:6px;">
-                <div style="height:100%;background:${color};width:${pct}%;transition:width 0.3s;"></div>
-              </div>
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:12px;font-weight:600;color:#1f2937;">${estado.ocupacion} / ${estado.capacidad} maletas</span>
-                <span style="font-size:11px;font-weight:600;color:${color};">${Math.round(pct)}%</span>
-              </div>
-            </div>
-            <div style="font-size:10px;color:#9ca3af;padding-top:8px;border-top:1px solid #e5e7eb;">
-              <div>Tipo: ${a.capacidad > 7000 ? '⭐ Grande' : a.capacidad > 4000 ? '⭐⭐ Mediano' : '⭐⭐⭐ Pequeño'}</div>
+          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:120px;line-height:1.3;">
+            <div style="font-size:11px;font-weight:700;color:#1f2937;">${a.codigo} · ${a.ciudad}</div>
+            <div style="display:flex;align-items:center;gap:4px;font-size:10px;line-height:1.2;">
+              <span style="font-weight:700;color:${color};">${pct.toFixed(1)}%</span>
+              <span style="color:#6b7280;">${estado.ocupacion}/${estado.capacidad} maletas</span>
             </div>
           </div>`;
       };
@@ -854,7 +845,7 @@ export default function SimulacionPeriodo() {
       m.setZIndexOffset(10000);
       m.airportCode = a.codigo;
       m.generarPopupHTML = generarPopupHTML;
-      m.bindPopup(generarPopupHTML(), { maxWidth: 300 });
+      m.bindPopup(generarPopupHTML(), { maxWidth: 300, className: 'warehouse-popup' });
       m.on('popupopen', () => { openPopupMarkerRef.current = m; m.setPopupContent(m.generarPopupHTML()); });
       m.on('popupclose', () => { if (openPopupMarkerRef.current === m) openPopupMarkerRef.current = null; });
       markersRef.current.push(m);
@@ -2395,6 +2386,7 @@ export default function SimulacionPeriodo() {
         codigo: a.codigo,
         ciudad: a.ciudad,
         pais: a.pais,
+        continente: a.continente || '',
         capacidad: state.capacidad,
         ocupacion: state.ocupacion,
         pct,
@@ -2421,6 +2413,9 @@ export default function SimulacionPeriodo() {
       const q = filterAlmPais.toLowerCase();
       list = list.filter(a => a.pais.toLowerCase().includes(q));
     }
+    if (filterAlmContinente) {
+      list = list.filter(a => a.continente === filterAlmContinente);
+    }
     if (filterAlmSemaforo) {
       list = list.filter(a => {
         const pct = a.pct;
@@ -2436,6 +2431,7 @@ export default function SimulacionPeriodo() {
       if (sortAlmBy === 'codigo') cmp = a.codigo.localeCompare(b.codigo);
       else if (sortAlmBy === 'ciudad') cmp = a.ciudad.localeCompare(b.ciudad);
       else if (sortAlmBy === 'pais') cmp = a.pais.localeCompare(b.pais);
+      else if (sortAlmBy === 'continente') cmp = a.continente.localeCompare(b.continente);
       else if (sortAlmBy === 'ocupacion') cmp = a.pct - b.pct;
       else if (sortAlmBy === 'stock') cmp = a.ocupacion - b.ocupacion;
       else if (sortAlmBy === 'entrantes') cmp = a.entrantes.maletas - b.entrantes.maletas;
@@ -2444,7 +2440,7 @@ export default function SimulacionPeriodo() {
       return sortAlmDir === 'desc' ? -cmp : cmp;
     });
     return list;
-  }, [almacenesData, filterAlmCodigo, filterAlmPais, filterAlmSemaforo, sortAlmBy, sortAlmDir]);
+  }, [almacenesData, filterAlmCodigo, filterAlmPais, filterAlmContinente, filterAlmSemaforo, sortAlmBy, sortAlmDir]);
 
   const totalHeightAlm = almacenesFiltrados.length * ITEM_HEIGHT_ALM;
   const startIdxAlm = Math.max(0, Math.floor(scrollTopAlm / ITEM_HEIGHT_ALM) - OVERSCAN_ALM);
@@ -3073,6 +3069,9 @@ export default function SimulacionPeriodo() {
               @keyframes led-blink { 0%,100% { opacity:1; box-shadow:0 0 6px rgba(239,68,68,0.8); } 50% { opacity:0.4; box-shadow:0 0 2px rgba(239,68,68,0.2); } }
               .led-active { background-color: #ef4444; border: 1px solid #b91c1c; animation: led-blink 1.2s ease-in-out infinite; }
               .almacen-marker { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); }
+              .warehouse-popup .leaflet-popup-content-wrapper { padding: 6px 8px !important; border-radius: 6px; }
+              .warehouse-popup .leaflet-popup-content { margin: 0 !important; }
+              .warehouse-popup .leaflet-popup-tip-container { display: none; }
             `}</style>
 
             <div style={{ pointerEvents: 'auto', backgroundColor: 'rgba(255,255,255,0.92)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow)', overflow: 'hidden', width: 110 }}>
@@ -3605,6 +3604,7 @@ export default function SimulacionPeriodo() {
                         onClick={() => {
                           const simStart = sim.simStartDateRef.current;
                           if (!simStart || esCancelado || esCancelling) return;
+                          if (selectedVueloKey === codigoVuelo) { setSelectedVueloKey(null); cerrarPanelAvion(); return; }
                           const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
                           // setUTCHours para mantener todo en UTC
                           let d = new Date(simStart); d.setUTCHours(gmtHour, gmtMin, 0, 0);
@@ -3733,7 +3733,7 @@ export default function SimulacionPeriodo() {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                  <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmSemaforo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
+                  <button onClick={() => { setFilterAlmCodigo(''); setFilterAlmContinente(''); setFilterAlmSemaforo(''); setSortAlmBy('codigo'); setSortAlmDir('asc'); }}
                     style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
                     ✕ Borrar
                   </button>
@@ -3749,12 +3749,23 @@ export default function SimulacionPeriodo() {
                   </select>
                 </div>
                 <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Continente</label>
+                  <select value={filterAlmContinente} onChange={e => setFilterAlmContinente(e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
+                    <option value="">Todos</option>
+                    {[...new Set(sim.aeropuertos.map(a => a.continente).filter(Boolean))].sort().map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: 8 }}>
                   <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
                   <select value={sortAlmBy} onChange={e => setSortAlmBy(e.target.value)}
                     style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none' }}>
                     <option value="codigo">Código</option>
                     <option value="ciudad">Ciudad</option>
                     <option value="pais">País</option>
+                    <option value="continente">Continente</option>
                     <option value="ocupacion">Ocupación</option>
                     <option value="stock">Stock</option>
                     <option value="entrantes">Entrantes</option>
@@ -3820,7 +3831,7 @@ export default function SimulacionPeriodo() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <div>
                             <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{alm.codigo}</span>
-                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}{alm.continente ? ` · ${alm.continente}` : ''}</div>
                           </div>
                           <span style={{ fontSize: '11px', fontWeight: 700, color: estadoColor }}>{alm.pct.toFixed(0)}%</span>
                         </div>

@@ -101,6 +101,12 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
   }
 }
 
+function formatMinutosToHHMM(minutos: number, simStartDate: Date | null): string {
+  if (!simStartDate || !Number.isFinite(minutos)) return '—';
+  const date = new Date(simStartDate.getTime() + minutos * 60000);
+  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 // ─── Constantes ──────────────────────────────────────────────────────────────
 /** Segundos reales por iteración (30s algoritmo + 5s margen) */
 const SEGS_POR_ITER = 35;
@@ -117,6 +123,8 @@ export default function SimulacionPeriodo() {
   const [mapReady, setMapReady] = useState(false);
   const hoveredFlightKeyRef = useRef<string | null>(null);
   const tooltipElRef = useRef<HTMLDivElement | null>(null);
+  const selectedPinRef = useRef<HTMLDivElement | null>(null);
+  const selectedPinFlightKeyRef = useRef<string | null>(null);
 
   const sim = useSimulacion();
   const simRef = useRef(sim);
@@ -1312,6 +1320,13 @@ export default function SimulacionPeriodo() {
         tooltipElRef.current.style.left = (r.left + r.width / 2) + 'px';
         tooltipElRef.current.style.top = (r.top - 6) + 'px';
       }
+
+      // Reposicionar pin si este vuelo está seleccionado
+      if (selectedPinFlightKeyRef.current === fe.key && selectedPinRef.current && selectedPinRef.current.style.display !== 'none') {
+        const rc = fe.airplaneImage.getBoundingClientRect();
+        selectedPinRef.current.style.left = (rc.left + rc.width / 2) + 'px';
+        selectedPinRef.current.style.top = (rc.top + rc.height / 2 - 8) + 'px';
+      }
     }
 
     function startLoop() {
@@ -1343,6 +1358,16 @@ export default function SimulacionPeriodo() {
             if (lastStopwatchLabelRef.current !== '') {
               lastStopwatchLabelRef.current = '';
               setStopwatch('00:00');
+            }
+          }
+
+          if (selectedPinFlightKeyRef.current && selectedPinRef.current && selectedPinRef.current.style.display !== 'none') {
+            const stillActive = flightEventsRef.current.some(fe => fe.key === selectedPinFlightKeyRef.current && fe.active && !fe.done && fe.airplaneImage);
+            if (!stillActive) {
+              selectedPinRef.current.style.display = 'none';
+              selectedPinFlightKeyRef.current = null;
+              panelFlightKeyRef.current = null;
+              setSelectedVueloKey(null);
             }
           }
 
@@ -1411,7 +1436,12 @@ export default function SimulacionPeriodo() {
     return () => {
       cancelAnimationFrame(frameId);
       if (checkInterval) clearInterval(checkInterval);
-      // Limpiar referencias SVG para que al re-montar se vuelvan a crear
+      if (selectedPinRef.current) {
+        selectedPinRef.current.style.display = 'none';
+        selectedPinFlightKeyRef.current = null;
+      }
+      panelFlightKeyRef.current = null;
+      setSelectedVueloKey(null);
       for (const fe of flightEventsRef.current) {
         fe.svgElement = undefined;
         fe.airplaneGroup = undefined;
@@ -1535,6 +1565,12 @@ export default function SimulacionPeriodo() {
       fe.active = false;
       fe.done = true;
     });
+    if (selectedPinRef.current) {
+      selectedPinRef.current.style.display = 'none';
+      selectedPinFlightKeyRef.current = null;
+    }
+    panelFlightKeyRef.current = null;
+    setSelectedVueloKey(null);
     setShowStoppedOverlay(true);
     setStartDate('');
   }
@@ -1863,12 +1899,42 @@ export default function SimulacionPeriodo() {
     if (panel) panel.remove();
     panelFlightKeyRef.current = null;
     setSelectedVueloKey(null);
+    if (selectedPinRef.current) {
+      selectedPinRef.current.style.display = 'none';
+    }
+    selectedPinFlightKeyRef.current = null;
   }
 
   function mostrarPanelAvion(fe: FlightEvent, autoScroll = true) {
     // Cerrar panel de envío si estuviera abierto
     const panelEnvio = document.getElementById('airplaneDetailsPanel');
     if (panelEnvio) panelEnvio.remove();
+
+    // Ocultar pin anterior
+    if (selectedPinRef.current) {
+      selectedPinRef.current.style.display = 'none';
+    }
+    selectedPinFlightKeyRef.current = null;
+
+    // Crear/posicionar pin para el nuevo avión seleccionado
+    if (fe.airplaneImage) {
+      if (!selectedPinRef.current) {
+        const pin = document.createElement('div');
+        pin.id = 'selected-flight-pin';
+        pin.style.cssText = 'position:fixed;pointer-events:none;z-index:99999;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);';
+        const img = document.createElement('img');
+        img.style.cssText = 'width:22px;height:22px;';
+        pin.appendChild(img);
+        document.body.appendChild(pin);
+        selectedPinRef.current = pin;
+      }
+      selectedPinRef.current.style.display = 'flex';
+      (selectedPinRef.current.querySelector('img') as HTMLImageElement).src = '/down-arrow.svg';
+      const r = fe.airplaneImage.getBoundingClientRect();
+      selectedPinRef.current.style.left = (r.left + r.width / 2) + 'px';
+      selectedPinRef.current.style.top = (r.top + r.height / 2 - 8) + 'px';
+      selectedPinFlightKeyRef.current = fe.key;
+    }
 
     let panel = document.getElementById('airplaneFlightPanel');
     const isNew = !panel;
@@ -2563,22 +2629,23 @@ export default function SimulacionPeriodo() {
   // ── Datos derivados de Almacenes ────────────────────────────────────────────
   const almacenesData = useMemo(() => {
     const feRef = flightEventsRef.current;
-    const rutasMap = rutasPlanificadasRef.current;
 
-    const salientesPorOrigen = new Map<string, { envios: Set<string>; maletas: number }>();
-    const entrantesPorDestino = new Map<string, { envios: Set<string>; maletas: number }>();
+    const currentMin = currentMinSimRef.current;
+    const salientesPorOrigen = new Map<string, { vuelos: number; maletas: number }>();
+    const entrantesPorDestino = new Map<string, { vuelos: number; maletas: number }>();
 
-    for (const ruta of rutasMap.values()) {
-      for (const tramo of ruta.tramos || []) {
-        let s = salientesPorOrigen.get(tramo.origen);
-        if (!s) { s = { envios: new Set(), maletas: 0 }; salientesPorOrigen.set(tramo.origen, s); }
-        s.envios.add(ruta.idEnvio);
-        s.maletas += tramo.maletasVuelo;
-
-        let e = entrantesPorDestino.get(tramo.destino);
-        if (!e) { e = { envios: new Set(), maletas: 0 }; entrantesPorDestino.set(tramo.destino, e); }
-        e.envios.add(ruta.idEnvio);
-        e.maletas += tramo.maletasVuelo;
+    for (const fe of feRef) {
+      if (!fe.done && fe.origenCode && fe.minutosInicio != null && fe.minutosInicio >= currentMin) {
+        let s = salientesPorOrigen.get(fe.origenCode);
+        if (!s) { s = { vuelos: 0, maletas: 0 }; salientesPorOrigen.set(fe.origenCode, s); }
+        s.vuelos++;
+        s.maletas += fe.maletasVuelo;
+      }
+      if (!fe.done && fe.destinoCode && fe.minutosFin != null && fe.minutosFin >= currentMin) {
+        let e = entrantesPorDestino.get(fe.destinoCode);
+        if (!e) { e = { vuelos: 0, maletas: 0 }; entrantesPorDestino.set(fe.destinoCode, e); }
+        e.vuelos++;
+        e.maletas += fe.maletasVuelo;
       }
     }
 
@@ -2592,13 +2659,30 @@ export default function SimulacionPeriodo() {
       }
     }
 
+    const proximaSalida = new Map<string, number>();
+    const proximaLlegada = new Map<string, number>();
+    for (const fe of feRef) {
+      if (!fe.done && fe.minutosInicio != null && fe.minutosInicio >= currentMin && fe.origenCode) {
+        const existing = proximaSalida.get(fe.origenCode);
+        if (existing === undefined || fe.minutosInicio < existing) {
+          proximaSalida.set(fe.origenCode, fe.minutosInicio);
+        }
+      }
+      if (!fe.done && fe.minutosFin != null && fe.minutosFin >= currentMin && fe.destinoCode) {
+        const existing = proximaLlegada.get(fe.destinoCode);
+        if (existing === undefined || fe.minutosFin < existing) {
+          proximaLlegada.set(fe.destinoCode, fe.minutosFin);
+        }
+      }
+    }
+
     return sim.aeropuertos.map(a => {
       const state = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
       const pct = state.capacidad > 0 ? (state.ocupacion / state.capacidad) * 100 : 0;
       const rawSal = salientesPorOrigen.get(a.codigo);
       const rawEnt = entrantesPorDestino.get(a.codigo);
-      const sal = { envios: rawSal?.envios.size ?? 0, maletas: rawSal?.maletas ?? 0 };
-      const ent = { envios: rawEnt?.envios.size ?? 0, maletas: rawEnt?.maletas ?? 0 };
+      const sal = { envios: rawSal?.vuelos ?? 0, maletas: rawSal?.maletas ?? 0 };
+      const ent = { envios: rawEnt?.vuelos ?? 0, maletas: rawEnt?.maletas ?? 0 };
       const tra = transitoPorDestino.get(a.codigo) || { vuelos: 0, maletas: 0 };
       return {
         codigo: a.codigo,
@@ -2611,6 +2695,8 @@ export default function SimulacionPeriodo() {
         salientes: sal,
         entrantes: ent,
         transito: tra,
+        proximaSalidaMinutos: proximaSalida.get(a.codigo) ?? Infinity,
+        proximaLlegadaMinutos: proximaLlegada.get(a.codigo) ?? Infinity,
       };
     });
   }, [sim.aeropuertos, flightEventsRef, rutasPlanificadasRef, refreshTick, sim.allFlightEvents, simMinutos]);
@@ -2655,6 +2741,8 @@ export default function SimulacionPeriodo() {
       else if (sortAlmBy === 'entrantes') cmp = a.entrantes.maletas - b.entrantes.maletas;
       else if (sortAlmBy === 'salientes') cmp = a.salientes.maletas - b.salientes.maletas;
       else if (sortAlmBy === 'transito') cmp = a.transito.maletas - b.transito.maletas;
+      else if (sortAlmBy === 'proxima_salida') cmp = a.proximaSalidaMinutos - b.proximaSalidaMinutos;
+      else if (sortAlmBy === 'proxima_llegada') cmp = a.proximaLlegadaMinutos - b.proximaLlegadaMinutos;
       return sortAlmDir === 'desc' ? -cmp : cmp;
     });
     return list;
@@ -2887,7 +2975,7 @@ export default function SimulacionPeriodo() {
               </div>
               <div style={{ overflow: 'hidden', transition: 'max-height 0.25s ease, opacity 0.2s ease', maxHeight: centroControlOpen ? 100 : 0, opacity: centroControlOpen ? 1 : 0 }}>
                 <div style={{ padding: '0 8px 6px', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'stretch' }}>
-                  <button onClick={() => { setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) { setAlmacenesPanelOpen(false); setEnviosPanelOpen(false); } }}
+                  <button onClick={() => { if (flightPanelOpen) cerrarPanelAvion(); setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) { setAlmacenesPanelOpen(false); setEnviosPanelOpen(false); } }}
                     style={{ padding: '5px 10px', fontSize: 11, backgroundColor: flightPanelOpen ? '#f97316' : '#10b981', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'white', fontWeight: 600, textAlign: 'center' }}>
                     ✈️ Vuelos
                   </button>
@@ -3059,7 +3147,7 @@ export default function SimulacionPeriodo() {
                   Vuelos Disponibles
                 </h3>
                 <button
-                  onClick={() => setFlightPanelOpen(false)}
+                  onClick={() => { setFlightPanelOpen(false); cerrarPanelAvion(); }}
                   style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}
                 >
                   ×
@@ -3532,6 +3620,8 @@ export default function SimulacionPeriodo() {
                     <option value="entrantes">Entrantes</option>
                     <option value="salientes">Salientes</option>
                     <option value="transito">En tránsito</option>
+                    <option value="proxima_salida">Próxima salida</option>
+                    <option value="proxima_llegada">Próxima llegada</option>
                   </select>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -3595,9 +3685,9 @@ export default function SimulacionPeriodo() {
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
                           <span>📦 Stock: <strong style={{ color: 'var(--text-primary)' }}>{alm.ocupacion}/{alm.capacidad}</strong></span>
-                          <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#2563eb' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
-                          <span>📤 Salen: <strong style={{ color: '#d97706' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
-                          <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#059669' }}>{alm.transito.maletas}</strong></span>
+                          <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#000000' }}>{alm.entrantes.envios} vuelos</strong> ({alm.entrantes.maletas} maletas)</span>
+                          <span>📤 Salen: <strong style={{ color: '#000000' }}>{alm.salientes.envios} vuelos</strong> ({alm.salientes.maletas} maletas)</span>
+                          <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#000000' }}>{alm.transito.maletas}</strong></span>
                         </div>
                         {selectedAlmacen === alm.codigo && (
                           <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
@@ -3611,7 +3701,7 @@ export default function SimulacionPeriodo() {
                                 <>
                                   {salientes.length > 0 && (
                                     <div style={{ marginBottom: '4px' }}>
-                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#d97706' }}>📤 Salen ({salientes.length}):</span>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>📤 Salen ({salientes.length}):</span>
                                       {salientes.slice(0, 3).map(r => {
                                         const tramo = (r.tramos || []).find(t => t.origen === alm.codigo);
                                         const claveR = claveEnvio(r.idEnvio, r.numeroLote);
@@ -3619,7 +3709,7 @@ export default function SimulacionPeriodo() {
                                         const loteLabel = r.numeroLote ? ` · L${r.numeroLote}/${sim.totalLotesRef.current.get(r.idEnvio) ?? '?'}` : '';
                                         return (
                                           <div key={claveR} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                            {codUnico} → {r.destino} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
+                                            {codUnico} → {r.destino} (Sale: {tramo?.sale || '??'}, {tramo?.maletasVuelo} maletas)
                                           </div>
                                         );  
                                       })}
@@ -3628,13 +3718,13 @@ export default function SimulacionPeriodo() {
                                   )}
                                   {entrantes.length > 0 && (
                                     <div style={{ marginBottom: '4px' }}>
-                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#2563eb' }}>📥 Entran ({entrantes.length}):</span>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>📥 Entran ({entrantes.length}):</span>
                                       {entrantes.slice(0, 3).map(r => {
                                         const tramo = (r.tramos || []).find(t => t.destino === alm.codigo);
                                         const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
                                         return (
                                           <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                            {tramo?.origen} → {codUnico} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
+                                            {tramo?.origen} → {codUnico} (Llega: {tramo?.llega || '??'}, {tramo?.maletasVuelo} maletas)
                                           </div>
                                         );
                                       })}
@@ -3643,10 +3733,10 @@ export default function SimulacionPeriodo() {
                                   )}
                                   {enTransito.length > 0 && (
                                     <div>
-                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#059669' }}>✈️ En tránsito ({enTransito.length}):</span>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>✈️ En tránsito ({enTransito.length}):</span>
                                       {enTransito.filter(fe => fe.maletasVuelo > 0).map(fe => (
                                         <div key={fe.key} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                          {fe.origenCode} → ({fe.maletasVuelo} maletas)
+                                          {fe.origenCode} → {fe.destinoCode} (Llega: {formatMinutosToHHMM(fe.minutosFin, simStartDateObj)}, {fe.maletasVuelo} maletas)
                                         </div>
                                       ))}
                                     </div>

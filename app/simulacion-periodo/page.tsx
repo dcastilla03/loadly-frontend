@@ -1559,17 +1559,6 @@ export default function SimulacionPeriodo() {
       // flujo, para que el desprendimiento sea imperceptible (sin saltos).
       const rect = panel.getBoundingClientRect();
 
-      // Placeholder invisible: reserva el mismo espacio dentro del flex para que los
-      // paneles hermanos no se reacomoden al instante.
-      const placeholder = document.createElement('div');
-      placeholder.style.width = rect.width + 'px';
-      placeholder.style.height = rect.height + 'px';
-      placeholder.style.flexShrink = '0';
-      placeholder.style.visibility = 'hidden';
-      placeholder.setAttribute('aria-hidden', 'true');
-      panel.parentNode?.insertBefore(placeholder, panel.nextSibling);
-      (panel as any)._placeholder = placeholder;
-
       panel.style.position = 'fixed';
       panel.style.left = rect.left + 'px';
       panel.style.top = rect.top + 'px';
@@ -1583,10 +1572,6 @@ export default function SimulacionPeriodo() {
     };
 
     const resetPosition = () => {
-      const placeholder = (panel as any)._placeholder as HTMLElement | undefined;
-      if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
-      (panel as any)._placeholder = null;
-
       panel.style.position = '';
       panel.style.left = '';
       panel.style.top = '';
@@ -1664,8 +1649,6 @@ export default function SimulacionPeriodo() {
       panel.removeEventListener('mousedown', onMouseDown as any);
       document.removeEventListener('mousemove', onMouseMove as any);
       document.removeEventListener('mouseup', onMouseUp);
-      const placeholder = (panel as any)._placeholder as HTMLElement | undefined;
-      if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
     };
   }
 
@@ -3809,8 +3792,8 @@ export default function SimulacionPeriodo() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
                           <span>📦 Stock: <strong style={{ color: 'var(--text-primary)' }}>{alm.ocupacion}/{alm.capacidad}</strong></span>
                           <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: 'var(--text-primary)' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
-                          <span>📤 Salen: <strong style={{ color: '#d97706' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
-                          <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#059669' }}>{alm.transito.maletas}</strong></span>
+                          <span>📤 Salen: <strong style={{ color: '#000000' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
+                          <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#000000' }}>{alm.transito.maletas}</strong></span>
                         </div>
                         {selectedAlmacen === alm.codigo && (
                           <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
@@ -3824,7 +3807,7 @@ export default function SimulacionPeriodo() {
                                 <>
                                   {salientes.length > 0 && (
                                     <div style={{ marginBottom: '4px' }}>
-                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#d97706' }}>📤 Salen ({salientes.length}):</span>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>📤 Salen ({salientes.length}):</span>
                                       {salientes.slice(0, 3).map(r => {
                                         const tramo = (r.tramos || []).find(t => t.origen === alm.codigo);
                                         const clave = claveEnvio(r.idEnvio, r.numeroLote);
@@ -3841,7 +3824,7 @@ export default function SimulacionPeriodo() {
                                   )}
                                   {entrantes.length > 0 && (
                                     <div style={{ marginBottom: '4px' }}>
-                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#2563eb' }}>📥 Entran ({entrantes.length}):</span>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>📥 Entran ({entrantes.length}):</span>
                                       {entrantes.slice(0, 3).map(r => {
                                         const tramo = (r.tramos || []).find(t => t.destino === alm.codigo);
                                         const clave = claveEnvio(r.idEnvio, r.numeroLote);
@@ -3858,7 +3841,7 @@ export default function SimulacionPeriodo() {
                                   )}
                                   {enTransito.length > 0 && (
                                     <div>
-                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#059669' }}>✈️ En tránsito ({enTransito.length}):</span>
+                                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>✈️ En tránsito ({enTransito.length}):</span>
                                       {enTransito.filter(fe => fe.maletasVuelo > 0).map(fe => (
                                         <div key={fe.key} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
                                           {fe.origenCode} → ({fe.maletasVuelo} maletas)

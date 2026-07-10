@@ -101,12 +101,6 @@ function formatSimTime(minutos: number, startDate: string | null, startTime: str
   }
 }
 
-function formatMinutosToHHMM(minutos: number, simStartDate: Date | null): string {
-  if (!simStartDate || !Number.isFinite(minutos)) return '—';
-  const date = new Date(simStartDate.getTime() + minutos * 60000);
-  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
-}
-
 // ─── Constantes ──────────────────────────────────────────────────────────────
 /** Segundos reales por iteración (30s algoritmo + 5s margen) */
 const SEGS_POR_ITER = 35;
@@ -2629,23 +2623,22 @@ export default function SimulacionPeriodo() {
   // ── Datos derivados de Almacenes ────────────────────────────────────────────
   const almacenesData = useMemo(() => {
     const feRef = flightEventsRef.current;
+    const rutasMap = rutasPlanificadasRef.current;
 
-    const currentMin = currentMinSimRef.current;
-    const salientesPorOrigen = new Map<string, { vuelos: number; maletas: number }>();
-    const entrantesPorDestino = new Map<string, { vuelos: number; maletas: number }>();
+    const salientesPorOrigen = new Map<string, { envios: Set<string>; maletas: number }>();
+    const entrantesPorDestino = new Map<string, { envios: Set<string>; maletas: number }>();
 
-    for (const fe of feRef) {
-      if (!fe.done && fe.origenCode && fe.minutosInicio != null && fe.minutosInicio >= currentMin) {
-        let s = salientesPorOrigen.get(fe.origenCode);
-        if (!s) { s = { vuelos: 0, maletas: 0 }; salientesPorOrigen.set(fe.origenCode, s); }
-        s.vuelos++;
-        s.maletas += fe.maletasVuelo;
-      }
-      if (!fe.done && fe.destinoCode && fe.minutosFin != null && fe.minutosFin >= currentMin) {
-        let e = entrantesPorDestino.get(fe.destinoCode);
-        if (!e) { e = { vuelos: 0, maletas: 0 }; entrantesPorDestino.set(fe.destinoCode, e); }
-        e.vuelos++;
-        e.maletas += fe.maletasVuelo;
+    for (const ruta of rutasMap.values()) {
+      for (const tramo of ruta.tramos || []) {
+        let s = salientesPorOrigen.get(tramo.origen);
+        if (!s) { s = { envios: new Set(), maletas: 0 }; salientesPorOrigen.set(tramo.origen, s); }
+        s.envios.add(ruta.idEnvio);
+        s.maletas += tramo.maletasVuelo;
+
+        let e = entrantesPorDestino.get(tramo.destino);
+        if (!e) { e = { envios: new Set(), maletas: 0 }; entrantesPorDestino.set(tramo.destino, e); }
+        e.envios.add(ruta.idEnvio);
+        e.maletas += tramo.maletasVuelo;
       }
     }
 
@@ -2659,30 +2652,13 @@ export default function SimulacionPeriodo() {
       }
     }
 
-    const proximaSalida = new Map<string, number>();
-    const proximaLlegada = new Map<string, number>();
-    for (const fe of feRef) {
-      if (!fe.done && fe.minutosInicio != null && fe.minutosInicio >= currentMin && fe.origenCode) {
-        const existing = proximaSalida.get(fe.origenCode);
-        if (existing === undefined || fe.minutosInicio < existing) {
-          proximaSalida.set(fe.origenCode, fe.minutosInicio);
-        }
-      }
-      if (!fe.done && fe.minutosFin != null && fe.minutosFin >= currentMin && fe.destinoCode) {
-        const existing = proximaLlegada.get(fe.destinoCode);
-        if (existing === undefined || fe.minutosFin < existing) {
-          proximaLlegada.set(fe.destinoCode, fe.minutosFin);
-        }
-      }
-    }
-
     return sim.aeropuertos.map(a => {
       const state = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
       const pct = state.capacidad > 0 ? (state.ocupacion / state.capacidad) * 100 : 0;
       const rawSal = salientesPorOrigen.get(a.codigo);
       const rawEnt = entrantesPorDestino.get(a.codigo);
-      const sal = { envios: rawSal?.vuelos ?? 0, maletas: rawSal?.maletas ?? 0 };
-      const ent = { envios: rawEnt?.vuelos ?? 0, maletas: rawEnt?.maletas ?? 0 };
+      const sal = { envios: rawSal?.envios.size ?? 0, maletas: rawSal?.maletas ?? 0 };
+      const ent = { envios: rawEnt?.envios.size ?? 0, maletas: rawEnt?.maletas ?? 0 };
       const tra = transitoPorDestino.get(a.codigo) || { vuelos: 0, maletas: 0 };
       return {
         codigo: a.codigo,
@@ -2695,11 +2671,9 @@ export default function SimulacionPeriodo() {
         salientes: sal,
         entrantes: ent,
         transito: tra,
-        proximaSalidaMinutos: proximaSalida.get(a.codigo) ?? Infinity,
-        proximaLlegadaMinutos: proximaLlegada.get(a.codigo) ?? Infinity,
       };
     });
-  }, [sim.aeropuertos, flightEventsRef, rutasPlanificadasRef, refreshTick, sim.allFlightEvents, simMinutos]);
+  }, [sim.aeropuertos, rutasPlanificadasRef, refreshTick]);
 
   const ITEM_HEIGHT_ALM = 100;
   const OVERSCAN_ALM = 5;
@@ -2741,8 +2715,6 @@ export default function SimulacionPeriodo() {
       else if (sortAlmBy === 'entrantes') cmp = a.entrantes.maletas - b.entrantes.maletas;
       else if (sortAlmBy === 'salientes') cmp = a.salientes.maletas - b.salientes.maletas;
       else if (sortAlmBy === 'transito') cmp = a.transito.maletas - b.transito.maletas;
-      else if (sortAlmBy === 'proxima_salida') cmp = a.proximaSalidaMinutos - b.proximaSalidaMinutos;
-      else if (sortAlmBy === 'proxima_llegada') cmp = a.proximaLlegadaMinutos - b.proximaLlegadaMinutos;
       return sortAlmDir === 'desc' ? -cmp : cmp;
     });
     return list;
@@ -3620,8 +3592,6 @@ export default function SimulacionPeriodo() {
                     <option value="entrantes">Entrantes</option>
                     <option value="salientes">Salientes</option>
                     <option value="transito">En tránsito</option>
-                    <option value="proxima_salida">Próxima salida</option>
-                    <option value="proxima_llegada">Próxima llegada</option>
                   </select>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -3685,8 +3655,8 @@ export default function SimulacionPeriodo() {
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
                           <span>📦 Stock: <strong style={{ color: 'var(--text-primary)' }}>{alm.ocupacion}/{alm.capacidad}</strong></span>
-                          <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#000000' }}>{alm.entrantes.envios} vuelos</strong> ({alm.entrantes.maletas} maletas)</span>
-                          <span>📤 Salen: <strong style={{ color: '#000000' }}>{alm.salientes.envios} vuelos</strong> ({alm.salientes.maletas} maletas)</span>
+                          <span style={{ textAlign: 'right' }}>📥 Entran: <strong style={{ color: '#000000' }}>{alm.entrantes.envios} envíos</strong> ({alm.entrantes.maletas} maletas)</span>
+                          <span>📤 Salen: <strong style={{ color: '#000000' }}>{alm.salientes.envios} envíos</strong> ({alm.salientes.maletas} maletas)</span>
                           <span style={{ textAlign: 'right' }}>✈️ Tránsito: <strong style={{ color: '#000000' }}>{alm.transito.maletas}</strong></span>
                         </div>
                         {selectedAlmacen === alm.codigo && (
@@ -3709,7 +3679,7 @@ export default function SimulacionPeriodo() {
                                         const loteLabel = r.numeroLote ? ` · L${r.numeroLote}/${sim.totalLotesRef.current.get(r.idEnvio) ?? '?'}` : '';
                                         return (
                                           <div key={claveR} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                            {codUnico} → {r.destino} (Sale: {tramo?.sale || '??'}, {tramo?.maletasVuelo} maletas)
+                                            {codUnico} → {r.destino} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
                                           </div>
                                         );  
                                       })}
@@ -3724,7 +3694,7 @@ export default function SimulacionPeriodo() {
                                         const codUnico = `${r.idEnvio}${r.idCliente || ''}${r.origen}${r.destino}`;
                                         return (
                                           <div key={r.idEnvio} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                            {tramo?.origen} → {codUnico} (Llega: {tramo?.llega || '??'}, {tramo?.maletasVuelo} maletas)
+                                            {tramo?.origen} → {codUnico} (tramo {tramo?.orden}: {tramo?.origen}→{tramo?.destino}, {tramo?.maletasVuelo} maletas)
                                           </div>
                                         );
                                       })}
@@ -3736,7 +3706,7 @@ export default function SimulacionPeriodo() {
                                       <span style={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>✈️ En tránsito ({enTransito.length}):</span>
                                       {enTransito.filter(fe => fe.maletasVuelo > 0).map(fe => (
                                         <div key={fe.key} style={{ fontSize: '9px', color: 'var(--text-secondary)', paddingLeft: '12px' }}>
-                                          {fe.origenCode} → {fe.destinoCode} (Llega: {formatMinutosToHHMM(fe.minutosFin, simStartDateObj)}, {fe.maletasVuelo} maletas)
+                                          {fe.origenCode} → ({fe.maletasVuelo} maletas)
                                         </div>
                                       ))}
                                     </div>

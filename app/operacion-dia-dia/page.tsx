@@ -30,23 +30,23 @@ function forceSpanish(style: any): any {
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
 function getAirplaneSVG(pct: number, isEmpty?: boolean): string {
-  if (isEmpty) return '/airplane-blue.svg';
-  if (pct < 50) return '/airplane-green.svg';
-  if (pct < 80) return '/airplane-orange.svg';
+  if (isEmpty || pct === 0) return '/airplane-blue.svg';
+  if (pct <= 30) return '/airplane-green.svg';
+  if (pct <= 70) return '/airplane-orange.svg';
   return '/airplane-red.svg';
 }
 
 function getLocationSVG(pct: number): string {
   if (pct === 0) return '/almacen-blue.svg';
-  if (pct < 50) return '/almacen-green.svg';
-  if (pct < 80) return '/almacen-orange.svg';
+  if (pct <= 30) return '/almacen-green.svg';
+  if (pct <= 70) return '/almacen-orange.svg';
   return '/almacen-red.svg';
 }
 
 function getWarehouseColorKey(pct: number): 'blue' | 'green' | 'orange' | 'red' {
   if (pct === 0) return 'blue';
-  if (pct < 50) return 'green';
-  if (pct < 80) return 'orange';
+  if (pct <= 30) return 'green';
+  if (pct <= 70) return 'orange';
   return 'red';
 }
 
@@ -123,6 +123,11 @@ export default function SimulacionPeriodo() {
   const sim = useSimulacion();
   const simRef = useRef(sim);
   simRef.current = sim;
+  const panelEnvioKeyRef = useRef<string | null>(null);
+  const panelEnvioViewRef = useRef<'plan' | 'monitoreo'>('plan');
+  const panelEnvioRcRef = useRef<BackendRutaPlanificada | null>(null);
+  const panelEnvioForzadoRef = useRef<string | null>(null);
+  const panelEnvioHelpersRef = useRef<{ transitarA: (html: string) => void; generarVistaPlanViaje: () => string } | null>(null);
   const user = typeof window !== 'undefined' ? (() => { try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; } })() : null;
   useEffect(() => {
     (window as any).debugDiaADia = () => ({
@@ -592,7 +597,7 @@ export default function SimulacionPeriodo() {
       if (!fe.airplaneImage) return;
       const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      const bucket = (fe as any)._lastColorBucket ?? (isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2));
+      const bucket = (fe as any)._lastColorBucket ?? (isEmpty || ocupPct === 0 ? -1 : (ocupPct <= 30 ? 0 : ocupPct <= 70 ? 1 : 2));
       const colorKey = bucket === -1 ? 'blue' : bucket === 0 ? 'green' : bucket === 1 ? 'orange' : 'red';
       fe.airplaneImage.style.display = (filter.all || filter[colorKey]) ? '' : 'none';
     });
@@ -912,6 +917,30 @@ export default function SimulacionPeriodo() {
   const ocupacionLegendRef = useRef<HTMLDivElement>(null);
   const globalIndicatorsPanelRef = useRef<HTMLDivElement>(null);
 
+  // ── Auto‑refresh panel "📦 Plan de viaje" cuando llegan datos nuevos ───
+  useEffect(() => {
+    const panel = document.getElementById('airplaneDetailsPanel');
+    if (!panel || !panelEnvioKeyRef.current || !panelEnvioHelpersRef.current) return;
+
+    const codigoEnvio = panelEnvioKeyRef.current;
+    const codigoUnicoForzado = panelEnvioForzadoRef.current;
+
+    let rutaCompleta = codigoUnicoForzado
+      ? sim.rutasPorCodigoUnicoRef.current.get(codigoUnicoForzado)
+      : rutasPlanificadasRef.current.get(codigoEnvio);
+    if (!rutaCompleta && codigoUnicoForzado) {
+      rutaCompleta = rutasPlanificadasRef.current.get(codigoEnvio);
+    }
+    if (!rutaCompleta) return;
+
+    panelEnvioRcRef.current = rutaCompleta || null;
+
+    if (panelEnvioViewRef.current === 'plan') {
+      const h = panelEnvioHelpersRef.current;
+      h.transitarA(h.generarVistaPlanViaje());
+    }
+  }, [sim.iteracion]);
+
   const parseTime = (t: string) => {
     const p = t.split(' ');
     if (t.includes('/')) return { date: p[0], time: p[1] };
@@ -1016,7 +1045,7 @@ export default function SimulacionPeriodo() {
       const generarPopupHTML = () => {
         const estado = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
         const pct = estado.capacidad > 0 ? Math.min(100, (estado.ocupacion / estado.capacidad) * 100) : 0;
-        const color = pct === 0 ? '#3b82f6' : pct < 50 ? '#10b981' : pct < 80 ? '#f97316' : '#ef4444';
+        const color = pct === 0 ? '#3b82f6' : pct <= 30 ? '#10b981' : pct <= 70 ? '#f97316' : '#ef4444';
         return `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:120px;line-height:1.3;">
             <div style="font-size:11px;font-weight:700;color:#1f2937;">${a.codigo} · ${a.ciudad}</div>
@@ -1202,7 +1231,7 @@ export default function SimulacionPeriodo() {
         const isEmpty = fe.key.startsWith('unused-');
         const ocupPct = isEmpty ? 0 : (fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0);
         const codigo = generarCodigoVuelo(fe.origenCode, fe.destinoCode, extraerHHMM(fe.sale || ''));
-        const color = isEmpty ? '#3b82f6' : ocupPct < 50 ? '#10b981' : ocupPct < 80 ? '#f97316' : '#ef4444';
+        const color = isEmpty || ocupPct === 0 ? '#3b82f6' : ocupPct <= 30 ? '#10b981' : ocupPct <= 70 ? '#f97316' : '#ef4444';
         let tooltip = tooltipElRef.current;
         if (!tooltip) {
           tooltip = document.createElement('div');
@@ -1235,7 +1264,7 @@ export default function SimulacionPeriodo() {
       const filter = activeColorsRef.current;
       const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      const bucket = (fe as any)._lastColorBucket ?? (isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2));
+      const bucket = (fe as any)._lastColorBucket ?? (isEmpty || ocupPct === 0 ? -1 : (ocupPct <= 30 ? 0 : ocupPct <= 70 ? 1 : 2));
       const colorKey = bucket === -1 ? 'blue' : bucket === 0 ? 'green' : bucket === 1 ? 'orange' : 'red';
       const visible = filter.all || filter[colorKey];
       fe.airplaneImage.style.display = visible ? '' : 'none';
@@ -1301,7 +1330,7 @@ export default function SimulacionPeriodo() {
       // Actualizar color si cambió
       const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      const bucket = isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2);
+      const bucket = isEmpty || ocupPct === 0 ? -1 : (ocupPct <= 30 ? 0 : ocupPct <= 70 ? 1 : 2);
       if ((fe as any)._lastColorBucket !== bucket) {
         fe.airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct, isEmpty));
         (fe as any)._lastColorBucket = bucket;
@@ -1317,9 +1346,11 @@ export default function SimulacionPeriodo() {
 
       // Reposicionar pin si este vuelo está seleccionado
       if (selectedPinFlightKeyRef.current === fe.key && selectedPinRef.current && selectedPinRef.current.style.display !== 'none') {
+        const pinContainer = mapRef.current || document.body;
         const rc = fe.airplaneImage.getBoundingClientRect();
-        selectedPinRef.current.style.left = (rc.left + rc.width / 2) + 'px';
-        selectedPinRef.current.style.top = (rc.top + rc.height / 2 - 8) + 'px';
+        const pinCR = pinContainer.getBoundingClientRect();
+        selectedPinRef.current.style.left = (rc.left - pinCR.left + rc.width / 2) + 'px';
+        selectedPinRef.current.style.top = (rc.top - pinCR.top + rc.height / 2 - 8) + 'px';
       }
     }
 
@@ -1653,21 +1684,14 @@ export default function SimulacionPeriodo() {
 
   // Cancela un vuelo llamando al backend
   const cancelarVuelo = async (vuelo: any) => {
-    const origen = vuelo.origen;
-    const destino = vuelo.destino;
-    const minutosInicio = vuelo.minutosInicio;
-
-    // Obtener GMT del aeropuerto de origen
-    const aeropuertoOrigen = sim.aeropuertosRef.current.get(origen);
-    const gmtOrigen = aeropuertoOrigen?.gmt ?? 0;
-
-    // Hora local del origen: minutosInicio + gmtOrigen * 60 (en minutos)
-    const minutosLocal = minutosInicio + gmtOrigen * 60;
-    const minutosDelDia = ((minutosLocal % (24 * 60)) + (24 * 60)) % (24 * 60);
-    const hh = String(Math.floor(minutosDelDia / 60)).padStart(2, '0');
-    const mm = String(minutosDelDia % 60).padStart(2, '0');
+    // Código de visualización (el que ve el usuario en la tarjeta, ej. "SPIMSEQM0013")
     const salidaHHMM = extraerHHMM(vuelo.salida);
     const claveVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, salidaHHMM);
+
+    // Código que espera el backend: "ORIGEN-DESTINO-HH:MM" (con guiones y ':'),
+    // igual a como SimulacionPeriodoController arma sus claves (v.getOrigen() + "-" + v.getDestino() + "-" + v.getHoraSalida()).
+    // Si se manda el código concatenado (sin separadores) el backend no encuentra el vuelo planificado.
+    const claveVueloBackend = `${vuelo.origen}-${vuelo.destino}-${salidaHHMM}`;
 
 
     // 2. Calcular reloj simulado en UTC (GMT+0)
@@ -1685,15 +1709,17 @@ export default function SimulacionPeriodo() {
     const reloj = `${y}${M}${d}-${h}-${m}`;
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL;
-      const url = `${API_URL}/api/simulacion/vuelos/cancelar?claveVuelo=${encodeURIComponent(claveVuelo)}&relojSimuladoActual=${encodeURIComponent(reloj)}`;
+      const url = `${API_URL}/api/simulacion/vuelos/cancelar?claveVuelo=${encodeURIComponent(claveVueloBackend)}&relojSimuladoActual=${encodeURIComponent(reloj)}`;
       console.log('[cancelarVuelo] URL:', url);
       const res = await fetch(url, { method: 'POST' });
       if (res.ok) {
         const msg = await res.text();
         sim.addLog(`✅ Cancelación exitosa: ${msg}`, '#22c55e');
         // Persistir cancelación local si el vuelo no está en el SSE
-        if (!sim.cancelledFlights.has(claveVuelo)) {
-          canceledLocallyRef.current = new Set(canceledLocallyRef.current).add(claveVuelo);
+        // (sim.cancelledFlights se pobla vía SSE con el mismo formato "ORIGEN-DESTINO-HH:MM"
+        // que el backend nos devuelve en vueloCancelado, por eso comparamos con claveVueloBackend)
+        if (!sim.cancelledFlights.has(claveVueloBackend)) {
+          canceledLocallyRef.current = new Set(canceledLocallyRef.current).add(claveVueloBackend);
         }
       } else {
         sim.addLog(`❌ Error al cancelar vuelo`, '#ef4444');
@@ -1712,10 +1738,21 @@ export default function SimulacionPeriodo() {
     const container = mapRef.current;
     if (!container) return;
 
+    // Clamp posición inicial dentro del mapa
+    const cr = container.getBoundingClientRect();
+    const pw = panel.offsetWidth || 300;
+    const ph = panel.offsetHeight || 400;
+    const clampedRight = Math.min(defaultRight, Math.max(0, cr.width - pw));
+    const clampedTop = Math.min(defaultTop, Math.max(0, cr.height - ph));
+    if (clampedRight !== defaultRight || clampedTop !== defaultTop) {
+      panel.style.right = clampedRight + 'px';
+      panel.style.top = clampedTop + 'px';
+    }
+
     // Posición de reset
     const resetPosition = () => {
-      panel.style.right = defaultRight + 'px';
-      panel.style.top = defaultTop + 'px';
+      panel.style.right = clampedRight + 'px';
+      panel.style.top = clampedTop + 'px';
       panel.style.left = '';
     };
 
@@ -1912,21 +1949,23 @@ export default function SimulacionPeriodo() {
 
     // Crear/posicionar pin para el nuevo avión seleccionado
     if (fe.airplaneImage) {
+      const pinContainer = mapRef.current || document.body;
       if (!selectedPinRef.current) {
         const pin = document.createElement('div');
         pin.id = 'selected-flight-pin';
-        pin.style.cssText = 'position:fixed;pointer-events:none;z-index:99999;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);';
+        pin.style.cssText = 'position:absolute;pointer-events:none;z-index:99998;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);';
         const img = document.createElement('img');
         img.style.cssText = 'width:22px;height:22px;';
         pin.appendChild(img);
-        document.body.appendChild(pin);
+        pinContainer.appendChild(pin);
         selectedPinRef.current = pin;
       }
       selectedPinRef.current.style.display = 'flex';
       (selectedPinRef.current.querySelector('img') as HTMLImageElement).src = '/down-arrow.svg';
       const r = fe.airplaneImage.getBoundingClientRect();
-      selectedPinRef.current.style.left = (r.left + r.width / 2) + 'px';
-      selectedPinRef.current.style.top = (r.top + r.height / 2 - 8) + 'px';
+      const pinR = pinContainer.getBoundingClientRect();
+      selectedPinRef.current.style.left = (r.left - pinR.left + r.width / 2) + 'px';
+      selectedPinRef.current.style.top = (r.top - pinR.top + r.height / 2 - 8) + 'px';
       selectedPinFlightKeyRef.current = fe.key;
     }
 
@@ -1939,7 +1978,7 @@ export default function SimulacionPeriodo() {
         position:absolute;right:12px;top:170px;width:300px;
         background:white;border-radius:12px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
-        padding:18px;z-index:10001;
+        padding:18px;z-index:99999;
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         max-height:60vh;overflow-y:auto;pointer-events:auto;
       `;
@@ -2106,7 +2145,7 @@ export default function SimulacionPeriodo() {
       if (el) {
         el.addEventListener('click', () => {
           const envioFe = flightEventsRef.current.find(e => e.key.startsWith(env.idEnvio));
-          if (envioFe) mostrarPanelEnvio(envioFe, env.codigoRastreo, env.idEnvio);
+          if (envioFe) { setFlightPanelOpen(false); setEnviosPanelOpen(true); setSelectedEnvioKey(env.idEnvio); mostrarPanelEnvio(envioFe, env.codigoRastreo, env.idEnvio); }
         });
       }
     });
@@ -2121,6 +2160,11 @@ export default function SimulacionPeriodo() {
     const panel = document.getElementById('airplaneDetailsPanel');
     if (panel) panel.remove();
     setSelectedEnvioKey(null);
+    panelEnvioKeyRef.current = null;
+    panelEnvioViewRef.current = 'plan';
+    panelEnvioRcRef.current = null;
+    panelEnvioForzadoRef.current = null;
+    panelEnvioHelpersRef.current = null;
   }
 
   function mostrarPanelEnvio(fe: FlightEvent, codigoUnicoForzado?: string, idEnvioForzado?: string) {
@@ -2135,7 +2179,7 @@ export default function SimulacionPeriodo() {
         position:absolute;right:12px;top:170px;width:300px;
         background:white;border-radius:12px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
-        padding:18px;z-index:10000;
+        padding:18px;z-index:99999;
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         max-height:70vh;overflow-y:auto;pointer-events:auto;
       `;
@@ -2172,6 +2216,11 @@ export default function SimulacionPeriodo() {
     const loteLabel = rutaCompleta?.numeroLote
       ? ` · Lote ${rutaCompleta.numeroLote}/${sim.totalLotesRef.current.get(rutaCompleta.idEnvio) ?? '?'}`
       : '';
+
+    panelEnvioKeyRef.current = codigoEnvio;
+    panelEnvioViewRef.current = 'plan';
+    panelEnvioRcRef.current = rutaCompleta || null;
+    panelEnvioForzadoRef.current = codigoUnicoForzado || null;
 
     if (!rutaCompleta) {
       panel.innerHTML = `
@@ -2232,40 +2281,42 @@ export default function SimulacionPeriodo() {
       return Date.UTC(y, m - 1, d, h, mi);
     };
 
-    // ── Build Plan de Viaje tramos ──
-    const tramosVisual = rc.tramos?.map((tramo, index) => {
-      const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
-      const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
-      const isLast = index === (rc.tramos?.length ?? 0) - 1;
-      let cursorTs = rc.fechaRegistro ? parseDateStr(rc.fechaRegistro) : (sim.simStartDateRef.current?.getTime() || Date.now());
-      const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
-      const saleP = saleTime.split(':').map(Number);
-      let saleTs = new Date(cursorTs).setUTCHours(saleP[0], saleP[1], 0, 0);
-      if (saleTs < cursorTs) saleTs += 86400000;
-      const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
-      const llegaP = llegaTime.split(':').map(Number);
-      let llegaTs = new Date(saleTs).setUTCHours(llegaP[0], llegaP[1], 0, 0);
-      if (llegaTs < saleTs) llegaTs += 86400000;
-      const saleD = formatDateTime(new Date(saleTs), gmtOffset);
-      const llegaD = formatDateTime(new Date(llegaTs), gmtOffset);
-      return `
-        <div style="background:#f9fafb;padding:8px 12px;border-radius:8px;margin-bottom:${isLast ? '0' : '8px'};">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
-              <span style="font-size:11px;color:#1f2937;font-weight:600;font-family:monospace;">${tramo.origen} → ${tramo.destino}</span>
-            </div>
-            <button id="gotoTramo_${codigoEnvio}_${index}" style="background:#2563eb;border:none;color:white;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;cursor:pointer;">✈ Ir</button>
-          </div>
-        </div>`;
-    }).join('') || '';
-
     // ── Views ──
     function generarVistaPlanViaje() {
+      const rcLocal = panelEnvioRcRef.current || rc;
+      const ll = rcLocal.numeroLote
+        ? ` · Lote ${rcLocal.numeroLote}/${(sim.totalLotesRef.current?.get(rcLocal.idEnvio) ?? '?')}`
+        : '';
+      const tramosVisual = rcLocal.tramos?.map((tramo, index) => {
+        const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
+        const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
+        const isLast = index === (rcLocal.tramos?.length ?? 0) - 1;
+        let cursorTs = rcLocal.fechaRegistro ? parseDateStr(rcLocal.fechaRegistro) : (sim.simStartDateRef.current?.getTime() || Date.now());
+        const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
+        const saleP = saleTime.split(':').map(Number);
+        let saleTs = new Date(cursorTs).setUTCHours(saleP[0], saleP[1], 0, 0);
+        if (saleTs < cursorTs) saleTs += 86400000;
+        const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
+        const llegaP = llegaTime.split(':').map(Number);
+        let llegaTs = new Date(saleTs).setUTCHours(llegaP[0], llegaP[1], 0, 0);
+        if (llegaTs < saleTs) llegaTs += 86400000;
+        const saleD = formatDateTime(new Date(saleTs), gmtOffset);
+        const llegaD = formatDateTime(new Date(llegaTs), gmtOffset);
+        return `
+          <div style="background:#f9fafb;padding:8px 12px;border-radius:8px;margin-bottom:${isLast ? '0' : '8px'};">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
+                <span style="font-size:11px;color:#1f2937;font-weight:600;font-family:monospace;">${tramo.origen} → ${tramo.destino}</span>
+              </div>
+              <button id="gotoTramo_${codigoEnvio}_${index}" style="background:#2563eb;border:none;color:white;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;cursor:pointer;">✈ Ir</button>
+            </div>
+          </div>`;
+      }).join('') || '';
       return `
         <div class="panel-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;cursor:grab;user-select:none;">
           <div>
-            <h3 style="margin:0;font-size:16px;color:#1f2937;">📦 Plan de viaje${loteLabel ? `<span style="font-size:12px;color:#9333ea;font-weight:600;">${loteLabel}</span>` : ''}</h3>
+            <h3 style="margin:0;font-size:16px;color:#1f2937;">📦 Plan de viaje${ll ? `<span style="font-size:12px;color:#9333ea;font-weight:600;">${ll}</span>` : ''}</h3>
             <div style="font-size:11px;color:#6b7280;margin-top:2px;">${codigoRastreo}</div>
           </div>
           <div style="display:flex;align-items:center;gap:4px;">
@@ -2276,14 +2327,14 @@ export default function SimulacionPeriodo() {
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">DETALLES DE ENVÍO</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRegistro ? formatDateTime(new Date(parseDateStr(rc.fechaRegistro)), gmtOffset) : '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRecojo ? formatDateTime(new Date(parseDateStr(rc.fechaRecojo)), gmtOffset) : '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.fechaRegistro ? formatDateTime(new Date(parseDateStr(rcLocal.fechaRegistro)), gmtOffset) : '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.fechaRecojo ? formatDateTime(new Date(parseDateStr(rcLocal.fechaRecojo)), gmtOffset) : '-'}</div></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;">
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.duracion || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">SLA</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">👥 Cliente</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.idCliente || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Maletas</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.maletas}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.duracion || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">SLA</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.sla || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">👥 Cliente</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.idCliente || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Maletas</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.maletas}</div></div>
           </div>
         </div>
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
@@ -2295,13 +2346,14 @@ export default function SimulacionPeriodo() {
     }
 
     function generarTimelineMonitoreo() {
+      const rcLocal = panelEnvioRcRef.current || rc;
       const latestFe = getLatestFe();
-      const tramos = rc.tramos || [];
+      const tramos = rcLocal.tramos || [];
       const tramoActual = latestFe.tramoOrden;
 
       // Construir nodos de aeropuertos (sin sale/llega aún)
       const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending'; sale?: string; llega?: string }[] = [];
-      aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'pending' });
+      aeropuertosRuta.push({ codigo: rcLocal.origen, nombre: getUbicacion(rcLocal.origen), state: 'pending' });
       tramos.forEach(tramo => {
         const last = aeropuertosRuta[aeropuertosRuta.length - 1];
         if (last.codigo !== tramo.destino) {
@@ -2373,8 +2425,17 @@ export default function SimulacionPeriodo() {
     }
 
     function generarVistaMonitoreo() {
+      const rcLocal = panelEnvioRcRef.current || rc;
       const latestFe = getLatestFe();
       const { timelineHtml } = generarTimelineMonitoreo();
+      const aeroOriLoc = sim.aeropuertos.find(a => a.codigo === rcLocal.origen);
+      const aeroDesLoc = sim.aeropuertos.find(a => a.codigo === rcLocal.destino);
+      const ubiOriLoc = aeroOriLoc ? `${aeroOriLoc.ciudad}, ${aeroOriLoc.pais}` : rcLocal.origen;
+      const ubiDesLoc = aeroDesLoc ? `${aeroDesLoc.ciudad}, ${aeroDesLoc.pais}` : rcLocal.destino;
+      const tipoRutaLoc = (rcLocal.tramos?.length ?? 0) <= 1 ? 'Directo' : 'Con Escala';
+      const llLoc = rcLocal.numeroLote
+        ? ` · Lote ${rcLocal.numeroLote}/${(sim.totalLotesRef.current?.get(rcLocal.idEnvio) ?? '?')}`
+        : '';
 
       const restMin = Math.max(0, Math.floor(latestFe.minutosFin - currentMinSimRef.current));
       const restHH = Math.floor(restMin / 60);
@@ -2393,23 +2454,23 @@ export default function SimulacionPeriodo() {
         </div>
         <div style="background:#f3f4f6;padding:10px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Código Único de Envío</div>
-          <div style="font-size:13px;color:#1f2937;font-weight:700;">${codigoRastreo}<span style="font-size:11px;color:#9333ea;font-weight:600;">${loteLabel}</span></div>
+          <div style="font-size:13px;color:#1f2937;font-weight:700;">${codigoRastreo}<span style="font-size:11px;color:#9333ea;font-weight:600;">${llLoc}</span></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div style="background:#eef2ff;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Origen</div>
-            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rc.origen}</div>
-            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubicacionOrigen}</div>
+            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rcLocal.origen}</div>
+            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubiOriLoc}</div>
           </div>
           <div style="background:#fef3c7;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Destino</div>
-            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rc.destino}</div>
-            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubicacionDestino}</div>
+            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rcLocal.destino}</div>
+            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubiDesLoc}</div>
           </div>
         </div>
         <div style="background:#f3f4f6;padding:8px 12px;border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
           <span style="font-size:11px;color:#6b7280;font-weight:600;">Tipo de Ruta</span>
-          <span style="font-size:12px;padding:3px 10px;border-radius:999px;background:${tipoRuta === 'Directo' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)'};color:${tipoRuta === 'Directo' ? '#16a34a' : '#d97706'};font-weight:700;">${tipoRuta}</span>
+          <span style="font-size:12px;padding:3px 10px;border-radius:999px;background:${tipoRutaLoc === 'Directo' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)'};color:${tipoRutaLoc === 'Directo' ? '#16a34a' : '#d97706'};font-weight:700;">${tipoRutaLoc}</span>
         </div>
         <div id="monitoreo-content-${codigoEnvio}">
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
@@ -2419,7 +2480,7 @@ export default function SimulacionPeriodo() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Plazo de Entrega</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rcLocal.sla || '-'}</div>
           </div>
           <div style="background:${trBg};padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo Restante</div>
@@ -2436,6 +2497,7 @@ export default function SimulacionPeriodo() {
       const container = document.getElementById(`monitoreo-content-${codigoEnvio}`);
       if (!container) return;
 
+      const rcLocal = panelEnvioRcRef.current || rc;
       const latestFe = getLatestFe();
       const { timelineHtml } = generarTimelineMonitoreo();
 
@@ -2454,7 +2516,7 @@ export default function SimulacionPeriodo() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Plazo de Entrega</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rcLocal.sla || '-'}</div>
           </div>
           <div style="background:${trBg};padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo Restante</div>
@@ -2480,6 +2542,7 @@ export default function SimulacionPeriodo() {
         });
         document.getElementById('monitoreoBtn')?.addEventListener('click', () => {
           currentView = 'monitoreo';
+          panelEnvioViewRef.current = 'monitoreo';
           transitarA(generarVistaMonitoreo());
           setTimeout(() => {
             if (currentView === 'monitoreo') {
@@ -2491,10 +2554,12 @@ export default function SimulacionPeriodo() {
         });
         document.getElementById('backToPlanBtn')?.addEventListener('click', () => {
           currentView = 'plan';
+          panelEnvioViewRef.current = 'plan';
           if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
           transitarA(generarVistaPlanViaje());
         });
-        (rc.tramos || []).forEach((tramo, idx) => {
+        const rcLocalBtn = panelEnvioRcRef.current || rc;
+        (rcLocalBtn.tramos || []).forEach((tramo, idx) => {
           const btn = document.getElementById(`gotoTramo_${codigoEnvio}_${idx}`);
           if (btn) {
             btn.addEventListener('click', () => {
@@ -2503,13 +2568,14 @@ export default function SimulacionPeriodo() {
                 f.origenCode === tramo.origen &&
                 f.destinoCode === tramo.destino
               );
-              if (feTramo) { cerrarPanelEnvio(); mostrarPanelAvion(feTramo); }
+              if (feTramo) { setEnviosPanelOpen(false); setFlightPanelOpen(true); cerrarPanelEnvio(); mostrarPanelAvion(feTramo); }
             });
           }
         });
       }, 200);
     }
 
+    panelEnvioHelpersRef.current = { transitarA, generarVistaPlanViaje };
     transitarA(generarVistaPlanViaje());
   }
 
@@ -2555,9 +2621,9 @@ export default function SimulacionPeriodo() {
         const pct = getOcup(vuelo);
         if (pct < 0) { matchSemaforo = false; }
         else if (filterSemaforo === 'azul') matchSemaforo = pct === 0;
-        else if (filterSemaforo === 'verde') matchSemaforo = pct > 0 && pct < 50;
-        else if (filterSemaforo === 'naranja') matchSemaforo = pct >= 50 && pct < 80;
-        else if (filterSemaforo === 'rojo') matchSemaforo = pct >= 80;
+        else if (filterSemaforo === 'verde') matchSemaforo = pct > 0 && pct <= 30;
+        else if (filterSemaforo === 'naranja') matchSemaforo = pct > 30 && pct <= 70;
+        else if (filterSemaforo === 'rojo') matchSemaforo = pct > 70;
       }
       return matchCodigo && matchOrigen && matchDestino && matchSemaforo;
     });
@@ -2698,9 +2764,9 @@ export default function SimulacionPeriodo() {
       list = list.filter(a => {
         const pct = a.pct;
         if (filterAlmSemaforo === 'azul') return pct === 0;
-        if (filterAlmSemaforo === 'verde') return pct > 0 && pct < 50;
-        if (filterAlmSemaforo === 'naranja') return pct >= 50 && pct < 80;
-        if (filterAlmSemaforo === 'rojo') return pct >= 80;
+        if (filterAlmSemaforo === 'verde') return pct > 0 && pct <= 30;
+        if (filterAlmSemaforo === 'naranja') return pct > 30 && pct <= 70;
+        if (filterAlmSemaforo === 'rojo') return pct > 70;
         return true;
       });
     }
@@ -2751,9 +2817,7 @@ export default function SimulacionPeriodo() {
       generarCodigoVuelo(v.origen, v.destino, extraerHHMM(v.salida)) === codigo
     );
     if (idx < 0) return;
-    const targetScrollTop = idx * ITEM_HEIGHT;
 
-    setScrollTop(targetScrollTop);
     autoScrollPendingRef.current = true;
 
     const delay = panelWasOpenRef.current ? 0 : 420;
@@ -2761,7 +2825,18 @@ export default function SimulacionPeriodo() {
       scrollTimeoutRef.current = null;
       if (!autoScrollPendingRef.current) return;
       autoScrollPendingRef.current = false;
-      if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = targetScrollTop;
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      // Medir la altura REAL en este instante (no el estado cacheado),
+      // igual que hace scrollIntoView internamente.
+      const liveHeight = el.clientHeight;
+      const maxScrollTop = Math.max(0, vuelosFiltrados.length * ITEM_HEIGHT - liveHeight);
+      const targetScrollTop = Math.min(
+        maxScrollTop,
+        Math.max(0, idx * ITEM_HEIGHT - (liveHeight - ITEM_HEIGHT) / 2)
+      );
+      setScrollTop(targetScrollTop);
+      el.scrollTop = targetScrollTop;
     }, delay);
 
     return () => {
@@ -2772,6 +2847,16 @@ export default function SimulacionPeriodo() {
       }
     };
   }, [scrollTrigger]);
+
+  // Efecto: hacer scroll al envío seleccionado
+  useEffect(() => {
+    if (!enviosPanelOpen || !selectedEnvioKey) return;
+    const id = setTimeout(() => {
+      const el = document.querySelector(`[data-id="${CSS.escape(selectedEnvioKey)}"]`);
+      if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    }, 100);
+    return () => clearTimeout(id);
+  }, [enviosPanelOpen, selectedEnvioKey]);
 
   // Hacer arrastrable el panel de Indicadores globales
   useEffect(() => {
@@ -2980,9 +3065,9 @@ export default function SimulacionPeriodo() {
                 <div style={{ marginTop: 6 }}>
                   {[
                     { color: '#2563eb', label: '0% — Vacío' },
-                    { color: '#10b981', label: '< 50% — Bajo' },
-                    { color: '#f97316', label: '50–80% — Medio' },
-                    { color: '#ef4444', label: '> 80% — Alto' },
+                    { color: '#10b981', label: '<= 30% — Bajo' },
+                    { color: '#f97316', label: '30–70% — Medio' },
+                    { color: '#ef4444', label: '> 70% — Alto' },
                   ].map(({ color, label }) => (
                     <div key={color} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                       <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />
@@ -3076,7 +3161,7 @@ export default function SimulacionPeriodo() {
                     { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(1)}%`, sv: metricas.ocupacionAviones },
                     { label: 'Maletas entregadas', value: metricas.maletasEntregadas.toLocaleString() },
                     ].map(m => {
-                      const sc = m.sv !== undefined ? (m.sv < 50 ? '#22c55e' : m.sv < 80 ? '#f97316' : '#ef4444') : undefined;
+                      const sc = m.sv !== undefined ? (m.sv <= 30 ? '#22c55e' : m.sv <= 70 ? '#f97316' : '#ef4444') : undefined;
                       return (
                         <div key={m.label} style={{ padding: '3px 6px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6, borderLeft: sc ? `3px solid ${sc}` : undefined }}>
                           <div style={{ fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>{m.label}</div>
@@ -3228,7 +3313,10 @@ export default function SimulacionPeriodo() {
                     const cOri = aO ? `${aO.ciudad}` : vuelo.origen;
                     const cDes = aD ? `${aD.ciudad}` : vuelo.destino;
                     const claveVuelo = generarCodigoVuelo(vuelo.origen, vuelo.destino, salidaHHMM);
-                    const esCancelado = sim.cancelledFlights.has(claveVuelo) || canceledLocallyRef.current.has(claveVuelo);
+                    // sim.cancelledFlights y canceledLocallyRef usan el formato "ORIGEN-DESTINO-HH:MM"
+                    // (el que devuelve el backend), no el código concatenado de visualización.
+                    const claveVueloBackend = `${vuelo.origen}-${vuelo.destino}-${salidaHHMM}`;
+                    const esCancelado = sim.cancelledFlights.has(claveVueloBackend) || canceledLocallyRef.current.has(claveVueloBackend);
                     const esCancelling = cancellingFlights.has(claveVuelo);
                     // Buscar FlightEvent activo para obtener ocupación y detectar sin uso
                     let pctOcupacion = 0;
@@ -3249,11 +3337,11 @@ export default function SimulacionPeriodo() {
                         pctOcupacion = 0;
                       }
 
-                      if (esSinUso) {
+                      if (esSinUso || pctOcupacion === 0) {
                         ocupColor = '#2563eb';
-                      } else if (pctOcupacion < 50) {
+                      } else if (pctOcupacion <= 30) {
                         ocupColor = '#22c55e';
-                      } else if (pctOcupacion < 80) {
+                      } else if (pctOcupacion <= 70) {
                         ocupColor = '#f97316';
                       } else {
                         ocupColor = '#ef4444';
@@ -3467,6 +3555,7 @@ export default function SimulacionPeriodo() {
                   return (
                     <div
                       key={idEnvio}
+                      data-id={idEnvio}
                       onClick={() => {
                         const envioFe = flightEventsRef.current.find(e => e.key.startsWith(idEnvio + '-'));
                         if (envioFe) { setSelectedEnvioKey(idEnvio); setSelectedVueloKey(null); mostrarPanelEnvio(envioFe); }
@@ -3627,7 +3716,7 @@ export default function SimulacionPeriodo() {
               ) : (
                 <div style={{ height: totalHeightAlm, paddingTop: offsetYAlm, boxSizing: 'border-box' }}>
                   {visibleAlmacenes.map((alm, i) => {
-                    const estadoColor = alm.pct === 0 ? '#6366f1' : alm.pct < 50 ? '#22c55e' : alm.pct < 80 ? '#f97316' : '#ef4444';
+                    const estadoColor = alm.pct === 0 ? '#6366f1' : alm.pct <= 30 ? '#22c55e' : alm.pct <= 70 ? '#f97316' : '#ef4444';
                     return (
                       <div
                         key={alm.codigo}
@@ -3746,7 +3835,7 @@ function StatCard({ title, value, color }: { title: string; value: number; color
 
 function MetricBox({ label, value, semaphoreValue }: { label: string; value: string; semaphoreValue?: number }) {
   const semColor = semaphoreValue !== undefined
-    ? semaphoreValue < 50 ? '#22c55e' : semaphoreValue < 80 ? '#f97316' : '#ef4444'
+    ? semaphoreValue <= 30 ? '#22c55e' : semaphoreValue <= 70 ? '#f97316' : '#ef4444'
     : undefined;
   return (
     <div style={{

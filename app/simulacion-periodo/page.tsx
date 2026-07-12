@@ -30,23 +30,23 @@ function forceSpanish(style: any): any {
 // ─── helpers SVG / Bézier ───────────────────────────────────────────────────
 
 function getAirplaneSVG(pct: number, isEmpty?: boolean): string {
-  if (isEmpty) return '/airplane-blue.svg';
-  if (pct < 50) return '/airplane-green.svg';
-  if (pct < 80) return '/airplane-orange.svg';
+  if (isEmpty || pct === 0) return '/airplane-blue.svg';
+  if (pct <= 30) return '/airplane-green.svg';
+  if (pct <= 70) return '/airplane-orange.svg';
   return '/airplane-red.svg';
 }
 
 function getLocationSVG(pct: number): string {
   if (pct === 0) return '/almacen-blue.svg';
-  if (pct < 50) return '/almacen-green.svg';
-  if (pct < 80) return '/almacen-orange.svg';
+  if (pct <= 30) return '/almacen-green.svg';
+  if (pct <= 70) return '/almacen-orange.svg';
   return '/almacen-red.svg';
 }
 
 function getWarehouseColorKey(pct: number): 'blue' | 'green' | 'orange' | 'red' {
   if (pct === 0) return 'blue';
-  if (pct < 50) return 'green';
-  if (pct < 80) return 'orange';
+  if (pct <= 30) return 'green';
+  if (pct <= 70) return 'orange';
   return 'red';
 }
 
@@ -133,6 +133,11 @@ export default function SimulacionPeriodo() {
   const tooltipElRef = useRef<HTMLDivElement | null>(null);
   const selectedPinRef = useRef<HTMLDivElement | null>(null);
   const selectedPinFlightKeyRef = useRef<string | null>(null);
+  const panelEnvioKeyRef = useRef<string | null>(null);
+  const panelEnvioViewRef = useRef<'plan' | 'monitoreo'>('plan');
+  const panelEnvioRcRef = useRef<BackendRutaPlanificada | null>(null);
+  const panelEnvioForzadoRef = useRef<string | null>(null);
+  const panelEnvioHelpersRef = useRef<{ transitarA: (html: string) => void; generarVistaPlanViaje: () => string } | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
   const ctx = useSimulationContext();
@@ -171,8 +176,8 @@ export default function SimulacionPeriodo() {
   const [envFilterCodigo, setEnvFilterCodigo] = useState('');
   const [envFilterOrigen, setEnvFilterOrigen] = useState('');
   const [envFilterDestino, setEnvFilterDestino] = useState('');
-  const [envSortBy, setEnvSortBy] = useState('salida');
-  const [envSortDir, setEnvSortDir] = useState<'asc' | 'desc'>('asc');
+  const [envSortBy, setEnvSortBy] = useState('registro');
+  const [envSortDir, setEnvSortDir] = useState<'asc' | 'desc'>('desc');
   const [envFiltersOpen, setEnvFiltersOpen] = useState(false);
   const [envFilterPosition, setEnvFilterPosition] = useState({ top: 0, left: 0 });
   const envFilterButtonRef = useRef<HTMLButtonElement>(null);
@@ -207,7 +212,7 @@ export default function SimulacionPeriodo() {
       if (!fe.airplaneImage) return;
       const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      const bucket = (fe as any)._lastColorBucket ?? (isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2));
+      const bucket = (fe as any)._lastColorBucket ?? (isEmpty || ocupPct === 0 ? -1 : (ocupPct <= 30 ? 0 : ocupPct <= 70 ? 1 : 2));
       const colorKey = bucket === -1 ? 'blue' : bucket === 0 ? 'green' : bucket === 1 ? 'orange' : 'red';
       fe.airplaneImage.style.display = (filter.all || filter[colorKey]) ? '' : 'none';
     });
@@ -617,7 +622,14 @@ export default function SimulacionPeriodo() {
 
   // ── Envíos filtrados (con soporte para lotes) ────────────────────────────
   const enviosFiltrados = useMemo(() => {
-    const arr = Array.from(sim.rutasPlanificadasRef.current.entries()).map(([clave, ruta]) => {
+    const arr = Array.from(sim.rutasPorCodigoUnicoRef.current.values())
+      .filter(ruta => {
+        if (!ruta.fechaRegistro || !sim.simStartDateRef.current) return true;
+        const minutosRegistro = fechaHoraAMinutosDesdeInicio(ruta.fechaRegistro, sim.simStartDateRef.current);
+        return simMinutos >= minutosRegistro;
+      })
+      .map((ruta) => {
+      const clave = claveEnvio(ruta.idEnvio, ruta.numeroLote);
       const tramos = ruta.tramos || [];
       const primerTramo = tramos[0];
       const ultimoTramo = tramos[tramos.length - 1];
@@ -629,10 +641,11 @@ export default function SimulacionPeriodo() {
         ? ` · Lote ${ruta.numeroLote}/${sim.totalLotesRef.current.get(ruta.idEnvio) ?? '?'}`
         : '';
       return {
-        clave, // claveEnvio(idEnvio, numeroLote)
+        clave,
         ruta,
         salida,
         llegada,
+        registro: ruta.fechaRegistro || '',
         tipoRuta: tramos.length <= 1 ? 'Directo' : 'En escala',
         codigoRastreo,
         loteLabel,
@@ -649,14 +662,39 @@ export default function SimulacionPeriodo() {
       })
       .sort((a, b) => {
         let cmp = 0;
-        if (envSortBy === 'salida') cmp = a.salida.localeCompare(b.salida);
+        if (envSortBy === 'registro') cmp = a.registro.localeCompare(b.registro);
+        else if (envSortBy === 'salida') cmp = a.salida.localeCompare(b.salida);
         else if (envSortBy === 'llegada') cmp = a.llegada.localeCompare(b.llegada);
         else if (envSortBy === 'origen') cmp = a.ruta.origen.localeCompare(b.ruta.origen);
         else if (envSortBy === 'destino') cmp = a.ruta.destino.localeCompare(b.ruta.destino);
         else if (envSortBy === 'ocupacion') cmp = a.ruta.maletas - b.ruta.maletas;
         return envSortDir === 'asc' ? cmp : -cmp;
       });
-  }, [sim.allFlightEvents, sim.iteracion, sim.aeropuertos, envFilterCodigo, envFilterOrigen, envFilterDestino, envSortBy, envSortDir]);
+  }, [sim.allFlightEvents, sim.iteracion, simMinutos, sim.aeropuertos, envFilterCodigo, envFilterOrigen, envFilterDestino, envSortBy, envSortDir]);
+
+  // ── Auto‑refresh panel "📦 Plan de viaje" cuando llegan datos nuevos ───
+  useEffect(() => {
+    const panel = document.getElementById('airplaneDetailsPanel');
+    if (!panel || !panelEnvioKeyRef.current || !panelEnvioHelpersRef.current) return;
+
+    const codigoEnvio = panelEnvioKeyRef.current;
+    const codigoUnicoForzado = panelEnvioForzadoRef.current;
+
+    let rutaCompleta = codigoUnicoForzado
+      ? sim.rutasPorCodigoUnicoRef.current.get(codigoUnicoForzado)
+      : rutasPlanificadasRef.current.get(codigoEnvio);
+    if (!rutaCompleta && codigoUnicoForzado) {
+      rutaCompleta = rutasPlanificadasRef.current.get(codigoEnvio);
+    }
+    if (!rutaCompleta) return;
+
+    panelEnvioRcRef.current = rutaCompleta || null;
+
+    if (panelEnvioViewRef.current === 'plan') {
+      const h = panelEnvioHelpersRef.current;
+      h.transitarA(h.generarVistaPlanViaje());
+    }
+  }, [sim.iteracion]);
 
   // Calculate filter popup position
   useEffect(() => {
@@ -832,7 +870,7 @@ export default function SimulacionPeriodo() {
       const generarPopupHTML = () => {
         const estado = airportStateRef.current.get(a.codigo) || { ocupacion: 0, capacidad: a.capacidad };
         const pct = estado.capacidad > 0 ? Math.min(100, (estado.ocupacion / estado.capacidad) * 100) : 0;
-        const color = pct === 0 ? '#3b82f6' : pct < 50 ? '#10b981' : pct < 80 ? '#f97316' : '#ef4444';
+        const color = pct === 0 ? '#3b82f6' : pct <= 30 ? '#10b981' : pct <= 70 ? '#f97316' : '#ef4444';
         return `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:120px;line-height:1.3;">
             <div style="font-size:11px;font-weight:700;color:#1f2937;">${a.codigo} · ${a.ciudad}</div>
@@ -1021,7 +1059,7 @@ export default function SimulacionPeriodo() {
         const isEmpty = fe.key.startsWith('unused-');
         const ocupPct = isEmpty ? 0 : (fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0);
         const codigo = generarCodigoVuelo(fe.origenCode, fe.destinoCode, extraerHHMM(fe.sale || ''));
-        const color = isEmpty ? '#3b82f6' : ocupPct < 50 ? '#10b981' : ocupPct < 80 ? '#f97316' : '#ef4444';
+        const color = isEmpty || ocupPct === 0 ? '#3b82f6' : ocupPct <= 30 ? '#10b981' : ocupPct <= 70 ? '#f97316' : '#ef4444';
         let tooltip = tooltipElRef.current;
         if (!tooltip) {
           tooltip = document.createElement('div');
@@ -1060,7 +1098,7 @@ export default function SimulacionPeriodo() {
       const filter = activeColorsRef.current;
       const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      const bucket = (fe as any)._lastColorBucket ?? (isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2));
+      const bucket = (fe as any)._lastColorBucket ?? (isEmpty || ocupPct === 0 ? -1 : (ocupPct <= 30 ? 0 : ocupPct <= 70 ? 1 : 2));
       const colorKey = bucket === -1 ? 'blue' : bucket === 0 ? 'green' : bucket === 1 ? 'orange' : 'red';
       const visible = filter.all || filter[colorKey];
       fe.airplaneImage.style.display = visible ? '' : 'none';
@@ -1131,7 +1169,7 @@ export default function SimulacionPeriodo() {
       // Actualizar color si cambió
       const isEmpty = fe.key.startsWith('unused-');
       const ocupPct = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
-      const bucket = isEmpty ? -1 : (ocupPct < 50 ? 0 : ocupPct < 80 ? 1 : 2);
+      const bucket = isEmpty || ocupPct === 0 ? -1 : (ocupPct <= 30 ? 0 : ocupPct <= 70 ? 1 : 2);
       if ((fe as any)._lastColorBucket !== bucket) {
         fe.airplaneImage.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', getAirplaneSVG(ocupPct, isEmpty));
         (fe as any)._lastColorBucket = bucket;
@@ -1147,9 +1185,11 @@ export default function SimulacionPeriodo() {
 
       // Reposicionar pin si este vuelo está seleccionado
       if (selectedPinFlightKeyRef.current === fe.key && selectedPinRef.current && selectedPinRef.current.style.display !== 'none') {
+        const pinContainer = mapRef.current || document.body;
         const rc = fe.airplaneImage.getBoundingClientRect();
-        selectedPinRef.current.style.left = (rc.left + rc.width / 2) + 'px';
-        selectedPinRef.current.style.top = (rc.top + rc.height / 2 - 8) + 'px';
+        const pinCR = pinContainer.getBoundingClientRect();
+        selectedPinRef.current.style.left = (rc.left - pinCR.left + rc.width / 2) + 'px';
+        selectedPinRef.current.style.top = (rc.top - pinCR.top + rc.height / 2 - 8) + 'px';
       }
     }
 
@@ -1507,10 +1547,21 @@ export default function SimulacionPeriodo() {
     const container = mapRef.current;
     if (!container) return;
 
+    // Clamp posición inicial dentro del mapa
+    const cr = container.getBoundingClientRect();
+    const pw = panel.offsetWidth || 300;
+    const ph = panel.offsetHeight || 400;
+    const clampedRight = Math.min(defaultRight, Math.max(0, cr.width - pw));
+    const clampedTop = Math.min(defaultTop, Math.max(0, cr.height - ph));
+    if (clampedRight !== defaultRight || clampedTop !== defaultTop) {
+      panel.style.right = clampedRight + 'px';
+      panel.style.top = clampedTop + 'px';
+    }
+
     // Posición de reset
     const resetPosition = () => {
-      panel.style.right = defaultRight + 'px';
-      panel.style.top = defaultTop + 'px';
+      panel.style.right = clampedRight + 'px';
+      panel.style.top = clampedTop + 'px';
       panel.style.left = '';
     };
 
@@ -1738,21 +1789,23 @@ export default function SimulacionPeriodo() {
 
     // Crear/posicionar pin para el nuevo avión seleccionado
     if (fe.airplaneImage) {
+      const pinContainer = mapRef.current || document.body;
       if (!selectedPinRef.current) {
         const pin = document.createElement('div');
         pin.id = 'selected-flight-pin';
-        pin.style.cssText = 'position:fixed;pointer-events:none;z-index:99999;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);';
+        pin.style.cssText = 'position:absolute;pointer-events:none;z-index:99998;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);';
         const img = document.createElement('img');
         img.style.cssText = 'width:22px;height:22px;';
         pin.appendChild(img);
-        document.body.appendChild(pin);
+        pinContainer.appendChild(pin);
         selectedPinRef.current = pin;
       }
       selectedPinRef.current.style.display = 'flex';
       (selectedPinRef.current.querySelector('img') as HTMLImageElement).src = '/down-arrow.svg';
       const r = fe.airplaneImage.getBoundingClientRect();
-      selectedPinRef.current.style.left = (r.left + r.width / 2) + 'px';
-      selectedPinRef.current.style.top = (r.top + r.height / 2 - 8) + 'px';
+      const pinR = pinContainer.getBoundingClientRect();
+      selectedPinRef.current.style.left = (r.left - pinR.left + r.width / 2) + 'px';
+      selectedPinRef.current.style.top = (r.top - pinR.top + r.height / 2 - 8) + 'px';
       selectedPinFlightKeyRef.current = fe.key;
     }
 
@@ -1765,7 +1818,7 @@ export default function SimulacionPeriodo() {
         position:absolute;right:12px;top:170px;width:300px;
         background:white;border-radius:12px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
-        padding:18px;z-index:10001;
+        padding:18px;z-index:99999;
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         max-height:60vh;overflow-y:auto;pointer-events:auto;
       `;
@@ -1844,16 +1897,31 @@ export default function SimulacionPeriodo() {
         const k = `${feOther.origenCode}-${feOther.destinoCode}-${feOther.sale}`;
         if (!flightToEnvios.has(k)) flightToEnvios.set(k, []);
         const arr = flightToEnvios.get(k)!;
-        if (!arr.some(e => e.idEnvio === id)) {
-          const rutaE = rutasPlanificadasRef.current.get(id);
-          arr.push({ idEnvio: id, idCliente: cli, origen: feOther.origenCode, destino: feOther.destinoCode, maletas: rutaE?.maletas ?? feOther.maletasVuelo });
+        if (!arr.some(e => e.idEnvio === id && e.idCliente === cli)) {
+          let rutaE = rutasPlanificadasRef.current.get(id);
+          for (const r of sim.rutasPorCodigoUnicoRef.current.values()) {
+            if (claveEnvio(r.idEnvio, r.numeroLote) === id && (r.idCliente || '') === cli) {
+              rutaE = r; break;
+            }
+          }
+          arr.push({ 
+            idEnvio: id, 
+            idCliente: cli, 
+            origen: rutaE?.origen ?? feOther.origenCode, 
+            destino: rutaE?.destino ?? feOther.destinoCode, 
+            maletas: rutaE?.maletas ?? feOther.maletasVuelo 
+          });
         }
       }
       const flightKey = `${fe.origenCode}-${fe.destinoCode}-${fe.sale}`;
       const entries = flightToEnvios.get(flightKey) || [];
       for (const e of entries) {
         const codigoUnico = `${e.idEnvio}${e.idCliente}${e.origen}${e.destino}`;
-        const totalTramos = new Set(flightEventsRef.current.filter(f => f.key.startsWith(e.idEnvio + '-')).map(f => `${f.origenCode}-${f.destinoCode}`)).size;
+        const totalTramos = new Set(flightEventsRef.current.filter(f => {
+          if (!f.key.startsWith(e.idEnvio + '-')) return false;
+          const fCli = (f.key.split('-')[1] || 'x') === 'x' ? '' : f.key.split('-')[1];
+          return fCli === (e.idCliente || '');
+        }).map(f => `${f.origenCode}-${f.destinoCode}`)).size;
         const tipo = totalTramos <= 1 ? 'Directo' : 'Por escalas';
         enviosRelacionados.push({ codigoUnico, idEnvio: e.idEnvio, label: `${e.origen} → ${e.destino} · ${tipo}`, maletas: e.maletas });
       }
@@ -1900,7 +1968,7 @@ export default function SimulacionPeriodo() {
         <div style="max-height:${enviosRelacionados.length > 3 ? '120px' : 'auto'};overflow-y:auto;">
         ${enviosRelacionados.map((env, i) => {
           // Obtener información de lote para este envío (usando la clave compuesta)
-          const rutaInfo = rutasPlanificadasRef.current.get(env.idEnvio);
+          const rutaInfo = sim.rutasPorCodigoUnicoRef.current.get(env.codigoUnico) ?? rutasPlanificadasRef.current.get(env.idEnvio);
           const loteLabel = rutaInfo?.numeroLote
             ? ` · Lote ${rutaInfo.numeroLote}/${sim.totalLotesRef.current.get(rutaInfo.idEnvio) ?? '?'}`
             : '';
@@ -1934,7 +2002,7 @@ export default function SimulacionPeriodo() {
             return feId === env.idEnvio && f.origenCode === fe.origenCode && f.destinoCode === fe.destinoCode;
           });
           envioFe = candidatos.find(f => f.active) || candidatos[candidatos.length - 1];
-          if (envioFe) mostrarPanelEnvio(envioFe, env.codigoUnico);
+          if (envioFe) { setFlightPanelOpen(false); setEnviosPanelOpen(true); setSelectedEnvioKey(env.codigoUnico); mostrarPanelEnvio(envioFe, env.codigoUnico); }
         });
       }
     });
@@ -1949,6 +2017,11 @@ export default function SimulacionPeriodo() {
     const panel = document.getElementById('airplaneDetailsPanel');
     if (panel) panel.remove();
     setSelectedEnvioKey(null);
+    panelEnvioKeyRef.current = null;
+    panelEnvioViewRef.current = 'plan';
+    panelEnvioRcRef.current = null;
+    panelEnvioForzadoRef.current = null;
+    panelEnvioHelpersRef.current = null;
   }
 
   function mostrarPanelEnvio(fe: FlightEvent, codigoUnicoForzado?: string) {
@@ -1963,7 +2036,7 @@ export default function SimulacionPeriodo() {
         position:absolute;right:12px;top:170px;width:300px;
         background:white;border-radius:12px;
         box-shadow:0 4px 20px rgba(0,0,0,0.18);
-        padding:18px;z-index:10000;
+        padding:18px;z-index:99999;
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         max-height:70vh;overflow-y:auto;pointer-events:auto;
       `;
@@ -1992,6 +2065,12 @@ export default function SimulacionPeriodo() {
     // Usar código forzado si se proporciona (desde búsqueda), si no calcular desde ruta
     const codigoRastreo = codigoUnicoForzado || `${codigoEnvio}${rutaCompleta?.idCliente || ''}${rutaCompleta?.origen || ''}${rutaCompleta?.destino || ''}`;
 
+    // Inicializar refs para auto‑refresh
+    panelEnvioKeyRef.current = codigoEnvio;
+    panelEnvioViewRef.current = 'plan';
+    panelEnvioRcRef.current = rutaCompleta || null;
+    panelEnvioForzadoRef.current = codigoUnicoForzado || null;
+
     if (!rutaCompleta) {
       panel.innerHTML = `
         <div class="panel-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;cursor:grab;user-select:none;">
@@ -2014,17 +2093,10 @@ export default function SimulacionPeriodo() {
 
     const rc = rutaCompleta!;
 
-    const aeropuertoOrigen = sim.aeropuertos.find(a => a.codigo === rc.origen);
-    const aeropuertoDestino = sim.aeropuertos.find(a => a.codigo === rc.destino);
-    const ubicacionOrigen = aeropuertoOrigen ? `${aeropuertoOrigen.ciudad}, ${aeropuertoOrigen.pais}` : rc.origen;
-    const ubicacionDestino = aeropuertoDestino ? `${aeropuertoDestino.ciudad}, ${aeropuertoDestino.pais}` : rc.destino;
-
     const getUbicacion = (codigo: string) => {
       const ap = sim.aeropuertos.find(a => a.codigo === codigo);
       return ap ? `${ap.ciudad}, ${ap.pais}` : codigo;
     };
-
-    const tipoRuta = (rc.tramos?.length ?? 0) <= 1 ? 'Directo' : 'Con Escala';
 
     const formatDateTime = (date: Date) => {
       const d = String(date.getUTCDate()).padStart(2, '0');
@@ -2049,43 +2121,43 @@ export default function SimulacionPeriodo() {
       return new Date(Date.UTC(y, m - 1, d, h, mi));
     };
 
-    // ── Build Plan de Viaje tramos ──
-    const tramosVisual = rc.tramos?.map((tramo, index) => {
-      const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
-      const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
-      const isLast = index === (rc.tramos?.length ?? 0) - 1;
-      let cursorDate = rc.fechaRegistro ? parseDateStr(rc.fechaRegistro) : null;
-      if (!cursorDate) {
-        const [sy, sm, sd] = (startDate || '2027-01-02').split('-').map(Number);
-        const stp = (startTime || '00:00').split(':').map(Number);
-        cursorDate = new Date(Date.UTC(sy, sm - 1, sd, stp[0], stp[1]));
-      }
-      const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
-      const saleP = saleTime.split(':').map(Number);
-      let saleDate = new Date(cursorDate);
-      saleDate.setUTCHours(saleP[0], saleP[1], 0, 0);
-      if (saleDate.getTime() < cursorDate.getTime()) saleDate.setUTCDate(saleDate.getUTCDate() + 1);
-      const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
-      const llegaP = llegaTime.split(':').map(Number);
-      let llegaDate = new Date(saleDate);
-      llegaDate.setUTCHours(llegaP[0], llegaP[1], 0, 0);
-      if (llegaDate.getTime() < saleDate.getTime()) llegaDate.setUTCDate(llegaDate.getUTCDate() + 1);
-      const saleD = formatDateTime(saleDate);
-      const llegaD = formatDateTime(llegaDate);
-      return `
-        <div style="background:#f9fafb;padding:8px 12px;border-radius:8px;margin-bottom:${isLast ? '0' : '8px'};">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
-              <span style="font-size:11px;color:#1f2937;font-weight:600;font-family:monospace;">${tramo.origen} → ${tramo.destino}</span>
-            </div>
-            <button id="gotoTramo_${codigoEnvio}_${index}" style="background:#2563eb;border:none;color:white;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;cursor:pointer;">✈ Ir</button>
-          </div>
-        </div>`;
-    }).join('') || '';
-
     // ── Views ──
     function generarVistaPlanViaje() {
+      const rcLocal = panelEnvioRcRef.current || rc;
+      const tramosVisual = rcLocal.tramos?.map((tramo, index) => {
+        const aOrigen = sim.aeropuertos.find(a => a.codigo === tramo.origen);
+        const aDestino = sim.aeropuertos.find(a => a.codigo === tramo.destino);
+        const isLast = index === (rcLocal.tramos?.length ?? 0) - 1;
+        let cursorDate = rcLocal.fechaRegistro ? parseDateStr(rcLocal.fechaRegistro) : null;
+        if (!cursorDate) {
+          const [sy, sm, sd] = (startDate || '2027-01-02').split('-').map(Number);
+          const stp = (startTime || '00:00').split(':').map(Number);
+          cursorDate = new Date(Date.UTC(sy, sm - 1, sd, stp[0], stp[1]));
+        }
+        const saleTime = (tramo.sale || '').split(' ')[1] || '00:00';
+        const saleP = saleTime.split(':').map(Number);
+        let saleDate = new Date(cursorDate);
+        saleDate.setUTCHours(saleP[0], saleP[1], 0, 0);
+        if (saleDate.getTime() < cursorDate.getTime()) saleDate.setUTCDate(saleDate.getUTCDate() + 1);
+        const llegaTime = (tramo.llega || '').split(' ')[1] || '00:00';
+        const llegaP = llegaTime.split(':').map(Number);
+        let llegaDate = new Date(saleDate);
+        llegaDate.setUTCHours(llegaP[0], llegaP[1], 0, 0);
+        if (llegaDate.getTime() < saleDate.getTime()) llegaDate.setUTCDate(llegaDate.getUTCDate() + 1);
+        const saleD = formatDateTime(saleDate);
+        const llegaD = formatDateTime(llegaDate);
+        return `
+          <div style="background:#f9fafb;padding:8px 12px;border-radius:8px;margin-bottom:${isLast ? '0' : '8px'};">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Tramo ${tramo.orden}</span>
+                <span style="font-size:11px;color:#1f2937;font-weight:600;font-family:monospace;">${tramo.origen} → ${tramo.destino}</span>
+              </div>
+              <button id="gotoTramo_${codigoEnvio}_${index}" style="background:#2563eb;border:none;color:white;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;cursor:pointer;">✈ Ir</button>
+            </div>
+          </div>`;
+      }).join('') || '';
+
       return `
         <div class="panel-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;cursor:grab;user-select:none;">
           <div>
@@ -2100,14 +2172,14 @@ export default function SimulacionPeriodo() {
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
           <div style="font-size:11px;color:#6b7280;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em;">DETALLES DE ENVÍO</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRegistro || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.fechaRecojo || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Registro</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.fechaRegistro || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Recojo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.fechaRecojo || '-'}</div></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;">
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.duracion || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">SLA</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">👥 Cliente</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.idCliente || '-'}</div></div>
-            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Maletas</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rc.maletas}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.duracion || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">SLA</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.sla || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">👥 Cliente</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.idCliente || '-'}</div></div>
+            <div><div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Maletas</div><div style="font-size:11px;color:#1f2937;font-weight:700;">${rcLocal.maletas}</div></div>
           </div>
         </div>
         <div style="background:#f3f4f6;padding:12px;border-radius:8px;margin-bottom:10px;">
@@ -2119,13 +2191,14 @@ export default function SimulacionPeriodo() {
     }
 
     function generarTimelineMonitoreo() {
+      const rcLocal = panelEnvioRcRef.current || rc;
       const latestFe = getLatestFe();
-      const tramos = rc.tramos || [];
+      const tramos = rcLocal.tramos || [];
       const tramoActual = latestFe.tramoOrden;
 
       // Construir nodos de aeropuertos (sin sale/llega aún)
       const aeropuertosRuta: { codigo: string; nombre: string; state: 'done' | 'active' | 'pending'; sale?: string; llega?: string }[] = [];
-      aeropuertosRuta.push({ codigo: rc.origen, nombre: getUbicacion(rc.origen), state: 'pending' });
+      aeropuertosRuta.push({ codigo: rcLocal.origen, nombre: getUbicacion(rcLocal.origen), state: 'pending' });
       tramos.forEach(tramo => {
         const last = aeropuertosRuta[aeropuertosRuta.length - 1];
         if (last.codigo !== tramo.destino) {
@@ -2190,6 +2263,13 @@ export default function SimulacionPeriodo() {
     }
 
     function generarVistaMonitoreo() {
+      const rcLocal = panelEnvioRcRef.current || rc;
+      const aeroOri = sim.aeropuertos.find(a => a.codigo === rcLocal.origen);
+      const aeroDes = sim.aeropuertos.find(a => a.codigo === rcLocal.destino);
+      const ubiOri = aeroOri ? `${aeroOri.ciudad}, ${aeroOri.pais}` : rcLocal.origen;
+      const ubiDes = aeroDes ? `${aeroDes.ciudad}, ${aeroDes.pais}` : rcLocal.destino;
+      const tipoRuta = (rcLocal.tramos?.length ?? 0) <= 1 ? 'Directo' : 'Con Escala';
+
       const latestFe = getLatestFe();
       const { timelineHtml } = generarTimelineMonitoreo();
 
@@ -2215,13 +2295,13 @@ export default function SimulacionPeriodo() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div style="background:#eef2ff;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Origen</div>
-            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rc.origen}</div>
-            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubicacionOrigen}</div>
+            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rcLocal.origen}</div>
+            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubiOri}</div>
           </div>
           <div style="background:#fef3c7;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Destino</div>
-            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rc.destino}</div>
-            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubicacionDestino}</div>
+            <div style="font-size:13px;color:#1f2937;font-weight:800;">${rcLocal.destino}</div>
+            <div style="font-size:10px;color:#6b7280;font-weight:500;">${ubiDes}</div>
           </div>
         </div>
         <div style="background:#f3f4f6;padding:8px 12px;border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
@@ -2236,7 +2316,7 @@ export default function SimulacionPeriodo() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Plazo de Entrega</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rcLocal.sla || '-'}</div>
           </div>
           <div style="background:${trBg};padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo Restante</div>
@@ -2253,6 +2333,7 @@ export default function SimulacionPeriodo() {
       const container = document.getElementById(`monitoreo-content-${codigoEnvio}`);
       if (!container) return;
 
+      const rcLocal = panelEnvioRcRef.current || rc;
       const latestFe = getLatestFe();
       const { timelineHtml } = generarTimelineMonitoreo();
 
@@ -2271,7 +2352,7 @@ export default function SimulacionPeriodo() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div style="background:#f3f4f6;padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Plazo de Entrega</div>
-            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rc.sla || '-'}</div>
+            <div style="font-size:12px;color:#1f2937;font-weight:700;">${rcLocal.sla || '-'}</div>
           </div>
           <div style="background:${trBg};padding:10px;border-radius:8px;">
             <div style="font-size:9px;color:#6b7280;margin-bottom:2px;">Tiempo Restante</div>
@@ -2297,6 +2378,7 @@ export default function SimulacionPeriodo() {
         });
         document.getElementById('monitoreoBtn')?.addEventListener('click', () => {
           currentView = 'monitoreo';
+          panelEnvioViewRef.current = 'monitoreo';
           transitarA(generarVistaMonitoreo());
           setTimeout(() => {
             if (currentView === 'monitoreo') {
@@ -2308,11 +2390,13 @@ export default function SimulacionPeriodo() {
         });
         document.getElementById('backToPlanBtn')?.addEventListener('click', () => {
           currentView = 'plan';
+          panelEnvioViewRef.current = 'plan';
           if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
           transitarA(generarVistaPlanViaje());
         });
         // Listeners para botones "✈ Ir" de cada tramo
-        (rc.tramos || []).forEach((tramo, idx) => {
+        const rcLocal = panelEnvioRcRef.current || rc;
+        (rcLocal.tramos || []).forEach((tramo, idx) => {
           const btn = document.getElementById(`gotoTramo_${codigoEnvio}_${idx}`);
           if (btn) {
             btn.addEventListener('click', () => {
@@ -2321,13 +2405,14 @@ export default function SimulacionPeriodo() {
                 f.origenCode === tramo.origen &&
                 f.destinoCode === tramo.destino
               );
-              if (feTramo) { cerrarPanelEnvio(); mostrarPanelAvion(feTramo); }
+              if (feTramo) { setEnviosPanelOpen(false); setFlightPanelOpen(true); cerrarPanelEnvio(); mostrarPanelAvion(feTramo); }
             });
           }
         });
       }, 200);
     }
 
+    panelEnvioHelpersRef.current = { transitarA, generarVistaPlanViaje };
     transitarA(generarVistaPlanViaje());
   }
 
@@ -2378,9 +2463,9 @@ export default function SimulacionPeriodo() {
         const pct = getOcup(vuelo);
         if (pct < 0) { matchSemaforo = false; }
         else if (filterSemaforo === 'azul') matchSemaforo = pct === 0;
-        else if (filterSemaforo === 'verde') matchSemaforo = pct > 0 && pct < 50;
-        else if (filterSemaforo === 'naranja') matchSemaforo = pct >= 50 && pct < 80;
-        else if (filterSemaforo === 'rojo') matchSemaforo = pct >= 80;
+        else if (filterSemaforo === 'verde') matchSemaforo = pct > 0 && pct <= 30;
+        else if (filterSemaforo === 'naranja') matchSemaforo = pct > 30 && pct <= 70;
+        else if (filterSemaforo === 'rojo') matchSemaforo = pct > 70;
       }
       return matchCodigo && matchOrigen && matchDestino && matchSemaforo;
     });
@@ -2481,9 +2566,9 @@ export default function SimulacionPeriodo() {
       list = list.filter(a => {
         const pct = a.pct;
         if (filterAlmSemaforo === 'azul') return pct === 0;
-        if (filterAlmSemaforo === 'verde') return pct > 0 && pct < 50;
-        if (filterAlmSemaforo === 'naranja') return pct >= 50 && pct < 80;
-        if (filterAlmSemaforo === 'rojo') return pct >= 80;
+        if (filterAlmSemaforo === 'verde') return pct > 0 && pct <= 30;
+        if (filterAlmSemaforo === 'naranja') return pct > 30 && pct <= 70;
+        if (filterAlmSemaforo === 'rojo') return pct > 70;
         return true;
       });
     }
@@ -2534,9 +2619,7 @@ export default function SimulacionPeriodo() {
       generarCodigoVuelo(v.origen, v.destino, extraerHHMM(v.salida)) === codigo
     );
     if (idx < 0) return;
-    const targetScrollTop = idx * ITEM_HEIGHT;
-
-    setScrollTop(targetScrollTop);
+    
     autoScrollPendingRef.current = true;
 
     const delay = panelWasOpenRef.current ? 0 : 420;
@@ -2544,7 +2627,19 @@ export default function SimulacionPeriodo() {
       scrollTimeoutRef.current = null;
       if (!autoScrollPendingRef.current) return;
       autoScrollPendingRef.current = false;
-      if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = targetScrollTop;
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      // Medir la altura REAL en este instante (no el estado cacheado),
+      // igual que hace scrollIntoView internamente.
+      const liveHeight = el.clientHeight;
+      const maxScrollTop = Math.max(0, vuelosFiltrados.length * ITEM_HEIGHT - liveHeight);
+      const targetScrollTop = Math.min(
+        maxScrollTop,
+        Math.max(0, idx * ITEM_HEIGHT - (liveHeight - ITEM_HEIGHT) / 2)
+      );
+      setScrollTop(targetScrollTop);
+      el.scrollTop = targetScrollTop;
+      
     }, delay);
 
     return () => {
@@ -2555,6 +2650,16 @@ export default function SimulacionPeriodo() {
       }
     };
   }, [scrollTrigger]);
+
+  // Efecto: hacer scroll al envío seleccionado
+  useEffect(() => {
+    if (!enviosPanelOpen || !selectedEnvioKey) return;
+    const id = setTimeout(() => {
+      const el = document.querySelector(`[data-codigo="${CSS.escape(selectedEnvioKey)}"]`);
+      if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    }, 100);
+    return () => clearTimeout(id);
+  }, [enviosPanelOpen, selectedEnvioKey]);
 
   // Efecto: hacer arrastrables (con botón de reposicionamiento) los paneles
   // flotantes "Tiempos" e "Indicadores globales", igual que Detalle del viaje / Plan de viaje
@@ -2897,21 +3002,21 @@ export default function SimulacionPeriodo() {
                 <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
                   {sim.resumen && (
                     <>
-                      <div style={{ padding: '8px 14px', backgroundColor: '#f0fdf4', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
                         <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Envíos</div>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#16a34a' }}>{sim.resumen.totalEnviosPlanificados}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>{sim.resumen.totalEnviosPlanificados}</div>
                       </div>
-                      <div style={{ padding: '8px 14px', backgroundColor: '#eff6ff', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
                         <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Maletas</div>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#2563eb' }}>{sim.resumen.totalMaletasPlanificadas}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>{sim.resumen.totalMaletasPlanificadas}</div>
                       </div>
-                      <div style={{ padding: '8px 14px', backgroundColor: '#fefce8', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
                         <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Ocup. Vuelos</div>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#ca8a04' }}>{sim.resumen.ocupacionPromedioVuelos.toFixed(1)}%</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>{sim.resumen.ocupacionPromedioVuelos.toFixed(1)}%</div>
                       </div>
-                      <div style={{ padding: '8px 14px', backgroundColor: '#fef2f2', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
+                      <div style={{ padding: '8px 14px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center', minWidth: '100px' }}>
                         <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Ocup. Almacenes</div>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#dc2626' }}>{sim.resumen.ocupacionPromedioAlmacenes.toFixed(1)}%</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>{sim.resumen.ocupacionPromedioAlmacenes.toFixed(1)}%</div>
                       </div>
                     </>
                   )}
@@ -3180,9 +3285,9 @@ export default function SimulacionPeriodo() {
                 <div style={{ marginTop: 6 }}>
                   {[
                     { color: '#2563eb', label: '0% — Vacío' },
-                    { color: '#10b981', label: '< 50% — Bajo' },
-                    { color: '#f97316', label: '50–80% — Medio' },
-                    { color: '#ef4444', label: '> 80% — Alto' },
+                    { color: '#10b981', label: '<= 30% — Bajo' },
+                    { color: '#f97316', label: '30–70% — Medio' },
+                    { color: '#ef4444', label: '> 70% — Alto' },
                   ].map(({ color, label }) => (
                     <div key={color} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                       <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />
@@ -3278,7 +3383,7 @@ export default function SimulacionPeriodo() {
                     { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(1)}%`, sv: metricas.ocupacionAviones },
                     { label: 'Maletas entregadas', value: metricas.maletasEntregadas.toLocaleString() },
                     ].map(m => {
-                      const sc = m.sv !== undefined ? (m.sv < 50 ? '#22c55e' : m.sv < 80 ? '#f97316' : '#ef4444') : undefined;
+                      const sc = m.sv !== undefined ? (m.sv <= 30 ? '#22c55e' : m.sv <= 70 ? '#f97316' : '#ef4444') : undefined;
                       return (
                         <div key={m.label} style={{ padding: '3px 6px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6, borderLeft: sc ? `3px solid ${sc}` : undefined }}>
                           <div style={{ fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>{m.label}</div>
@@ -3366,7 +3471,7 @@ export default function SimulacionPeriodo() {
                 </button>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                Total: {sim.rutasPlanificadasRef.current.size} envíos
+                Total: {enviosFiltrados.length} envíos
               </div>
               <button
                 ref={envFilterButtonRef}
@@ -3390,7 +3495,7 @@ export default function SimulacionPeriodo() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</span>
-                    <button onClick={() => { setEnvFilterCodigo(''); setEnvFilterOrigen(''); setEnvFilterDestino(''); setEnvSortBy('salida'); setEnvSortDir('asc'); }}
+                    <button onClick={() => { setEnvFilterCodigo(''); setEnvFilterOrigen(''); setEnvFilterDestino(''); setEnvSortBy('registro'); setEnvSortDir('desc'); }}
                       style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600 }}>
                       ✕ Borrar
                     </button>
@@ -3425,6 +3530,7 @@ export default function SimulacionPeriodo() {
                     <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Ordenar por</label>
                     <select value={envSortBy} onChange={(e) => setEnvSortBy(e.target.value)}
                       style={{ width: '100%', padding: '6px 8px', fontSize: 11, border: '1px solid var(--border-color)', borderRadius: 5, outline: 'none', boxSizing: 'border-box', cursor: 'pointer' }}>
+                      <option value="registro">Registro</option>
                       <option value="salida">Hora de salida</option>
                       <option value="llegada">Hora de llegada</option>
                       <option value="origen">Origen</option>
@@ -3445,25 +3551,26 @@ export default function SimulacionPeriodo() {
                   {sim.rutasPlanificadasRef.current.size === 0 ? '⏳ Esperando planificación del GA...' : '⚠️ No envíos coinciden con los filtros'}
                 </div>
               ) : (
-                enviosFiltrados.slice().reverse().map(({ clave, ruta, tipoRuta, codigoRastreo, loteLabel }) => {
+                enviosFiltrados.map(({ clave, ruta, tipoRuta, codigoRastreo, loteLabel }) => {
                   const aOri = sim.aeropuertos.find((a: any) => a.codigo === ruta.origen);
                   const aDes = sim.aeropuertos.find((a: any) => a.codigo === ruta.destino);
                   const ciudadOrigen = aOri ? `${aOri.ciudad}` : ruta.origen;
                   const ciudadDestino = aDes ? `${aDes.ciudad}` : ruta.destino;
                   return (
                     <div
-                      key={clave}
+                      key={codigoRastreo}
+                      data-codigo={codigoRastreo}
                       onClick={() => {
                         const envioFe = flightEventsRef.current.find(e => e.key.startsWith(clave + '-'));
                         if (envioFe) {
-                          setSelectedEnvioKey(clave);
+                          setSelectedEnvioKey(codigoRastreo);
                           setSelectedVueloKey(null);
                           mostrarPanelEnvio(envioFe, codigoRastreo);
                         }
                       }}
                       style={{
                         padding: '6px 10px', backgroundColor: 'var(--bg-tertiary)',
-                        border: selectedEnvioKey === clave ? '2px solid var(--accent-blue)' : '1px solid var(--border-color)',
+                        border: selectedEnvioKey === codigoRastreo ? '2px solid var(--accent-blue)' : '1px solid var(--border-color)',
                         borderRadius: '6px', marginBottom: '6px', cursor: 'pointer',
                       }}
                     >
@@ -3649,11 +3756,11 @@ export default function SimulacionPeriodo() {
                       } else {
                         pctOcupacion = 0;
                       }
-                       if (esSinUso) {
+                       if (esSinUso || pctOcupacion === 0) {
                         ocupColor = '#2563eb';
-                      } else if (pctOcupacion < 50) {
+                      } else if (pctOcupacion <= 30) {
                         ocupColor = '#22c55e';
-                      } else if (pctOcupacion < 80) {
+                      } else if (pctOcupacion <= 70) {
                         ocupColor = '#f97316';
                       } else {
                         ocupColor = '#ef4444';
@@ -3873,7 +3980,7 @@ export default function SimulacionPeriodo() {
               ) : (
                 <div style={{ height: totalHeightAlm, paddingTop: offsetYAlm, boxSizing: 'border-box' }}>
                   {visibleAlmacenes.map((alm, i) => {
-                    const estadoColor = alm.pct === 0 ? '#6366f1' : alm.pct < 50 ? '#22c55e' : alm.pct < 80 ? '#f97316' : '#ef4444';
+                    const estadoColor = alm.pct === 0 ? '#6366f1' : alm.pct <= 30 ? '#22c55e' : alm.pct <= 70 ? '#f97316' : '#ef4444';
                     return (
                       <div
                         key={alm.codigo}
@@ -3994,7 +4101,7 @@ function StatCard({ title, value, color }: { title: string; value: number; color
 
 function MetricBox({ label, value, semaphoreValue }: { label: string; value: string; semaphoreValue?: number }) {
   const semColor = semaphoreValue !== undefined
-    ? semaphoreValue < 50 ? '#22c55e' : semaphoreValue < 80 ? '#f97316' : '#ef4444'
+    ? semaphoreValue <= 30 ? '#22c55e' : semaphoreValue <= 70 ? '#f97316' : '#ef4444'
     : undefined;
   return (
     <div style={{

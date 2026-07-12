@@ -196,6 +196,15 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
         const minSim = Math.min(TOTAL_MINUTOS_SIM, currentMinSimRef.current);
         currentMinSimRef.current = minSim;
 
+        // El backend termina de calcular antes que el front termine de animar los
+        // 5 días. RESUMEN_FINAL solo deja el resumen "pendiente" (pendingResumenRef);
+        // acá lo confirmamos recién cuando el reloj visual llegó al final del día 5,
+        // para que el overlay de finalización no se adelante a la animación.
+        if (sim.pendingResumenRef.current && minSim >= TOTAL_MINUTOS_SIM) {
+          sim.commitResumenFinal();
+          addLogRef.current('🏁 Simulación finalizada correctamente', '#22c55e');
+        }
+
         const events = flightEventsRef.current;
         const simStart = sim.simStartDateRef.current;
 

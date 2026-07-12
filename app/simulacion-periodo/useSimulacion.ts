@@ -378,6 +378,11 @@ export function useSimulacion(startDate?: string, startTime?: string) {
   const rutasPorCodigoUnicoRef = useRef<Map<string, BackendRutaPlanificada>>(new Map());
   const allFlightEventsRef = useRef<FlightEvent[]>([]);
   const simulacionFinalizadaRef = useRef(false);
+  // Resumen recibido del backend (RESUMEN_FINAL) pero aún no confirmado para mostrar:
+  // el backend siempre termina de calcular antes que el front termine de animar
+  // los 5 días. Se guarda aquí y sólo se "confirma" (commitResumenFinal) cuando
+  // el reloj visual (currentMinSimRef en SimulationContext) llega al final del día 5.
+  const pendingResumenRef = useRef<Resumen | null>(null);
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
@@ -451,6 +456,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     rutasPorCodigoUnicoRef.current.clear();
     totalLotesRef.current.clear();
     simulacionFinalizadaRef.current = false;
+    pendingResumenRef.current = null;
 
     // Cargar aeropuertos si aún no están disponibles
     if (aeropuertosRef.current.size === 0) {
@@ -664,9 +670,8 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
       } else if (tipo === 'RESUMEN_FINAL') {
         simulacionFinalizadaRef.current = true;
-        if (d.resumenFinal) setResumen(d.resumenFinal);
-        setIsRunning(false);
-        addLog('🏁 Simulación finalizada correctamente', '#22c55e');
+        if (d.resumenFinal) pendingResumenRef.current = d.resumenFinal;
+        addLog('🧮 Backend finalizó el cálculo — terminando animación del día 5...', '#6366f1');
         es.close();
       }
     };
@@ -729,12 +734,26 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setCancelledFlights(new Set());
     setSuppressedTramos(new Map());
     setResumen(null);
+    pendingResumenRef.current = null;
     try {
       await fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' });
     } catch (error) {
       console.error('Error al detener simulación:', error);
     }
   }, [addLog]);
+
+  // Confirma y muestra el resumenFinal ya recibido del backend. Debe llamarse SOLO
+  // cuando el reloj visual (currentMinSimRef) alcanzó el final del día 5 — la llama
+  // el engineLoop de SimulationContext, no procesarMensaje. Deps vacíos a propósito:
+  // engineLoop guarda una referencia a `sim` capturada en el mount y la llama desde
+  // ahí, así que esta función debe mantener identidad estable (como addLog/addLogBatch).
+  const commitResumenFinal = useCallback(() => {
+    if (pendingResumenRef.current) {
+      setResumen(pendingResumenRef.current);
+      pendingResumenRef.current = null;
+    }
+    setIsRunning(false);
+  }, []);
 
   const totalIterSeguro = Number.isFinite(totalIter) && totalIter > 0 ? totalIter : 30;
   const progreso = totalIterSeguro > 0 ? (iteracion / totalIterSeguro) * 100 : 0;
@@ -745,6 +764,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     iteracion, totalIter: totalIterSeguro, reloj, logs,
     totalPlanificados, totalMaletas, progreso, diaActual,
     iniciar, detener, addLog, addLogBatch,
+    pendingResumenRef, commitResumenFinal,
     realStartTimeRef,
     simStartDateRef,
     aeropuertosRef,

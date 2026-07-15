@@ -28,7 +28,11 @@ interface SimulationContextValue {
 const SimulationContext = createContext<SimulationContextValue | null>(null);
 
 export function SimulationProvider({ children, startDate, startTime, pathname }: { children: ReactNode; startDate?: string; startTime?: string; pathname?: string }) {
-  const sim = useSimulacion(startDate || undefined, startTime || undefined);
+  const sim = useSimulacion(
+    startDate || undefined,
+    startTime || undefined,
+    pathname?.startsWith('/simulacion-periodo') ?? false
+  );
 
   // ── Refs (persisten mientras el Provider está montado) ──
   const airportStateRef = useRef<Map<string, { ocupacion: number; capacidad: number }>>(new Map());

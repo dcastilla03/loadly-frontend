@@ -319,7 +319,7 @@ export const SIM_CONFIG = {
   K: 120, // Aceleración
 };
 
-export function useSimulacion(startDate?: string, startTime?: string) {
+export function useSimulacion(startDate?: string, startTime?: string, usarCanalCompartido = false) {
   const [isRunning, setIsRunning] = useState(false);
   const [aeropuertos, setAeropuertos] = useState<AeropuertoSim[]>([]);
   const [allFlightEvents, setAllFlightEvents] = useState<FlightEvent[]>([]);
@@ -386,6 +386,8 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
+  const usarCanalCompartidoRef = useRef(usarCanalCompartido);
+  usarCanalCompartidoRef.current = usarCanalCompartido;
 
   useEffect(() => {
     return () => {
@@ -393,7 +395,11 @@ export function useSimulacion(startDate?: string, startTime?: string) {
         esRef.current.close();
         esRef.current = null;
       }
-        fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' }).catch(() => {});
+        // En Período, cerrar una ventana sólo desconecta su SSE: la ejecución
+        // compartida continúa en el servidor para los demás espectadores.
+        if (!usarCanalCompartidoRef.current) {
+          fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' }).catch(() => {});
+        }
       };
     }, []);
 
@@ -527,11 +533,26 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     simStartDateRef.current = simStart;
 
     const kVal = customK ?? SIM_CONFIG.K;
+    const endpoint = usarCanalCompartido
+      ? 'compartida'
+      : 'iniciar';
     const url = sinFin
-      ? `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
-      : `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
+      ? `${API}/api/simulacion/periodo/${endpoint}?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
+      : `${API}/api/simulacion/periodo/${endpoint}?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
     const es = new EventSource(url);
     esRef.current = es;
+
+    // Abrir el SSE nunca inicia el algoritmo. Esta llamada explÃ­cita crea la
+    // ejecuciÃ³n compartida; una reconexiÃ³n automÃ¡tica del SSE solo se suscribe.
+    if (usarCanalCompartido) {
+      const startUrl = sinFin
+        ? `${API}/api/simulacion/periodo/compartida/iniciar?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
+        : `${API}/api/simulacion/periodo/compartida/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
+      fetch(startUrl, { method: 'POST' }).catch((error) => {
+        console.error('Error iniciando la simulaciÃ³n compartida:', error);
+        addLog('âŒ Error iniciando la simulaciÃ³n compartida', '#ef4444', null);
+      });
+    }
 
     // El backend envía: data:{...} sin línea event: previa
     // → todos los mensajes llegan como evento 'message' estándar.
@@ -720,7 +741,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     es.onopen = () => {
       sseErrorLoggedRef.current = false;
     };
-  }, [addLog, startDate]);
+  }, [addLog, startDate, usarCanalCompartido]);
 
   const detener = useCallback(async () => {
     setIsRunning(false);

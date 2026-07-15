@@ -1502,6 +1502,7 @@ export default function SimulacionPeriodo() {
 
   // Cancela un vuelo llamando al backend
   const cancelarVuelo = async (vuelo: any) => {
+    if (!sim.canStopSimulation) return;
     const claveVuelo = getCancelKey(vuelo);
     console.log('[cancelarVuelo] Enviando claveVuelo:', claveVuelo, 'vuelo:', vuelo);
 
@@ -3822,12 +3823,14 @@ export default function SimulacionPeriodo() {
                             )}
                             {!esCancelado && !esCancelling && (
                               <button
+                                disabled={!sim.canStopSimulation}
                                 onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
                                 style={{
                                   padding: '2px 6px', fontSize: '10px',
                                   backgroundColor: 'rgba(220, 53, 69, 0.1)', color: 'var(--danger-red)',
                                   border: '1px solid rgba(220, 53, 69, 0.3)', borderRadius: '4px',
-                                  cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
+                                  cursor: sim.canStopSimulation ? 'pointer' : 'default', fontWeight: 600, whiteSpace: 'nowrap',
+                                  opacity: sim.canStopSimulation ? 1 : 0.45
                                 }}
                               >
                                 Cancelar

@@ -3248,8 +3248,8 @@ export default function SimulacionPeriodo() {
               </div>
               <div style={{ overflow: 'hidden', transition: 'max-height 0.25s ease, opacity 0.2s ease', maxHeight: centroControlOpen ? 130 : 0, opacity: centroControlOpen ? 1 : 0 }}>
                 <div style={{ padding: '0 8px 6px', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'stretch' }}>
-                  <button onClick={handleDetener} disabled={!sim.isRunning}
-                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', fontWeight: 600, opacity: !sim.isRunning ? 0.6 : 1, textAlign: 'center' }}>
+                  <button onClick={handleDetener} disabled={!sim.isRunning || !sim.canStopSimulation}
+                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: !sim.isRunning || !sim.canStopSimulation ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning || !sim.canStopSimulation ? 'default' : 'pointer', color: 'white', fontWeight: 600, opacity: !sim.isRunning || !sim.canStopSimulation ? 0.6 : 1, textAlign: 'center' }}>
                     ⏹️ Detener
                   </button>
                   <button onClick={() => { if (flightPanelOpen) cerrarPanelAvion(); setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) { setAlmacenesPanelOpen(false); setEnviosPanelOpen(false); } }}

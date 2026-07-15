@@ -151,6 +151,13 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
     }
 
     if (sim.iteracion > 0 && !clockEnabledRef.current) {
+      const inicioVisualCompartido = sim.sharedVisualStartEpochMsRef.current;
+      if (inicioVisualCompartido) {
+        currentMinSimRef.current = Math.min(
+          5 * 24 * 60,
+          Math.max(0, ((Date.now() - inicioVisualCompartido) * SIM_CONFIG.K) / 60000)
+        );
+      }
       clockEnabledRef.current = true;
       clockStateRef.current = 'VISUALIZANDO';
       lastFrameTimeRef.current = performance.now();
@@ -158,7 +165,7 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
       configCountdownRef.current = 0;
       // Iniciar stopwatch solo si no está ya corriendo
       if (stopwatchStartedAtRef.current === null) {
-        stopwatchStartedAtRef.current = Date.now();
+        stopwatchStartedAtRef.current = inicioVisualCompartido || Date.now();
       }
     }
 

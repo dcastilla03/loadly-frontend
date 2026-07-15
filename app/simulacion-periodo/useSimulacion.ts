@@ -97,6 +97,7 @@ export interface BackendRutaPlanificada {
 interface BackendSimEvent {
   tipo: string;
   relojSimulado: string;   // "YYYY-MM-DD HH:MM"
+  inicioVisualEpochMs?: number;
   limiteLectura?: string;  // "YYYY-MM-DD HH:MM"
   totalIteracionesEstimadas?: number;
   aeropuertos?: BackendAeropuerto[];
@@ -321,6 +322,7 @@ export const SIM_CONFIG = {
 
 export function useSimulacion(startDate?: string, startTime?: string, usarCanalCompartido = false) {
   const [isRunning, setIsRunning] = useState(false);
+  const [isSharedSimulationOwner, setIsSharedSimulationOwner] = useState(false);
   const [aeropuertos, setAeropuertos] = useState<AeropuertoSim[]>([]);
   const [allFlightEvents, setAllFlightEvents] = useState<FlightEvent[]>([]);
   const [allLogEvents, setAllLogEvents] = useState<LogEvent[]>([]);
@@ -386,6 +388,7 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
+  const sharedVisualStartEpochMsRef = useRef<number | null>(null);
   const usarCanalCompartidoRef = useRef(usarCanalCompartido);
   usarCanalCompartidoRef.current = usarCanalCompartido;
 
@@ -448,6 +451,7 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
 
   const iniciar = useCallback((customStartDate?: string, customStartTime?: string, customK?: number, sinFin?: boolean) => {
     if (customK !== undefined) { SIM_CONFIG.K = customK; }
+    setIsSharedSimulationOwner(false);
     if (esRef.current) esRef.current.close();
     setIsRunning(true);
     setAllFlightEvents([]);
@@ -458,6 +462,7 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
     setSuppressedTramos(new Map());
     iteracionIdxRef.current = 0;
     realStartTimeRef.current = performance.now();
+    sharedVisualStartEpochMsRef.current = null;
     rutasPlanificadasRef.current.clear();
     rutasPorCodigoUnicoRef.current.clear();
     totalLotesRef.current.clear();
@@ -548,16 +553,25 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
       const startUrl = sinFin
         ? `${API}/api/simulacion/periodo/compartida/iniciar?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
         : `${API}/api/simulacion/periodo/compartida/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
-      fetch(startUrl, { method: 'POST' }).catch((error) => {
-        console.error('Error iniciando la simulaciÃ³n compartida:', error);
-        addLog('âŒ Error iniciando la simulaciÃ³n compartida', '#ef4444', null);
-      });
+      fetch(startUrl, { method: 'POST' })
+        .then(async (response) => {
+          const result = await response.text();
+          if (!response.ok) throw new Error(result);
+          setIsSharedSimulationOwner(result.includes('iniciada') && !result.includes('existente'));
+        })
+        .catch((error) => {
+          console.error('Error iniciando la simulaciÃ³n compartida:', error);
+          addLog('âŒ Error iniciando la simulaciÃ³n compartida', '#ef4444', null);
+        });
     }
 
     // El backend envía: data:{...} sin línea event: previa
     // → todos los mensajes llegan como evento 'message' estándar.
     // Despachamos por d.tipo en un único handler.
     const procesarMensaje = (d: BackendSimEvent) => {
+      if (typeof d.inicioVisualEpochMs === 'number') {
+        sharedVisualStartEpochMsRef.current = d.inicioVisualEpochMs;
+      }
       const tipo = (d.tipo || '').toUpperCase();
       console.log('[SSE] tipo recibido:', tipo, '| reloj:', d.relojSimulado);
 
@@ -782,11 +796,13 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
 
   return {
     isRunning, aeropuertos, allFlightEvents, allLogEvents, stats, resumen, colapso,
+    canStopSimulation: !usarCanalCompartido || isSharedSimulationOwner,
     iteracion, totalIter: totalIterSeguro, reloj, logs,
     totalPlanificados, totalMaletas, progreso, diaActual,
     iniciar, detener, addLog, addLogBatch,
     pendingResumenRef, commitResumenFinal,
     realStartTimeRef,
+    sharedVisualStartEpochMsRef,
     simStartDateRef,
     aeropuertosRef,
     rutasPlanificadasRef,

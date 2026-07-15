@@ -1500,6 +1500,36 @@ export default function SimulacionPeriodo() {
     return `${vuelo.origen}-${vuelo.destino}-${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
+  // Encuentra el FlightEvent real correspondiente a un vuelo del catálogo (origen+destino+hora GMT).
+  // IMPORTANTE: en una simulación multi-día, la misma ruta+hora se repite una vez por cada día
+  // (mismo `minutosInicio % 1440`), generando varios FlightEvents distintos con distinta
+  // ocupación (maletasVuelo/capacidadVuelo) cada uno. Buscar solo por "hora del día" con `.find()`
+  // devuelve el PRIMER FlightEvent que calce en el array -sin importar de qué día es-, lo cual
+  // puede traer la ocupación de un día distinto al que corresponde mostrar (de ahí el % erróneo
+  // en la tarjeta de "Vuelos Disponibles"). Aquí desambiguamos eligiendo, entre todas las
+  // ocurrencias de esa ruta+hora, la más cercana al instante actual de la simulación,
+  // priorizando vuelos activos/pendientes (no `done`) y con carga real asignada (no `unused-`).
+  const encontrarFlightEventDeVuelo = (vuelo: { origen: string; destino: string; salida: string }): FlightEvent | undefined => {
+    const [hh, mm] = extraerHHMM(vuelo.salida).split(':').map(Number);
+    const horaDelDia = ((hh * 60 + mm) % 1440 + 1440) % 1440;
+    const candidatos = flightEventsRef.current.filter(e =>
+      e.origenCode === vuelo.origen &&
+      e.destinoCode === vuelo.destino &&
+      (((e.minutosInicio % 1440) + 1440) % 1440) === horaDelDia
+    );
+    if (candidatos.length === 0) return undefined;
+    if (candidatos.length === 1) return candidatos[0];
+
+    const ahora = currentMinSimRef.current;
+    const puntuar = (e: FlightEvent) => {
+      let penalizacion = 0;
+      if (e.done) penalizacion += 1_000_000;
+      if (e.key.startsWith('unused-')) penalizacion += 500_000;
+      return penalizacion + Math.abs(e.minutosInicio - ahora);
+    };
+    return candidatos.reduce((mejor, actual) => (puntuar(actual) < puntuar(mejor) ? actual : mejor));
+  };
+
   // Cancela un vuelo llamando al backend
   const cancelarVuelo = async (vuelo: any) => {
     const claveVuelo = getCancelKey(vuelo);
@@ -2429,22 +2459,10 @@ export default function SimulacionPeriodo() {
 
   const vuelosFiltrados = useMemo(() => {
     const simStart = sim.simStartDateRef.current;
-    const feRef = flightEventsRef.current;
 
     const getOcup = (v: typeof vuelosGlobales[0]) => {
       if (!simStart) return 0;
-      const [hh, mm] = extraerHHMM(v.salida).split(':').map(Number);
-      let d = new Date(simStart);
-      d.setUTCHours(hh, mm, 0, 0);
-      while (d.getTime() < simStart.getTime()) {
-        d.setUTCDate(d.getUTCDate() + 1);
-      }
-      const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
-      const fe = feRef.find((e: any) =>
-        e.origenCode === v.origen &&
-        e.destinoCode === v.destino &&
-        (e.minutosInicio % 1440) === (minInicio % 1440)
-      );
+      const fe = encontrarFlightEventDeVuelo(v);
       if (!fe) return 0;
       if (fe.key.startsWith('unused-')) return 0;
       if (fe.capacidadVuelo > 0) {
@@ -3744,12 +3762,7 @@ export default function SimulacionPeriodo() {
                     let esSinUso = true;
                     const simStartOcc = sim.simStartDateRef.current;
                     if (simStartOcc) {
-                      const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
-                      let d = new Date(simStartOcc); d.setUTCHours(gmtHour, gmtMin, 0, 0);
-                      while (d.getTime() < simStartOcc.getTime()) d.setUTCDate(d.getUTCDate() + 1);
-                      const minInicio = Math.round((d.getTime() - simStartOcc.getTime()) / 60000);
-                      let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
-                      if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
+                      const fe = encontrarFlightEventDeVuelo(vuelo);
                       esSinUso = !fe || fe.key.startsWith('unused-');
                       if (fe && !esSinUso) {
                         pctOcupacion = fe.capacidadVuelo > 0 ? (fe.maletasVuelo / fe.capacidadVuelo) * 100 : 0;
@@ -3773,14 +3786,13 @@ export default function SimulacionPeriodo() {
                           const simStart = sim.simStartDateRef.current;
                           if (!simStart || esCancelado || esCancelling) return;
                           if (selectedVueloKey === codigoVuelo) { setSelectedVueloKey(null); cerrarPanelAvion(); return; }
-                          const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
-                          // setUTCHours para mantener todo en UTC
-                          let d = new Date(simStart); d.setUTCHours(gmtHour, gmtMin, 0, 0);
-                          while (d.getTime() < simStart.getTime()) d.setUTCDate(d.getUTCDate() + 1);
-                          const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
-                          let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
-                          if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
+                          let fe = encontrarFlightEventDeVuelo(vuelo);
                           if (!fe) {
+                            const [gmtHour, gmtMin] = salidaHHMM.split(':').map(Number);
+                            // setUTCHours para mantener todo en UTC
+                            let d = new Date(simStart); d.setUTCHours(gmtHour, gmtMin, 0, 0);
+                            while (d.getTime() < simStart.getTime()) d.setUTCDate(d.getUTCDate() + 1);
+                            const minInicio = Math.round((d.getTime() - simStart.getTime()) / 60000);
                             const aOri2 = sim.aeropuertosRef.current.get(vuelo.origen);
                             const aDes2 = sim.aeropuertosRef.current.get(vuelo.destino);
                             if (aOri2 && aDes2) {

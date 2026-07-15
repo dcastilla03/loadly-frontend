@@ -257,11 +257,13 @@ export default function SimulacionPeriodo() {
       if (f.key.startsWith('unused-')) return true;
       // Si está activo o ya completado, lo mantenemos (no se puede reemplazar)
       if (f.active || f.done) return true;
-      // Verificar si algún nuevo evento coincide en origen, destino y hora (minutosInicio % 1440)
+      // Verificar si algún nuevo evento coincide en origen, destino y minutosInicio EXACTO
+      // (antes se comparaba solo minutosInicio % 1440, lo que hacía que un evento nuevo de
+      // OTRO día -misma hora del día- reemplazara/descartara por error un vuelo pendiente de HOY)
       const match = nuevos.some(n =>
         n.origenCode === f.origenCode &&
         n.destinoCode === f.destinoCode &&
-        (n.minutosInicio % 1440) === (f.minutosInicio % 1440) &&
+        n.minutosInicio === f.minutosInicio &&
         !n.key.startsWith('unused-')
       );
       return !match; // Si coincide, se elimina (será reemplazado)
@@ -2052,16 +2054,16 @@ export default function SimulacionPeriodo() {
     const sourceEvents = sim.allFlightEvents.length > 0 ? sim.allFlightEvents : flightEventsRef.current;
     const enviosRelacionados: { codigoRastreo: string; idEnvio: string; label: string; maletas: number; loteLabel: string }[] = [];
     if (!isEmptyFlight) {
-      const flightTimeMod = ((fe.minutosInicio % 1440) + 1440) % 1440;
-      console.log(`[DEBUG ENVIOS] fe.key=${fe.key} origen=${fe.origenCode} dest=${fe.destinoCode} flightTimeMod=${flightTimeMod} fe.minutosInicio=${fe.minutosInicio} allEvents=${sim.allFlightEvents.length} refEvents=${flightEventsRef.current.length}`);
+      // Comparar por minutosInicio EXACTO (no por hora-del-día vía % 1440): con mod 1440
+      // esto sumaba maletas de un vuelo de OTRO día que comparte la misma hora de salida,
+      // inflando el total mostrado en "🎒 MALETAS" del panel de Detalle del viaje.
       const mismosVuelos = sourceEvents.filter(e =>
         !e.key.startsWith('card-') &&
         !e.key.startsWith('unused-') &&
         e.origenCode === fe.origenCode &&
         e.destinoCode === fe.destinoCode &&
-        (((e.minutosInicio % 1440) + 1440) % 1440) === flightTimeMod
+        e.minutosInicio === fe.minutosInicio
       );
-      console.log(`[DEBUG ENVIOS RESULT] mismosVuelos=${mismosVuelos.length}`, mismosVuelos.map(e => ({ key: e.key, mod: ((e.minutosInicio % 1440) + 1440) % 1440 })));
       const codigosVistos = new Set<string>();
       for (const ev of mismosVuelos) {
         const eId = ev.key.split('-')[0];
@@ -2596,11 +2598,14 @@ export default function SimulacionPeriodo() {
 
     const getOcup = (v: typeof vuelosGlobales[0]) => {
       if (!simStart) return 0;
-      // Usamos sim.allFlightEvents en lugar de flightEventsRef.current
+      // v.minutosInicio ya es el minuto ABSOLUTO exacto de esta ocurrencia específica
+      // (vuelosGlobales se deduplica por origen+destino+minutosInicio+minutosFin exactos).
+      // Comparar por (% 1440) en vez de por igualdad exacta hacía que, en una simulación de
+      // varios días, se tomara la ocupación de OTRO día que comparte la misma hora del día.
       const fe = sim.allFlightEvents.find((e: FlightEvent) =>
         e.origenCode === v.origen &&
         e.destinoCode === v.destino &&
-        (e.minutosInicio % 1440) === (v.minutosInicio % 1440) &&
+        e.minutosInicio === v.minutosInicio &&
         !e.done
       );
       if (!fe) return 0;
@@ -3324,8 +3329,11 @@ export default function SimulacionPeriodo() {
                     let esSinUso = false;
                     if (sim.simStartDateRef.current) {
                       const minInicio = vuelo.minutosInicio;
-                      let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done && !e.key.startsWith('unused-'));
-                      if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.done);
+                      // minInicio ya es el minuto absoluto exacto de esta ocurrencia
+                      // (no una hora-del-día recurrente): comparar con === evita mezclar
+                      // la ocupación de otro día que comparte la misma hora de salida.
+                      let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio && !e.done && !e.key.startsWith('unused-'));
+                      if (!fe) fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio && !e.done);
                       esSinUso = !fe || fe.key.startsWith('unused-');
                       if (fe && !esSinUso) {
                         if (fe.capacidadVuelo > 0) {
@@ -3355,7 +3363,7 @@ export default function SimulacionPeriodo() {
                           if (!simStart || esCancelado || esCancelling) return;
                           if (selectedVueloKey === claveVuelo) { setSelectedVueloKey(null); cerrarPanelAvion(); return; }
                           const minInicio = vuelo.minutosInicio;
-                          let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && (e.minutosInicio % 1440) === (minInicio % 1440) && !e.key.startsWith('unused-'));
+                          let fe = flightEventsRef.current.find(e => e.origenCode === vuelo.origen && e.destinoCode === vuelo.destino && e.minutosInicio === minInicio && !e.key.startsWith('unused-'));
                           console.log(`[DEBUG VUELOS] vuelo=${vuelo.origen}→${vuelo.destino} salida=${salidaHHMM} minInicio=${minInicio}`, fe ? `feKey=${fe.key} capac=${fe.capacidadVuelo}` : 'SIN FE (card)');
                           console.log(`[DEBUG VUELOS] rutasPlanificadas=${rutasPlanificadasRef.current.size} flightEvents=${flightEventsRef.current.length}`);
                           if (fe) {

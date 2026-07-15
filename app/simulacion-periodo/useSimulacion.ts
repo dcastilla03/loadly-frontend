@@ -322,6 +322,7 @@ export const SIM_CONFIG = {
 
 export function useSimulacion(startDate?: string, startTime?: string, usarCanalCompartido = false) {
   const [isRunning, setIsRunning] = useState(false);
+  const [stopEventVersion, setStopEventVersion] = useState(0);
   const [isSharedSimulationOwner, setIsSharedSimulationOwner] = useState(false);
   const [aeropuertos, setAeropuertos] = useState<AeropuertoSim[]>([]);
   const [allFlightEvents, setAllFlightEvents] = useState<FlightEvent[]>([]);
@@ -650,6 +651,12 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
           }
         }
 
+      } else if (tipo === 'DETENIDA') {
+        setIsRunning(false);
+        pendingResumenRef.current = null;
+        setStopEventVersion(value => value + 1);
+        addLog('SimulaciÃ³n detenida por el controlador', '#f97316');
+
       } else if (tipo === 'COLAPSO') {
         if (d.colapso) { setColapso(d.colapso); addLog(`⚠️ COLAPSO: ${d.colapso.tipoError}`, '#ef4444'); }
 
@@ -796,6 +803,7 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
 
   return {
     isRunning, aeropuertos, allFlightEvents, allLogEvents, stats, resumen, colapso,
+    stopEventVersion,
     canStopSimulation: !usarCanalCompartido || isSharedSimulationOwner,
     iteracion, totalIter: totalIterSeguro, reloj, logs,
     totalPlanificados, totalMaletas, progreso, diaActual,

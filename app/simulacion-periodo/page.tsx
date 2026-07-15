@@ -201,6 +201,19 @@ export default function SimulacionPeriodo() {
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(() => Math.floor(currentMinSimRef.current));
 
+  // DETENIDA llega por el canal compartido cuando el propietario para la
+  // simulación. Todas las ventanas limpian su vista y muestran el mismo estado.
+  useEffect(() => {
+    if (sim.stopEventVersion === 0) return;
+    flightEventsRef.current.forEach(fe => {
+      try { fe.svgElement?.remove(); } catch (_) { }
+    });
+    flightEventsRef.current = [];
+    ctx.currentMinSimRef.current = 0;
+    setSimMinutos(0);
+    setShowStoppedOverlay(true);
+  }, [sim.stopEventVersion]);
+
   // Al montar, resetear lastFrameTimeRef para evitar salto de tiempo
   useEffect(() => {
     lastFrameTimeRef.current = performance.now();

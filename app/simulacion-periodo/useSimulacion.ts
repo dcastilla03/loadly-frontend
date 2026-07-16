@@ -97,6 +97,7 @@ export interface BackendRutaPlanificada {
 interface BackendSimEvent {
   tipo: string;
   relojSimulado: string;   // "YYYY-MM-DD HH:MM"
+  inicioVisualEpochMs?: number;
   limiteLectura?: string;  // "YYYY-MM-DD HH:MM"
   totalIteracionesEstimadas?: number;
   aeropuertos?: BackendAeropuerto[];
@@ -319,8 +320,10 @@ export const SIM_CONFIG = {
   K: 120, // Aceleración
 };
 
-export function useSimulacion(startDate?: string, startTime?: string) {
+export function useSimulacion(startDate?: string, startTime?: string, usarCanalCompartido = false) {
   const [isRunning, setIsRunning] = useState(false);
+  const [stopEventVersion, setStopEventVersion] = useState(0);
+  const [isSharedSimulationOwner, setIsSharedSimulationOwner] = useState(false);
   const [aeropuertos, setAeropuertos] = useState<AeropuertoSim[]>([]);
   const [allFlightEvents, setAllFlightEvents] = useState<FlightEvent[]>([]);
   const [allLogEvents, setAllLogEvents] = useState<LogEvent[]>([]);
@@ -386,6 +389,11 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
+  const sharedVisualStartEpochMsRef = useRef<number | null>(null);
+  const replayingSharedHistoryRef = useRef(false);
+  const sharedHistoryBufferRef = useRef<BackendSimEvent[]>([]);
+  const usarCanalCompartidoRef = useRef(usarCanalCompartido);
+  usarCanalCompartidoRef.current = usarCanalCompartido;
 
   useEffect(() => {
     return () => {
@@ -393,7 +401,11 @@ export function useSimulacion(startDate?: string, startTime?: string) {
         esRef.current.close();
         esRef.current = null;
       }
-        fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' }).catch(() => {});
+        // En Período, cerrar una ventana sólo desconecta su SSE: la ejecución
+        // compartida continúa en el servidor para los demás espectadores.
+        if (!usarCanalCompartidoRef.current) {
+          fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' }).catch(() => {});
+        }
       };
     }, []);
 
@@ -442,6 +454,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
   const iniciar = useCallback((customStartDate?: string, customStartTime?: string, customK?: number, sinFin?: boolean) => {
     if (customK !== undefined) { SIM_CONFIG.K = customK; }
+    setIsSharedSimulationOwner(false);
     if (esRef.current) esRef.current.close();
     setIsRunning(true);
     setAllFlightEvents([]);
@@ -452,6 +465,9 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     setSuppressedTramos(new Map());
     iteracionIdxRef.current = 0;
     realStartTimeRef.current = performance.now();
+    sharedVisualStartEpochMsRef.current = null;
+    replayingSharedHistoryRef.current = usarCanalCompartido;
+    sharedHistoryBufferRef.current = [];
     rutasPlanificadasRef.current.clear();
     rutasPorCodigoUnicoRef.current.clear();
     totalLotesRef.current.clear();
@@ -527,16 +543,40 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     simStartDateRef.current = simStart;
 
     const kVal = customK ?? SIM_CONFIG.K;
+    const endpoint = usarCanalCompartido
+      ? 'compartida'
+      : 'iniciar';
     const url = sinFin
-      ? `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
-      : `${API}/api/simulacion/periodo/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
+      ? `${API}/api/simulacion/periodo/${endpoint}?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
+      : `${API}/api/simulacion/periodo/${endpoint}?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
     const es = new EventSource(url);
     esRef.current = es;
+
+    // Abrir el SSE nunca inicia el algoritmo. Esta llamada explÃ­cita crea la
+    // ejecuciÃ³n compartida; una reconexiÃ³n automÃ¡tica del SSE solo se suscribe.
+    if (usarCanalCompartido) {
+      const startUrl = sinFin
+        ? `${API}/api/simulacion/periodo/compartida/iniciar?inicioStr=${inicio}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`
+        : `${API}/api/simulacion/periodo/compartida/iniciar?inicioStr=${inicio}&finStr=${fin}&taSegundos=${SIM_CONFIG.Ta}&sa=${SIM_CONFIG.Sa}&k=${kVal}&tamano=10`;
+      fetch(startUrl, { method: 'POST' })
+        .then(async (response) => {
+          const result = await response.text();
+          if (!response.ok) throw new Error(result);
+          setIsSharedSimulationOwner(result.includes('iniciada') && !result.includes('existente'));
+        })
+        .catch((error) => {
+          console.error('Error iniciando la simulaciÃ³n compartida:', error);
+          addLog('âŒ Error iniciando la simulaciÃ³n compartida', '#ef4444', null);
+        });
+    }
 
     // El backend envía: data:{...} sin línea event: previa
     // → todos los mensajes llegan como evento 'message' estándar.
     // Despachamos por d.tipo en un único handler.
     const procesarMensaje = (d: BackendSimEvent) => {
+      if (typeof d.inicioVisualEpochMs === 'number') {
+        sharedVisualStartEpochMsRef.current = d.inicioVisualEpochMs;
+      }
       const tipo = (d.tipo || '').toUpperCase();
       console.log('[SSE] tipo recibido:', tipo, '| reloj:', d.relojSimulado);
 
@@ -615,6 +655,16 @@ export function useSimulacion(startDate?: string, startTime?: string) {
           }
         }
 
+      } else if (tipo === 'DETENIDA') {
+        setIsRunning(false);
+        pendingResumenRef.current = null;
+        setStopEventVersion(value => value + 1);
+        addLog('SimulaciÃ³n detenida por el controlador', '#f97316');
+        if (esRef.current) {
+          esRef.current.close();
+          esRef.current = null;
+        }
+
       } else if (tipo === 'COLAPSO') {
         if (d.colapso) { setColapso(d.colapso); addLog(`⚠️ COLAPSO: ${d.colapso.tipoError}`, '#ef4444'); }
 
@@ -676,13 +726,38 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       }
     };
 
+    const procesarEventoSse = (d: BackendSimEvent) => {
+      if (!usarCanalCompartido) {
+        procesarMensaje(d);
+        return;
+      }
+
+      if ((d.tipo || '').toUpperCase() === 'REPLAY_COMPLETA') {
+        if (typeof d.inicioVisualEpochMs === 'number') {
+          sharedVisualStartEpochMsRef.current = d.inicioVisualEpochMs;
+        }
+        const history = sharedHistoryBufferRef.current;
+        sharedHistoryBufferRef.current = [];
+        replayingSharedHistoryRef.current = false;
+        history.forEach(procesarMensaje);
+        return;
+      }
+
+      if (replayingSharedHistoryRef.current) {
+        sharedHistoryBufferRef.current.push(d);
+        return;
+      }
+
+      procesarMensaje(d);
+    };
+
     // Escuchar evento genérico 'message' (sin event: header en el SSE)
     es.onmessage = (e: MessageEvent) => {
       try {
         const raw = e.data;
         console.log('[SSE RAW]', raw);
         const d: BackendSimEvent = JSON.parse(raw);
-        procesarMensaje(d);
+        procesarEventoSse(d);
       } catch (err) {
         console.warn('[SSE] Error parseando mensaje:', e.data, err);
       }
@@ -697,7 +772,7 @@ export function useSimulacion(startDate?: string, startTime?: string) {
           console.log(`[SSE RAW ${tipo}]`, raw);
           const d: BackendSimEvent = JSON.parse(e.data);
           if (!d.tipo) d.tipo = tipo;
-          procesarMensaje(d);
+          procesarEventoSse(d);
         } catch (err) {
           console.warn(`[SSE] Error parseando evento ${tipo}:`, err);
         }
@@ -719,13 +794,16 @@ export function useSimulacion(startDate?: string, startTime?: string) {
     };
     es.onopen = () => {
       sseErrorLoggedRef.current = false;
+      if (usarCanalCompartido) {
+        replayingSharedHistoryRef.current = true;
+        sharedHistoryBufferRef.current = [];
+      }
     };
-  }, [addLog, startDate]);
+  }, [addLog, startDate, usarCanalCompartido]);
 
   const detener = useCallback(async () => {
     setIsRunning(false);
     addLog('Simulación detenida manualmente', '#f97316');
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
     rutasPlanificadasRef.current.clear();
     rutasPorCodigoUnicoRef.current.clear();
     allFlightEventsRef.current = [];
@@ -739,6 +817,8 @@ export function useSimulacion(startDate?: string, startTime?: string) {
       await fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' });
     } catch (error) {
       console.error('Error al detener simulación:', error);
+    } finally {
+      if (esRef.current) { esRef.current.close(); esRef.current = null; }
     }
   }, [addLog]);
 
@@ -761,11 +841,14 @@ export function useSimulacion(startDate?: string, startTime?: string) {
 
   return {
     isRunning, aeropuertos, allFlightEvents, allLogEvents, stats, resumen, colapso,
+    stopEventVersion,
+    canStopSimulation: !usarCanalCompartido || isSharedSimulationOwner,
     iteracion, totalIter: totalIterSeguro, reloj, logs,
     totalPlanificados, totalMaletas, progreso, diaActual,
     iniciar, detener, addLog, addLogBatch,
     pendingResumenRef, commitResumenFinal,
     realStartTimeRef,
+    sharedVisualStartEpochMsRef,
     simStartDateRef,
     aeropuertosRef,
     rutasPlanificadasRef,

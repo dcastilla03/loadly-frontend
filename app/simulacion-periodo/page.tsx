@@ -201,6 +201,37 @@ export default function SimulacionPeriodo() {
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(() => Math.floor(currentMinSimRef.current));
 
+  // Al reproducir el historial SSE en una ventana observadora, algunos tramos
+  // ya estaban en vuelo antes de que el mapa terminara de montarse. Se rehace
+  // su estado desde el reloj compartido para que tambiÃ©n aparezcan en pantalla.
+  useEffect(() => {
+    if (!sim.isRunning || sim.iteracion === 0) return;
+    const frameId = requestAnimationFrame(() => {
+      const minutoActual = currentMinSimRef.current;
+      flightEventsRef.current.forEach(fe => {
+        if (fe.key.startsWith('unused-')) return;
+        if (fe.minutosInicio <= minutoActual && minutoActual < fe.minutosFin) {
+          fe.active = true;
+          fe.done = false;
+        }
+      });
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [sim.isRunning, sim.iteracion, sim.allFlightEvents]);
+
+  // DETENIDA llega por el canal compartido cuando el propietario para la
+  // simulación. Todas las ventanas limpian su vista y muestran el mismo estado.
+  useEffect(() => {
+    if (sim.stopEventVersion === 0) return;
+    flightEventsRef.current.forEach(fe => {
+      try { fe.svgElement?.remove(); } catch (_) { }
+    });
+    flightEventsRef.current = [];
+    ctx.currentMinSimRef.current = 0;
+    setSimMinutos(0);
+    setShowStoppedOverlay(true);
+  }, [sim.stopEventVersion]);
+
   // Al montar, resetear lastFrameTimeRef para evitar salto de tiempo
   useEffect(() => {
     lastFrameTimeRef.current = performance.now();
@@ -1241,6 +1272,17 @@ export default function SimulacionPeriodo() {
           const events = flightEventsRef.current;
 
           for (const fe of events) {
+            // En una ventana que se une tarde, el historial SSE puede llegar
+            // despuÃ©s de que el reloj compartido ya avanzÃ³. Rehidratar el
+            // tramo desde su intervalo evita descartar aviones reales activos.
+            const estaEnVuelo = !fe.key.startsWith('unused-')
+              && minSim >= fe.minutosInicio
+              && minSim < fe.minutosFin;
+            if (estaEnVuelo) {
+              fe.active = true;
+              fe.done = false;
+            }
+
             if (fe.done) {
               if (fe.svgElement) removeAvionRender(fe);
               continue;
@@ -1532,6 +1574,7 @@ export default function SimulacionPeriodo() {
 
   // Cancela un vuelo llamando al backend
   const cancelarVuelo = async (vuelo: any) => {
+    if (!sim.canStopSimulation) return;
     const claveVuelo = getCancelKey(vuelo);
     console.log('[cancelarVuelo] Enviando claveVuelo:', claveVuelo, 'vuelo:', vuelo);
 
@@ -3266,8 +3309,8 @@ export default function SimulacionPeriodo() {
               </div>
               <div style={{ overflow: 'hidden', transition: 'max-height 0.25s ease, opacity 0.2s ease', maxHeight: centroControlOpen ? 130 : 0, opacity: centroControlOpen ? 1 : 0 }}>
                 <div style={{ padding: '0 8px 6px', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'stretch' }}>
-                  <button onClick={handleDetener} disabled={!sim.isRunning}
-                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: !sim.isRunning ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning ? 'default' : 'pointer', color: 'white', fontWeight: 600, opacity: !sim.isRunning ? 0.6 : 1, textAlign: 'center' }}>
+                  <button onClick={handleDetener} disabled={!sim.isRunning || !sim.canStopSimulation}
+                    style={{ padding: '5px 10px', fontSize: 11, backgroundColor: !sim.isRunning || !sim.canStopSimulation ? 'var(--border-color)' : '#ef4444', border: 'none', borderRadius: 6, cursor: !sim.isRunning || !sim.canStopSimulation ? 'default' : 'pointer', color: 'white', fontWeight: 600, opacity: !sim.isRunning || !sim.canStopSimulation ? 0.6 : 1, textAlign: 'center' }}>
                     ⏹️ Detener
                   </button>
                   <button onClick={() => { if (flightPanelOpen) cerrarPanelAvion(); setFlightPanelOpen(!flightPanelOpen); if (!flightPanelOpen) { setAlmacenesPanelOpen(false); setEnviosPanelOpen(false); } }}
@@ -3834,12 +3877,14 @@ export default function SimulacionPeriodo() {
                             )}
                             {!esCancelado && !esCancelling && (
                               <button
+                                disabled={!sim.canStopSimulation}
                                 onClick={(e) => { e.stopPropagation(); cancelarVuelo(vuelo); }}
                                 style={{
                                   padding: '2px 6px', fontSize: '10px',
                                   backgroundColor: 'rgba(220, 53, 69, 0.1)', color: 'var(--danger-red)',
                                   border: '1px solid rgba(220, 53, 69, 0.3)', borderRadius: '4px',
-                                  cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
+                                  cursor: sim.canStopSimulation ? 'pointer' : 'default', fontWeight: 600, whiteSpace: 'nowrap',
+                                  opacity: sim.canStopSimulation ? 1 : 0.45
                                 }}
                               >
                                 Cancelar

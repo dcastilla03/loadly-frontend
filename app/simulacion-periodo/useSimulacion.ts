@@ -390,6 +390,8 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
   // Tiempo real en que comenzó la animación del cronómetro
   const realStartTimeRef = useRef<number | null>(null);
   const sharedVisualStartEpochMsRef = useRef<number | null>(null);
+  const replayingSharedHistoryRef = useRef(false);
+  const sharedHistoryBufferRef = useRef<BackendSimEvent[]>([]);
   const usarCanalCompartidoRef = useRef(usarCanalCompartido);
   usarCanalCompartidoRef.current = usarCanalCompartido;
 
@@ -464,6 +466,8 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
     iteracionIdxRef.current = 0;
     realStartTimeRef.current = performance.now();
     sharedVisualStartEpochMsRef.current = null;
+    replayingSharedHistoryRef.current = usarCanalCompartido;
+    sharedHistoryBufferRef.current = [];
     rutasPlanificadasRef.current.clear();
     rutasPorCodigoUnicoRef.current.clear();
     totalLotesRef.current.clear();
@@ -656,6 +660,10 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
         pendingResumenRef.current = null;
         setStopEventVersion(value => value + 1);
         addLog('SimulaciÃ³n detenida por el controlador', '#f97316');
+        if (esRef.current) {
+          esRef.current.close();
+          esRef.current = null;
+        }
 
       } else if (tipo === 'COLAPSO') {
         if (d.colapso) { setColapso(d.colapso); addLog(`⚠️ COLAPSO: ${d.colapso.tipoError}`, '#ef4444'); }
@@ -718,13 +726,38 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
       }
     };
 
+    const procesarEventoSse = (d: BackendSimEvent) => {
+      if (!usarCanalCompartido) {
+        procesarMensaje(d);
+        return;
+      }
+
+      if ((d.tipo || '').toUpperCase() === 'REPLAY_COMPLETA') {
+        if (typeof d.inicioVisualEpochMs === 'number') {
+          sharedVisualStartEpochMsRef.current = d.inicioVisualEpochMs;
+        }
+        const history = sharedHistoryBufferRef.current;
+        sharedHistoryBufferRef.current = [];
+        replayingSharedHistoryRef.current = false;
+        history.forEach(procesarMensaje);
+        return;
+      }
+
+      if (replayingSharedHistoryRef.current) {
+        sharedHistoryBufferRef.current.push(d);
+        return;
+      }
+
+      procesarMensaje(d);
+    };
+
     // Escuchar evento genérico 'message' (sin event: header en el SSE)
     es.onmessage = (e: MessageEvent) => {
       try {
         const raw = e.data;
         console.log('[SSE RAW]', raw);
         const d: BackendSimEvent = JSON.parse(raw);
-        procesarMensaje(d);
+        procesarEventoSse(d);
       } catch (err) {
         console.warn('[SSE] Error parseando mensaje:', e.data, err);
       }
@@ -739,7 +772,7 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
           console.log(`[SSE RAW ${tipo}]`, raw);
           const d: BackendSimEvent = JSON.parse(e.data);
           if (!d.tipo) d.tipo = tipo;
-          procesarMensaje(d);
+          procesarEventoSse(d);
         } catch (err) {
           console.warn(`[SSE] Error parseando evento ${tipo}:`, err);
         }
@@ -761,13 +794,16 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
     };
     es.onopen = () => {
       sseErrorLoggedRef.current = false;
+      if (usarCanalCompartido) {
+        replayingSharedHistoryRef.current = true;
+        sharedHistoryBufferRef.current = [];
+      }
     };
   }, [addLog, startDate, usarCanalCompartido]);
 
   const detener = useCallback(async () => {
     setIsRunning(false);
     addLog('Simulación detenida manualmente', '#f97316');
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
     rutasPlanificadasRef.current.clear();
     rutasPorCodigoUnicoRef.current.clear();
     allFlightEventsRef.current = [];
@@ -781,6 +817,8 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
       await fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' });
     } catch (error) {
       console.error('Error al detener simulación:', error);
+    } finally {
+      if (esRef.current) { esRef.current.close(); esRef.current = null; }
     }
   }, [addLog]);
 

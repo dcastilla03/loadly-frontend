@@ -201,6 +201,24 @@ export default function SimulacionPeriodo() {
   // Minutos simulados actuales (para mostrar en UI)
   const [simMinutos, setSimMinutos] = useState(() => Math.floor(currentMinSimRef.current));
 
+  // Al reproducir el historial SSE en una ventana observadora, algunos tramos
+  // ya estaban en vuelo antes de que el mapa terminara de montarse. Se rehace
+  // su estado desde el reloj compartido para que tambiÃ©n aparezcan en pantalla.
+  useEffect(() => {
+    if (!sim.isRunning || sim.iteracion === 0) return;
+    const frameId = requestAnimationFrame(() => {
+      const minutoActual = currentMinSimRef.current;
+      flightEventsRef.current.forEach(fe => {
+        if (fe.key.startsWith('unused-')) return;
+        if (fe.minutosInicio <= minutoActual && minutoActual < fe.minutosFin) {
+          fe.active = true;
+          fe.done = false;
+        }
+      });
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [sim.isRunning, sim.iteracion, sim.allFlightEvents]);
+
   // DETENIDA llega por el canal compartido cuando el propietario para la
   // simulación. Todas las ventanas limpian su vista y muestran el mismo estado.
   useEffect(() => {
@@ -1254,6 +1272,17 @@ export default function SimulacionPeriodo() {
           const events = flightEventsRef.current;
 
           for (const fe of events) {
+            // En una ventana que se une tarde, el historial SSE puede llegar
+            // despuÃ©s de que el reloj compartido ya avanzÃ³. Rehidratar el
+            // tramo desde su intervalo evita descartar aviones reales activos.
+            const estaEnVuelo = !fe.key.startsWith('unused-')
+              && minSim >= fe.minutosInicio
+              && minSim < fe.minutosFin;
+            if (estaEnVuelo) {
+              fe.active = true;
+              fe.done = false;
+            }
+
             if (fe.done) {
               if (fe.svgElement) removeAvionRender(fe);
               continue;

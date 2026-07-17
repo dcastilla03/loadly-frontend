@@ -120,7 +120,7 @@ export default function SimulacionPeriodo() {
   const selectedPinRef = useRef<HTMLDivElement | null>(null);
   const selectedPinFlightKeyRef = useRef<string | null>(null);
 
-  const sim = useSimulacion();
+  const sim = useSimulacion(undefined, undefined, false, false);
   const simRef = useRef(sim);
   simRef.current = sim;
   const panelEnvioKeyRef = useRef<string | null>(null);
@@ -345,13 +345,10 @@ export default function SimulacionPeriodo() {
   useEffect(() => { addLogRef.current = sim.addLog; }, [sim.addLog]);
 
   // ── Auto-start (k=1, sin fin, UTC) ──
-  const autoStartedRef = useRef(false);
   const ctx = useSimulationContext();
   useEffect(() => {
-    if (autoStartedRef.current) return;
     const token = localStorage.getItem('authToken');
     if (!token) return;
-    autoStartedRef.current = true;
     // Limpiar estado de Periodo en el contexto compartido
     sessionStorage.removeItem('periodoStartDate');
     sessionStorage.removeItem('periodoStartTime');
@@ -366,16 +363,14 @@ export default function SimulacionPeriodo() {
     ctx.clockEnabledRef.current = false;
     ctx.lastFrameTimeRef.current = 0;
     ctx.lastIteracionRef.current = 0;
-    // Detener Periodo en el contexto y luego Día a Día, antes de iniciar
-    ctx.sim.detener().then(() => sim.detener()).then(() => {
-      const now = new Date();
-      const y = now.getUTCFullYear();
-      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(now.getUTCDate()).padStart(2, '0');
-      const h = String(now.getUTCHours()).padStart(2, '0');
-      const min = String(now.getUTCMinutes()).padStart(2, '0');
-      sim.iniciar(`${y}-${m}-${d}`, `${h}:${min}`, 1, true);
-    });
+    // Iniciar Día a Día directamente
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(now.getUTCDate()).padStart(2, '0');
+    const h = String(now.getUTCHours()).padStart(2, '0');
+    const min = String(now.getUTCMinutes()).padStart(2, '0');
+    sim.iniciar(`${y}-${m}-${d}`, `${h}:${min}`, 1, true);
   }, []);
 
   // ── Control de estado del reloj (CALCULANDO → VISUALIZANDO) ──

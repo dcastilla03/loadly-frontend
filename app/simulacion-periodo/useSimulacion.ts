@@ -320,7 +320,7 @@ export const SIM_CONFIG = {
   K: 120, // Aceleración
 };
 
-export function useSimulacion(startDate?: string, startTime?: string, usarCanalCompartido = false) {
+export function useSimulacion(startDate?: string, startTime?: string, usarCanalCompartido = false, cleanupDetener = true) {
   const [isRunning, setIsRunning] = useState(false);
   const [stopEventVersion, setStopEventVersion] = useState(0);
   const [isSharedSimulationOwner, setIsSharedSimulationOwner] = useState(false);
@@ -394,18 +394,18 @@ export function useSimulacion(startDate?: string, startTime?: string, usarCanalC
   const sharedHistoryBufferRef = useRef<BackendSimEvent[]>([]);
   const usarCanalCompartidoRef = useRef(usarCanalCompartido);
   usarCanalCompartidoRef.current = usarCanalCompartido;
+  const cleanupDetenerRef = useRef(cleanupDetener);
+  cleanupDetenerRef.current = cleanupDetener;
 
   useEffect(() => {
     return () => {
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
-      }
-        // En Período, cerrar una ventana sólo desconecta su SSE: la ejecución
-        // compartida continúa en el servidor para los demás espectadores.
-        if (!usarCanalCompartidoRef.current) {
+        if (!usarCanalCompartidoRef.current && cleanupDetenerRef.current) {
           fetch(`${API}/api/simulacion/periodo/detener`, { method: 'POST' }).catch(() => {});
         }
+      }
       };
     }, []);
 

@@ -109,6 +109,29 @@ const TOTAL_MINUTOS_SIM = 5 * 24 * 60; // 7 200
 
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function SimulacionPeriodo() {
+  const ctx = useSimulationContext();
+  const sim = ctx.sim;
+
+  // Alias a refs del contexto (mismo patrón que pageperiodo.tsx)
+  const flightEventsRef = ctx.flightEventsRef;
+  const airportStateRef = ctx.airportStateRef;
+  const cancelledFlightsRef = ctx.cancelledFlightsRef;
+  const suppressedTramosRef = ctx.suppressedTramosRef;
+  const logEventsRef = ctx.logEventsRef;
+  const addLogRef = ctx.addLogRef;
+  const addLogBatchRef = ctx.addLogBatchRef;
+  const emptyFlightsAddedRef = ctx.emptyFlightsAddedRef;
+  const canceledLocallyRef = ctx.canceledLocallyRef;
+  const currentMinSimRef = ctx.currentMinSimRef;
+  const clockStateRef = ctx.clockStateRef;
+  const lastFrameTimeRef = ctx.lastFrameTimeRef;
+  const lastIteracionRef = ctx.lastIteracionRef;
+  const clockEnabledRef = ctx.clockEnabledRef;
+  const panelFlightKeyRef = ctx.panelFlightKeyRef;
+  const calcStartedAtRef = ctx.calcStartedAtRef;
+  const configCountdownRef = ctx.configCountdownRef;
+  const stopwatchStartedAtRef = ctx.stopwatchStartedAtRef;
+
   const [startDate, setStartDate] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -120,49 +143,38 @@ export default function SimulacionPeriodo() {
   const selectedPinRef = useRef<HTMLDivElement | null>(null);
   const selectedPinFlightKeyRef = useRef<string | null>(null);
 
-  const sim = useSimulacion(undefined, undefined, false, false);
-  const simRef = useRef(sim);
-  simRef.current = sim;
   const panelEnvioKeyRef = useRef<string | null>(null);
   const panelEnvioViewRef = useRef<'plan' | 'monitoreo'>('plan');
   const panelEnvioRcRef = useRef<BackendRutaPlanificada | null>(null);
   const panelEnvioForzadoRef = useRef<string | null>(null);
   const panelEnvioHelpersRef = useRef<{ transitarA: (html: string) => void; generarVistaPlanViaje: () => string } | null>(null);
   const user = typeof window !== 'undefined' ? (() => { try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; } })() : null;
+
   useEffect(() => {
     (window as any).debugDiaADia = () => ({
-      allLogEvents: simRef.current.allLogEvents.length,
+      allLogEvents: sim.allLogEvents.length,
       logEventsRef: logEventsRef.current.length,
       minSim: currentMinSimRef.current,
       clockEnabled: clockEnabledRef.current,
-      isRunning: simRef.current.isRunning,
-      iteracion: simRef.current.iteracion,
-      logs: simRef.current.logs.length,
+      isRunning: sim.isRunning,
+      iteracion: sim.iteracion,
+      logs: sim.logs.length,
       localLogs: localLogsRef.current.length,
       flightEvents: flightEventsRef.current.length,
-      rutas: rutasPlanificadasRef.current.size,
+      rutas: sim.rutasPlanificadasRef.current.size,
       K: SIM_CONFIG.K,
-      allFlightEvents: simRef.current.allFlightEvents.length,
+      allFlightEvents: sim.allFlightEvents.length,
     });
     return () => { delete (window as any).debugDiaADia; };
   }, []);
 
-  // ── Refs locales (independientes de Periodo) ──
-  const flightEventsRef = useRef<FlightEvent[]>([]);
-  const airportStateRef = useRef<Map<string, { ocupacion: number; capacidad: number }>>(new Map());
-  const cancelledFlightsRef = useRef<Set<string>>(new Set());
-  const suppressedTramosRef = useRef<Map<string, { minTramoOrden: number; iteracionIdx: number }>>(new Map());
-  const logEventsRef = useRef<LogEvent[]>([]);
-  const addLogRef = useRef<(text: string, color: string, minutosSimulados?: number | null) => void>(() => { });
-  const addLogBatchRef = useRef<(entries: Array<{ text: string; color: string; minutosDisparo: number }>) => void>(() => { });
   const [localLogs, setLocalLogs] = useState<Array<{ time: string | null; text: string; color: string }>>([]);
   const localLogsRef = useRef(localLogs);
   localLogsRef.current = localLogs;
 
-  function actualizarOcupacionAlmacen(codigo: string, delta: number) {
+  function actualizarIconoAlmacen(codigo: string) {
     const state = airportStateRef.current.get(codigo);
     if (!state) return;
-    state.ocupacion = Math.max(0, state.ocupacion + delta);
     const marker = markersRef.current.find((m: any) => m.airportCode === codigo);
     const actualizar = (mapInst.current as any)?._actualizarIconoAlmacen;
     if (marker && actualizar) {
@@ -171,9 +183,7 @@ export default function SimulacionPeriodo() {
     }
   }
 
-  const emptyFlightsAddedRef = useRef<Set<string>>(new Set());
   const [apiFlights, setApiFlights] = useState<any[] | null>(null);
-  const canceledLocallyRef = useRef<Set<string>>(new Set());
 
   function crearEmptyFlightEvent(flight: any, simStartDate: Date): FlightEvent | null {
     const infoOri = aeropuertoInfoRef.current.get(flight.idAeropuertoOrigen);
@@ -233,136 +243,31 @@ export default function SimulacionPeriodo() {
       capacidadAlmacenDestino: aDes.capacidad,
     };
   }
-  const currentMinSimRef = useRef<number>(0);
-  const clockStateRef = useRef<'CALCULANDO' | 'VISUALIZANDO'>('CALCULANDO');
-  const lastFrameTimeRef = useRef<number>(0);
-  const clockEnabledRef = useRef<boolean>(false);
-  const panelFlightKeyRef = useRef<string | null>(null);
-  const calcStartedAtRef = useRef<number>(0);
-  const configCountdownRef = useRef<number>(60);
-  const stopwatchStartedAtRef = useRef<number | null>(null);
-
-  // ── Sincronizar flightEvents del hook → ref local ──
-  useEffect(() => {
-    const nuevos = sim.allFlightEvents.filter(e => !flightEventsRef.current.some(f => f.key === e.key));
-    if (nuevos.length === 0) return;
-
-    // Construir conjunto de claves de los nuevos
-    const nuevosKeys = new Set(nuevos.map(e => e.key));
-
-    // Mantener solo los eventos actuales que no sean reemplazados por los nuevos
-    const current = flightEventsRef.current;
-    const keep = current.filter(f => {
-      // Los vuelos sin uso ('unused-') se mantienen siempre (no se reemplazan)
-      if (f.key.startsWith('unused-')) return true;
-      // Si está activo o ya completado, lo mantenemos (no se puede reemplazar)
-      if (f.active || f.done) return true;
-      // Verificar si algún nuevo evento coincide en origen, destino y minutosInicio EXACTO
-      // (antes se comparaba solo minutosInicio % 1440, lo que hacía que un evento nuevo de
-      // OTRO día -misma hora del día- reemplazara/descartara por error un vuelo pendiente de HOY)
-      const match = nuevos.some(n =>
-        n.origenCode === f.origenCode &&
-        n.destinoCode === f.destinoCode &&
-        n.minutosInicio === f.minutosInicio &&
-        !n.key.startsWith('unused-')
-      );
-      return !match; // Si coincide, se elimina (será reemplazado)
-    });
-
-    // Asignar la nueva lista: los que se mantienen + los nuevos
-    flightEventsRef.current = [...keep, ...nuevos];
-  }, [sim.allFlightEvents]);
-
-  // ── Sincronizar logEvents del hook → ref local ──
-  useEffect(() => {
-    if (sim.allLogEvents.length === 0) { logEventsRef.current = []; return; }
-    const nuevos = sim.allLogEvents.slice(logEventsRef.current.length);
-    if (nuevos.length > 0) {
-      logEventsRef.current = [...logEventsRef.current, ...nuevos];
-      const simStart = sim.simStartDateRef.current;
-      if (simStart) {
-        const now = Date.now();
-        const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
-        for (const le of nuevos) {
-          const eventTime = simStart.getTime() + le.minutosDisparo * 60000;
-          if (now >= eventTime) {
-            le.fired = true;
-            if (le.idEnvio) {
-              const ruta = rutasPlanificadasRef.current.get(le.idEnvio);
-              if (ruta) {
-                if (le.color === '#22c55e') {
-                  actualizarOcupacionAlmacen(ruta.origen, ruta.maletas);
-                } else if (le.color === '#3b82f6' && le.tramoOrden !== undefined) {
-                  const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
-                  if (tramo) actualizarOcupacionAlmacen(tramo.origen, -tramo.maletasVuelo);
-                } else if (le.color === '#8b5cf6' && le.tramoOrden !== undefined) {
-                  const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
-                  if (tramo) actualizarOcupacionAlmacen(tramo.destino, tramo.maletasVuelo);
-                } else if (le.color === '#f59e0b') {
-                  actualizarOcupacionAlmacen(ruta.destino, -ruta.maletas);
-                }
-              }
-            }
-            pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
-          } else {
-            const delay = eventTime - now;
-            setTimeout(() => {
-              le.fired = true;
-              addLogBatchRef.current([{ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo }]);
-            }, delay);
-          }
-        }
-        if (pendingLogs.length > 0) addLogBatchRef.current(pendingLogs);
-      }
-    }
-  }, [sim.allLogEvents]);
-
-  // ── Sincronizar cancelledFlights → ref local ──
-  useEffect(() => {
-    cancelledFlightsRef.current = sim.cancelledFlights;
-  }, [sim.cancelledFlights]);
-
-  // ── Sincronizar suppressedTramos → ref local ──
-  useEffect(() => {
-    suppressedTramosRef.current = sim.suppressedTramos;
-    if (sim.suppressedTramos.size === 0) return;
-    sim.suppressedTramos.forEach((info, idEnvio) => {
-      for (const fe of flightEventsRef.current) {
-        const feIdEnvio = fe.key.split('-')[0];
-        if (feIdEnvio !== idEnvio || fe.tramoOrden < info.minTramoOrden || fe.active) continue;
-        const m = fe.key.match(/iter(\d+)/);
-        if (m && parseInt(m[1]) === info.iteracionIdx) { fe.done = true; }
-      }
-      for (const le of logEventsRef.current) {
-        if (le.idEnvio === idEnvio && le.tramoOrden !== undefined && le.tramoOrden >= info.minTramoOrden) {
-          le.fired = true;
-        }
-      }
-    });
-  }, [sim.suppressedTramos]);
-
-  // ── Mantener addLogRef ──
-  useEffect(() => { addLogRef.current = sim.addLog; }, [sim.addLog]);
 
   // ── Auto-start (k=1, sin fin, UTC) ──
-  const ctx = useSimulationContext();
   useEffect(() => {
     const token = localStorage.getItem('authToken');
     if (!token) return;
+    // Restaurar estado desde sessionStorage (mismo patrón que Simulación por periodo)
+    const savedDate = sessionStorage.getItem('diaDiaStartDate');
+    if (savedDate && !sim.isRunning) {
+      setStartDate(savedDate);
+      setStartTime(sessionStorage.getItem('diaDiaStartTime') || '00:00');
+    }
     // Limpiar estado de Periodo en el contexto compartido
     sessionStorage.removeItem('periodoStartDate');
     sessionStorage.removeItem('periodoStartTime');
-    ctx.flightEventsRef.current = [];
-    ctx.airportStateRef.current.clear();
-    ctx.cancelledFlightsRef.current.clear();
-    ctx.suppressedTramosRef.current.clear();
-    ctx.emptyFlightsAddedRef.current.clear();
-    ctx.canceledLocallyRef.current.clear();
-    ctx.currentMinSimRef.current = 0;
-    ctx.clockStateRef.current = 'CALCULANDO';
-    ctx.clockEnabledRef.current = false;
-    ctx.lastFrameTimeRef.current = 0;
-    ctx.lastIteracionRef.current = 0;
+    flightEventsRef.current = [];
+    airportStateRef.current.clear();
+    cancelledFlightsRef.current.clear();
+    suppressedTramosRef.current.clear();
+    emptyFlightsAddedRef.current.clear();
+    canceledLocallyRef.current.clear();
+    currentMinSimRef.current = 0;
+    clockStateRef.current = 'CALCULANDO';
+    clockEnabledRef.current = false;
+    lastFrameTimeRef.current = 0;
+    lastIteracionRef.current = 0;
     // Iniciar Día a Día directamente
     const now = new Date();
     const y = now.getUTCFullYear();
@@ -371,35 +276,18 @@ export default function SimulacionPeriodo() {
     const h = String(now.getUTCHours()).padStart(2, '0');
     const min = String(now.getUTCMinutes()).padStart(2, '0');
     sim.iniciar(`${y}-${m}-${d}`, `${h}:${min}`, 1, true);
+    // Persistir estado en sessionStorage (mismo patrón que Simulación por periodo)
+    sessionStorage.setItem('diaDiaStartDate', `${y}-${m}-${d}`);
+    sessionStorage.setItem('diaDiaStartTime', `${h}:${min}`);
   }, []);
 
-  // ── Control de estado del reloj (CALCULANDO → VISUALIZANDO) ──
+  // ── Limpiar sessionStorage al detener ──
   useEffect(() => {
-    if (sim.isRunning && sim.iteracion === 0) {
-      clockEnabledRef.current = false;
-      currentMinSimRef.current = 0;
-      lastFrameTimeRef.current = 0;
-      clockStateRef.current = 'CALCULANDO';
-      calcStartedAtRef.current = performance.now();
-      configCountdownRef.current = 60;
-      flightEventsRef.current = [];
-      logEventsRef.current = [];
-      cancelledFlightsRef.current = new Set();
-      suppressedTramosRef.current = new Map();
+    if (!sim.isRunning) {
+      sessionStorage.removeItem('diaDiaStartDate');
+      sessionStorage.removeItem('diaDiaStartTime');
     }
-    if (sim.isRunning && sim.simStartDateRef.current && !clockEnabledRef.current) {
-      clockEnabledRef.current = true;
-      clockStateRef.current = 'VISUALIZANDO';
-      lastFrameTimeRef.current = performance.now();
-      calcStartedAtRef.current = 0;
-      configCountdownRef.current = 0;
-      if (stopwatchStartedAtRef.current === null) stopwatchStartedAtRef.current = Date.now();
-    }
-    if (sim.isRunning && sim.iteracion > 0 && stopwatchStartedAtRef.current === null) {
-      stopwatchStartedAtRef.current = Date.now();
-    }
-    if (!sim.isRunning) { clockEnabledRef.current = false; stopwatchStartedAtRef.current = null; }
-  }, [sim.isRunning, sim.iteracion]);
+  }, [sim.isRunning]);
 
   // ── Generar vuelos vacíos (unused) desde el schedule ──
   useEffect(() => {
@@ -478,94 +366,16 @@ export default function SimulacionPeriodo() {
     }
   }, [apiFlights, sim.aeropuertos, sim.isRunning]);
 
-  // ── Motor de simulación independiente ──
+  // ── Render loop: actualiza marcadores de almacén desde airportStateRef ──
   useEffect(() => {
     let frameId: number;
-    function engineLoop() {
-      try {
-        const now = performance.now();
-        if (clockStateRef.current === 'CALCULANDO' && calcStartedAtRef.current > 0) {
-          configCountdownRef.current = Math.max(0, 60 - Math.floor((now - calcStartedAtRef.current) / 1000));
-        }
-        if (clockEnabledRef.current) {
-          const deltaMs = now - (lastFrameTimeRef.current || now);
-          lastFrameTimeRef.current = now;
-          currentMinSimRef.current += (deltaMs / 1000) * (SIM_CONFIG.K / 60);
-        } else {
-          lastFrameTimeRef.current = now;
-        }
-        const minSim = Math.min(7200, currentMinSimRef.current);
-        currentMinSimRef.current = minSim;
-        const events = flightEventsRef.current;
-        const simStart = sim.simStartDateRef.current;
-        for (const fe of events) {
-          if (fe.done) continue;
-          if (!fe.active && minSim >= fe.minutosInicio) {
-            const apt = sim.aeropuertosRef.current.get(fe.origenCode);
-            const offset = apt?.gmt ?? 0;
-            const depDate = simStart ? new Date(simStart.getTime() + fe.minutosInicio * 60000) : new Date();
-            const gmtHour = depDate.getHours();
-            const gmtMin = depDate.getMinutes();
-            const localHour = ((gmtHour + offset) % 24 + 24) % 24;
-            const cancelKey = `${fe.origenCode}-${fe.destinoCode}-${String(localHour).padStart(2, '0')}:${String(gmtMin).padStart(2, '0')}`;
-            let suprimido = cancelledFlightsRef.current.has(cancelKey);
-            if (!suprimido) {
-              const supInfo = suppressedTramosRef.current.get(fe.key.split('-')[0]);
-              const m = fe.key.match(/iter(\d+)/);
-              if (supInfo && fe.tramoOrden >= supInfo.minTramoOrden && m && parseInt(m[1]) === supInfo.iteracionIdx) suprimido = true;
-            }
-            if (suprimido) { fe.done = true; } else {
-              fe.active = true; (fe as any)._activatedThisFrame = true;
-            }
-          }
-          if (fe.active) {
-            if ((fe as any)._activatedThisFrame) { (fe as any)._activatedThisFrame = false; } else if (fe.minutosFin - fe.minutosInicio <= 0 || minSim >= fe.minutosFin) {
-              fe.done = true; fe.active = false;
-              if (!fe.key.startsWith('unused-')) {
-                const mod1440 = fe.minutosInicio % 1440;
-                for (const p of events) {
-                  if (p.key.startsWith('unused-') && p.done && p.origenCode === fe.origenCode && p.destinoCode === fe.destinoCode && (p.minutosInicio % 1440) === mod1440) {
-                    const origDur = p.minutosFin - p.minutosInicio;
-                    const tod = Math.floor(minSim / 1440) * 1440 + p.minutosInicio % 1440;
-                    p.minutosInicio = tod <= minSim ? tod + 1440 : tod;
-                    p.minutosFin = p.minutosInicio + origDur;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
-        const pendingLogs: { text: string; color: string; minutosDisparo: number }[] = [];
-        for (const le of logEventsRef.current) {
-          if (!le.fired && minSim >= le.minutosDisparo) {
-            const info = suppressedTramosRef.current.get(le.idEnvio || '');
-            if (le.idEnvio && le.tramoOrden !== undefined && info && le.tramoOrden >= info.minTramoOrden) { le.fired = true; continue; }
-            le.fired = true;
-            if (le.idEnvio) {
-              const ruta = rutasPlanificadasRef.current.get(le.idEnvio);
-              if (ruta) {
-                if (le.color === '#22c55e') {
-                  actualizarOcupacionAlmacen(ruta.origen, ruta.maletas);
-                } else if (le.color === '#3b82f6' && le.tramoOrden !== undefined) {
-                  const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
-                  if (tramo) actualizarOcupacionAlmacen(tramo.origen, -tramo.maletasVuelo);
-                } else if (le.color === '#8b5cf6' && le.tramoOrden !== undefined) {
-                  const tramo = (ruta.tramos || []).find(t => t.orden === le.tramoOrden);
-                  if (tramo) actualizarOcupacionAlmacen(tramo.destino, tramo.maletasVuelo);
-                } else if (le.color === '#f59e0b') {
-                  actualizarOcupacionAlmacen(ruta.destino, -ruta.maletas);
-                }
-              }
-            }
-            pendingLogs.push({ text: le.text, color: le.color, minutosDisparo: le.minutosDisparo });
-          }
-        }
-        if (pendingLogs.length > 0) addLogBatchRef.current(pendingLogs);
-      } catch (err) { console.error('[engineLoop] Error:', err); }
-      frameId = requestAnimationFrame(engineLoop);
+    function iconLoop() {
+      for (const codigo of airportStateRef.current.keys()) {
+        actualizarIconoAlmacen(codigo);
+      }
+      frameId = requestAnimationFrame(iconLoop);
     }
-    engineLoop();
+    iconLoop();
     return () => cancelAnimationFrame(frameId);
   }, []);
 
@@ -687,7 +497,7 @@ export default function SimulacionPeriodo() {
     }
   }, []);
 
-  // sim se obtiene de useSimulacion() local (independiente de Periodo)
+  // sim se obtiene de ctx.sim (compartido con el contexto)
 
   // Cronómetro de tiempo real transcurrido (stopwatch) — se actualiza en el render loop
   const [stopwatch, setStopwatch] = useState('00:00');
@@ -1047,7 +857,7 @@ export default function SimulacionPeriodo() {
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:120px;line-height:1.3;">
             <div style="font-size:11px;font-weight:700;color:#1f2937;">${a.codigo} · ${a.ciudad}</div>
             <div style="display:flex;align-items:center;gap:4px;font-size:10px;line-height:1.2;">
-              <span style="font-weight:700;color:${color};">${pct.toFixed(1)}%</span>
+              <span style="font-weight:700;color:${color};">${pct.toFixed(2)}%</span>
               <span style="color:#6b7280;">${estado.ocupacion}/${estado.capacidad} maletas</span>
             </div>
           </div>`;
@@ -1081,7 +891,7 @@ export default function SimulacionPeriodo() {
       };
     }
 
-    const activeFlights = flightEventsRef.current.filter(fe => fe.active);
+    const activeFlights = sim.allFlightEvents.filter(fe => fe.active && !fe.done);
     const completedFlights = flightEventsRef.current.filter(fe => fe.done === true);
     const almacenes = Array.from(airportStateRef.current.values());
 
@@ -1169,7 +979,7 @@ export default function SimulacionPeriodo() {
       entregasExitosas,
       maletasEntregadas,
     };
-  }, [sim.isRunning, sim.iteracion, simMinutos, sim.logs.length, localLogs.length,sim.allLogEvents.length,sim.allFlightEvents.length]); // Re-calcula cada vez que simMinutos o logs cambian
+  }, [sim.isRunning, sim.iteracion, simMinutos, sim.logs.length, localLogs.length,sim.allLogEvents.length,sim.allFlightEvents.length, refreshTick]); // Re-calcula cada vez que simMinutos o logs cambian
 
 
 
@@ -1236,7 +1046,7 @@ export default function SimulacionPeriodo() {
           document.body.appendChild(tooltip);
           tooltipElRef.current = tooltip;
         }
-        tooltip.innerHTML = `${codigo} · <span style="color:${color}">${ocupPct.toFixed(1)}%</span>`;
+        tooltip.innerHTML = `${codigo} · <span style="color:${color}">${ocupPct.toFixed(2)}%</span>`;
         const rect = img.getBoundingClientRect();
         tooltip.style.left = (rect.left + rect.width / 2) + 'px';
         tooltip.style.top = (rect.top - 6) + 'px';
@@ -3156,12 +2966,12 @@ export default function SimulacionPeriodo() {
               {isGlobalIndicatorsOpen && (
                 <div style={{ borderTop: '1px solid #e5e7eb', padding: '4px 10px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-                    {[{ label: 'Ocupación Almacenes', value: `${metricas.ocupacionPromedio.toFixed(1)}%`, sv: metricas.ocupacionPromedio },
-                    { label: 'Tasa cumplimiento SLA', value: `${metricas.tasaCumplimientoSLA.toFixed(1)}%` },
-                    { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(1)}%`, sv: metricas.ocupacionAviones },
+                    {[{ label: 'Ocupación Almacenes', value: `${metricas.ocupacionPromedio.toFixed(2)}%`, sv: metricas.ocupacionPromedio },
+                    { label: 'Tasa cumplimiento SLA', value: `${metricas.tasaCumplimientoSLA.toFixed(2)}%` },
+                    { label: 'Ocupación de Aviones', value: `${metricas.ocupacionAviones.toFixed(2)}%`, sv: metricas.ocupacionAviones },
                     { label: 'Maletas entregadas', value: metricas.maletasEntregadas.toLocaleString() },
                     ].map(m => {
-                      const sc = m.sv !== undefined ? (m.sv <= 30 ? '#22c55e' : m.sv <= 70 ? '#f97316' : '#ef4444') : undefined;
+                      const sc = m.sv !== undefined ? (m.sv === 0 ? '#3b82f6' : m.sv <= 30 ? '#22c55e' : m.sv <= 70 ? '#f97316' : '#ef4444') : undefined;
                       return (
                         <div key={m.label} style={{ padding: '3px 6px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 6, borderLeft: sc ? `3px solid ${sc}` : undefined }}>
                           <div style={{ fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>{m.label}</div>
@@ -3436,7 +3246,7 @@ export default function SimulacionPeriodo() {
                           </span>
                           {!esCancelado && (
                             <span style={{ fontSize: '12px', fontWeight: 600, color: ocupColor }}>
-                              {`Ocup. ${(esSinUso ? 0 : pctOcupacion).toFixed(1)}%`}
+                              {`Ocup. ${(esSinUso ? 0 : pctOcupacion).toFixed(2)}%`}
                             </span>
                           )}
                         </div>
@@ -3740,7 +3550,7 @@ export default function SimulacionPeriodo() {
                             <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{alm.codigo}</span>
                             <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px' }}>{alm.ciudad}, {alm.pais}{alm.continente ? ` · ${alm.continente}` : ''}</div>
                           </div>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: estadoColor }}>{alm.pct.toFixed(0)}%</span>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: estadoColor }}>{alm.pct.toFixed(2)}%</span>
                         </div>
                         <div style={{ marginTop: '6px', height: '6px', backgroundColor: 'var(--border-color)', borderRadius: '3px', overflow: 'hidden' }}>
                           <div style={{ height: '100%', backgroundColor: estadoColor, width: `${Math.min(100, alm.pct)}%`, borderRadius: '3px', transition: 'width 0.3s ease' }} />

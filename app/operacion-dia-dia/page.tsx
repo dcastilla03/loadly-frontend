@@ -626,8 +626,6 @@ export default function SimulacionPeriodo() {
     if (!simStart) return [];
     const feList = flightEventsRef.current;
     if (feList.length === 0) return [];
-    const gmt = gmtOffset;
-
     // ← NUEVO: deduplicar por vuelo físico (origen+destino+minutosInicio+minutosFin).
     //   Varios lotes de un mismo envío (o varios envíos distintos) pueden compartir
     //   exactamente el mismo vuelo, y cada uno genera su propio FlightEvent.
@@ -641,10 +639,12 @@ export default function SimulacionPeriodo() {
     }
 
     return Array.from(vuelosUnicos.values()).map(fe => {
+        const aptOri = sim.aeropuertosRef.current.get(fe.origenCode);
+        const aptGmt = aptOri?.gmt ?? 0;
         const depDate = new Date(simStart.getTime() + fe.minutosInicio * 60000);
         const arrDate = new Date(simStart.getTime() + fe.minutosFin * 60000);
-        const depShifted = new Date(depDate.getTime() + gmt * 3600000);
-        const arrShifted = new Date(arrDate.getTime() + gmt * 3600000);
+        const depShifted = new Date(depDate.getTime() + aptGmt * 3600000);
+        const arrShifted = new Date(arrDate.getTime() + aptGmt * 3600000);
         const depStr = `${String(depShifted.getUTCDate()).padStart(2, '0')}/${String(depShifted.getUTCMonth() + 1).padStart(2, '0')}/${depShifted.getUTCFullYear()} ${String(depShifted.getUTCHours()).padStart(2, '0')}:${String(depShifted.getUTCMinutes()).padStart(2, '0')}`;
         const arrStr = `${String(arrShifted.getUTCDate()).padStart(2, '0')}/${String(arrShifted.getUTCMonth() + 1).padStart(2, '0')}/${arrShifted.getUTCFullYear()} ${String(arrShifted.getUTCHours()).padStart(2, '0')}:${String(arrShifted.getUTCMinutes()).padStart(2, '0')}`;
         return {

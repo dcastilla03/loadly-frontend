@@ -1818,9 +1818,10 @@ export default function SimulacionPeriodo() {
     startDateStr = `${simStartDate.getFullYear()}-${String(simStartDate.getMonth() + 1).padStart(2, '0')}-${String(simStartDate.getDate()).padStart(2, '0')}`;
     const depDate = new Date(simStartDate.getTime() + fe.minutosInicio * 60000);
     const arrDate = new Date(simStartDate.getTime() + fe.minutosFin * 60000);
-    const gmt = gmtOffset;
-    const depShifted = new Date(depDate.getTime() + gmt * 3600000);
-    const arrShifted = new Date(arrDate.getTime() + gmt * 3600000);
+    const aptOri = sim.aeropuertosRef.current.get(fe.origenCode);
+    const aptGmt = aptOri?.gmt ?? 0;
+    const depShifted = new Date(depDate.getTime() + aptGmt * 3600000);
+    const arrShifted = new Date(arrDate.getTime() + aptGmt * 3600000);
     const depHH = String(depShifted.getUTCHours()).padStart(2, '0');
     const depMi = String(depShifted.getUTCMinutes()).padStart(2, '0');
     const arrHH = String(arrShifted.getUTCHours()).padStart(2, '0');

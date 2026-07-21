@@ -36,6 +36,10 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
 
   // ── Refs (persisten mientras el Provider está montado) ──
   const airportStateRef = useRef<Map<string, { ocupacion: number; capacidad: number }>>(new Map());
+  // Guarda el minuto simulado (real, no de procesamiento) del último snapshot
+  // aplicado a cada almacén. Evita que un evento con timestamp más antiguo
+  // (de otro envío/tramo) sobreescriba un estado más reciente ya aplicado.
+  const airportLastUpdateRef = useRef<Map<string, number>>(new Map());
   const flightEventsRef = useRef<FlightEvent[]>([]);
   const cancelledFlightsRef = useRef<Set<string>>(new Set());
   const suppressedTramosRef = useRef<Map<string, { minTramoOrden: number; iteracionIdx: number }>>(new Map());
@@ -148,6 +152,7 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
       logEventsRef.current = [];
       cancelledFlightsRef.current = new Set();
       suppressedTramosRef.current = new Map();
+      airportLastUpdateRef.current = new Map();
     }
 
     if (sim.iteracion > 0 && !clockEnabledRef.current) {
@@ -183,6 +188,16 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
   // ── Motor de simulación (tiempo + ciclo de vida FlightEvents) ──
   // Corre siempre que el Provider está montado, incluso si el usuario navega a otra página.
   const TOTAL_MINUTOS_SIM = 5 * 24 * 60; // 7200
+  // Aplica un snapshot de ocupación de almacén solo si su minuto simulado real
+  // es >= al último ya aplicado a ese almacén. Así se evita que un evento de
+  // otro envío/tramo, con un snapshot más antiguo, pise un estado más reciente
+  // (causa del bug de "almacén que se vacía antes de tiempo").
+  function actualizarOcupacionAlmacen(codigo: string, ocupacion: number, capacidad: number, minutoEvento: number) {
+    const lastMin = airportLastUpdateRef.current.get(codigo);
+    if (lastMin !== undefined && minutoEvento < lastMin) return;
+    airportLastUpdateRef.current.set(codigo, minutoEvento);
+    airportStateRef.current.set(codigo, { ocupacion, capacidad });
+  }
   useEffect(() => {
     let frameId: number;
     function engineLoop() {
@@ -246,10 +261,7 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
             } else {
               fe.active = true;
               (fe as any)._activatedThisFrame = true;
-              airportStateRef.current.set(fe.origenCode, {
-                ocupacion: fe.ocupacionAlmacenOrigen,
-                capacidad: fe.capacidadAlmacenOrigen,
-              });
+              actualizarOcupacionAlmacen(fe.origenCode, fe.ocupacionAlmacenOrigen, fe.capacidadAlmacenOrigen, fe.minutosInicio);
             }
           }
 
@@ -262,10 +274,7 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
               if (duracion <= 0 || minSim >= fe.minutosFin) {
                 fe.done = true;
                 fe.active = false;
-                airportStateRef.current.set(fe.destinoCode, {
-                  ocupacion: fe.ocupacionAlmacenDestino,
-                  capacidad: fe.capacidadAlmacenDestino,
-                });
+                actualizarOcupacionAlmacen(fe.destinoCode, fe.ocupacionAlmacenDestino, fe.capacidadAlmacenDestino, fe.minutosFin);
                 // Liberar el placeholder (empty flight) correspondiente
                 if (!fe.key.startsWith('unused-')) {
                   const mod1440 = fe.minutosInicio % 1440;
@@ -310,10 +319,7 @@ export function SimulationProvider({ children, startDate, startTime, pathname }:
             // Actualizar ocupación del almacén cuando se registra un envío
             const leAny = le as any;
             if (leAny.updatePopupCode && typeof leAny.updatePopupOcupacion === 'number') {
-              airportStateRef.current.set(leAny.updatePopupCode, {
-                ocupacion: leAny.updatePopupOcupacion,
-                capacidad: leAny.updatePopupCapacidad ?? 0,
-              });
+              actualizarOcupacionAlmacen(leAny.updatePopupCode, leAny.updatePopupOcupacion, leAny.updatePopupCapacidad ?? 0, le.minutosDisparo);
             }
           }
         }
